@@ -43,6 +43,7 @@ export function Dashboard() {
   const concludedInspectionsCount = useLiveQuery(() => db.inspections.where('status').anyOf('concluida', 'finalizada').count());
   const totalAssetsCount = useLiveQuery(() => db.assets.count());
   const unreadNotifications = useLiveQuery(() => user ? db.notifications.where('targetUserId').equals(user.userId).and(n => !n.read).count() : 0, [user]);
+  const unsyncedCount = useLiveQuery(() => db.assets.where('needsSync').equals(1).count()) || 0;
 
   useEffect(() => {
     if (user) {
@@ -134,13 +135,22 @@ export function Dashboard() {
                 <AlertCircle className="w-5 h-5 flex-shrink-0" />
                 <div className="flex flex-col">
                   <span className="text-sm font-bold">Modo Offline Ativado</span>
-                  <span className="text-xs opacity-80">Você está offline. Os dados serão sincronizados automaticamente ao retornar.</span>
+                  <span className="text-xs opacity-80">Você está offline. {unsyncedCount > 0 ? `${unsyncedCount} itens aguardando conexão.` : 'Os dados serão sincronizados automaticamente ao retornar.'}</span>
                 </div>
               </div>
             ) : (
-              <div className="flex items-center justify-center gap-2 py-4">
-                <div className="w-2 h-2 rounded-full bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.5)]"></div>
-                <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Sincronizado com o servidor central</span>
+              <div className="flex flex-col items-center gap-2 py-4">
+                <div className="flex items-center gap-2">
+                  <div className="w-2 h-2 rounded-full bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.5)]"></div>
+                  <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">
+                    {unsyncedCount > 0 ? `Sincronizando ${unsyncedCount} itens...` : 'Sincronizado com o servidor central'}
+                  </span>
+                </div>
+                {unsyncedCount > 0 && (
+                  <div className="w-48 h-1 bg-slate-100 rounded-full overflow-hidden">
+                    <div className="h-full bg-emerald-400 animate-progress origin-left"></div>
+                  </div>
+                )}
               </div>
             )}
           </div>
@@ -355,6 +365,11 @@ function QuickActionButton({ icon: Icon, label, onClick, primary = false }: { ic
 function RecentInspectionRow({ inspection, locationName, onClick }: { inspection: Inspection, locationName: string, onClick: () => void, key?: string | number }) {
   const isFinalized = inspection.status === 'finalizada';
   const isInProgress = inspection.status === 'em_andamento';
+  
+  const assetCount = useLiveQuery(
+    () => db.assets.where('inspectionId').equals(inspection.id).count(),
+    [inspection.id]
+  );
 
   return (
     <Card 
@@ -363,15 +378,27 @@ function RecentInspectionRow({ inspection, locationName, onClick }: { inspection
     >
       <div className="flex items-center gap-5">
         <div className={cn(
-          "w-14 h-14 rounded-2xl flex items-center justify-center border-2 transition-all group-hover:scale-105",
+          "w-14 h-14 rounded-2xl flex items-center justify-center border-2 transition-all group-hover:scale-105 relative",
           isFinalized ? "bg-emerald-50/50 border-emerald-100/50" : "bg-blue-50/50 border-blue-100/50"
         )}>
           <ClipboardList className={cn("w-6 h-6", isFinalized ? "text-emerald-500" : "text-blue-500")} />
+          {isInProgress && (assetCount === 0) && (
+            <div className="absolute -top-1 -right-1 w-4 h-4 bg-amber-500 rounded-full border-2 border-white flex items-center justify-center">
+              <AlertCircle className="w-2.5 h-2.5 text-white" />
+            </div>
+          )}
         </div>
         <div className="flex flex-col gap-1">
-          <span className="font-bold text-slate-900 text-lg tracking-tight group-hover:text-blue-600 transition-colors line-clamp-1">{locationName}</span>
+          <div className="flex items-center gap-2">
+            <span className="font-bold text-slate-900 text-lg tracking-tight group-hover:text-blue-600 transition-colors line-clamp-1">{locationName}</span>
+            {isInProgress && (assetCount === 0) && (
+              <span className="bg-amber-100 text-amber-700 text-[8px] font-black uppercase px-2 py-0.5 rounded-full tracking-widest">Sem itens</span>
+            )}
+          </div>
           <div className="flex items-center gap-3 text-[10px] font-bold">
             <span className="uppercase text-slate-400 tracking-wider font-mono">{formatDate(inspection.date).split(',')[0]}</span>
+            <div className="w-1 h-1 rounded-full bg-slate-200"></div>
+            <span className="text-slate-400">{assetCount || 0} itens</span>
             <div className="w-1 h-1 rounded-full bg-slate-200"></div>
             <span className={cn(
               "uppercase tracking-[0.1em]",

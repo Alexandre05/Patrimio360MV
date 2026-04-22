@@ -1,18 +1,185 @@
 import { Card } from './UI';
-import { BarChart3, TrendingUp, AlertCircle, FileText, Download } from 'lucide-react';
-import { db } from '../lib/db';
+import { BarChart3, TrendingUp, AlertCircle, FileText, Download, Users, Award } from 'lucide-react';
+import { db, Asset, Location, Inspection } from '../lib/db';
 import { useLiveQuery } from 'dexie-react-hooks';
-import { cn } from '../lib/utils';
+import { cn, formatDate } from '../lib/utils';
+import jsPDF from 'jspdf';
+import autoTable from 'jspdf-autotable';
 
 export function ReportsView() {
   const assets = useLiveQuery(() => db.assets.toArray());
   const inspections = useLiveQuery(() => db.inspections.toArray());
+  const allUsers = useLiveQuery(() => db.users.toArray());
+  const locations = useLiveQuery(() => db.locations.toArray());
 
   const stats = {
     totalItens: assets?.length || 0,
     ruins: assets?.filter(a => a.condition === 'ruim' || a.condition === 'inservivel').length || 0,
     finalizadas: inspections?.filter(i => i.status === 'finalizada').length || 0,
     semPatrimonio: assets?.filter(a => !a.patrimonyNumber).length || 0
+  };
+
+  const inspectorWork = (inspections || [])
+    .filter(i => i.status !== 'em_andamento' && i.concludedBy)
+    .reduce((acc, current) => {
+      const inspectorId = current.concludedBy!;
+      acc[inspectorId] = (acc[inspectorId] || 0) + 1;
+      return acc;
+    }, {} as Record<string, number>);
+
+  const ranking = Object.entries(inspectorWork)
+    .map(([id, count]) => ({
+      id,
+      count,
+      name: allUsers?.find(u => u.userId === id)?.name || 'Vistoriador Externo'
+    }))
+    .sort((a, b) => b.count - a.count);
+
+  const locationSummary = locations?.map(loc => {
+    const locInspections = inspections?.filter(i => i.locationId === loc.id) || [];
+    const locAssets = assets?.filter(a => locInspections.some(i => i.id === a.inspectionId)) || [];
+    return {
+      ...loc,
+      itemCount: locAssets.length
+    };
+  }).sort((a, b) => b.itemCount - a.itemCount) || [];
+
+  const generateSingleLocationReport = (locId: string) => {
+    const loc = locations?.find(l => l.id === locId);
+    if (!loc) return;
+
+    const doc = new jsPDF();
+    doc.setFontSize(18);
+    doc.text(`Relatório de Inventário - ${loc.name}`, 14, 22);
+    
+    doc.setFontSize(11);
+    doc.text(`Data de Emissão: ${new Date().toLocaleDateString()}`, 14, 32);
+    doc.text(`Descrição: ${loc.description}`, 14, 38);
+
+    const locInspections = inspections?.filter(i => i.locationId === loc.id) || [];
+    const locAssets = assets?.filter(a => locInspections.some(i => i.id === a.inspectionId)) || [];
+
+    const tableData = locAssets.map(a => [
+      a.name,
+      a.patrimonyNumber || '-',
+      a.condition.toUpperCase(),
+      a.observations || '-'
+    ]);
+
+    autoTable(doc, {
+      head: [['Item', 'Nº Patrimônio', 'Estado', 'Obs']],
+      body: tableData,
+      startY: 45,
+      theme: 'grid'
+    });
+
+    doc.save(`Inventario_${loc.name.replace(/\s+/g, '_')}.pdf`);
+  };
+
+  const generateInserviceReport = () => {
+    const doc = new jsPDF();
+    doc.setFontSize(18);
+    doc.text('Relatório de Bens Inservíveis / Críticos', 14, 22);
+    
+    doc.setFontSize(11);
+    doc.text(`Data de Emissão: ${new Date().toLocaleDateString()}`, 14, 32);
+    doc.text(`Total de itens identificados: ${stats.ruins}`, 14, 38);
+
+    const items = assets?.filter(a => a.condition === 'ruim' || a.condition === 'inservivel') || [];
+    const tableData = items.map(a => [
+      a.name,
+      a.patrimonyNumber || '-',
+      a.condition.toUpperCase(),
+      locations?.find(l => {
+        const insp = inspections?.find(i => i.id === a.inspectionId);
+        return l.id === insp?.locationId;
+      })?.name || 'Local não ident.'
+    ]);
+
+    autoTable(doc, {
+      head: [['Item', 'Nº Patrimônio', 'Estado', 'Localização']],
+      body: tableData,
+      startY: 45,
+      theme: 'striped'
+    });
+
+    doc.save('Relatorio_Bens_Inserviveis.pdf');
+  };
+
+  const generateLocationReport = () => {
+    const doc = new jsPDF();
+    doc.setFontSize(18);
+    doc.text('Inventário Consolidado por Localização', 14, 22);
+    
+    doc.setFontSize(11);
+    doc.text(`Data de Emissão: ${new Date().toLocaleDateString()}`, 14, 32);
+
+    let currentY = 45;
+
+    locations?.forEach(loc => {
+      const locInspections = inspections?.filter(i => i.locationId === loc.id) || [];
+      const locAssets = assets?.filter(a => locInspections.some(i => i.id === a.inspectionId)) || [];
+
+      if (locAssets.length === 0) return;
+
+      if (currentY > 250) {
+        doc.addPage();
+        currentY = 20;
+      }
+
+      doc.setFontSize(13);
+      doc.setTextColor(30, 41, 59);
+      doc.text(loc.name.toUpperCase(), 14, currentY);
+      doc.setTextColor(0, 0, 0);
+
+      const tableData = locAssets.map(a => [
+        a.name,
+        a.patrimonyNumber || '-',
+        a.condition,
+        a.observations || '-'
+      ]);
+
+      autoTable(doc, {
+        head: [['Item', 'Nº Patrimônio', 'Estado', 'Obs']],
+        body: tableData,
+        startY: currentY + 5,
+        theme: 'grid',
+        margin: { top: 20 }
+      });
+
+      currentY = (doc as any).lastAutoTable.finalY + 15;
+    });
+
+    doc.save('Inventario_Por_Localizacao.pdf');
+  };
+
+  const generateNoPatrimonyReport = () => {
+    const doc = new jsPDF();
+    doc.setFontSize(18);
+    doc.text('Relatório de Bens Sem Identificação Patrimonial', 14, 22);
+    
+    doc.setFontSize(11);
+    doc.text(`Data de Emissão: ${new Date().toLocaleDateString()}`, 14, 32);
+    doc.text(`Esses itens requerem etiquetagem e registro no sistema central.`, 14, 38);
+
+    const items = assets?.filter(a => !a.patrimonyNumber) || [];
+    const tableData = items.map(a => [
+      a.name,
+      a.condition.toUpperCase(),
+      locations?.find(l => {
+        const insp = inspections?.find(i => i.id === a.inspectionId);
+        return l.id === insp?.locationId;
+      })?.name || 'Local não ident.'
+    ]);
+
+    autoTable(doc, {
+      head: [['Item', 'Estado Conservação', 'Localização']],
+      body: tableData,
+      startY: 45,
+      theme: 'striped'
+    });
+
+    doc.save('Relatorio_Bens_Sem_Patrimonio.pdf');
   };
 
   return (
@@ -50,24 +217,112 @@ export function ReportsView() {
         </div>
       </div>
 
-      <div className="flex flex-col gap-6">
-        <div className="flex items-center justify-between px-2">
-           <div className="flex flex-col">
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-10">
+        <div className="lg:col-span-2 flex flex-col gap-6">
+          <div className="flex items-center justify-between px-2">
+            <div className="flex flex-col">
               <h3 className="text-sm font-black text-slate-900 uppercase tracking-[0.2em]">Exportação de Dados</h3>
               <span className="text-[10px] font-bold text-slate-400">Emissão de registros oficiais</span>
-           </div>
+            </div>
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
+            <ReportAction 
+              title="Lista de Inservíveis" 
+              description="Bens para leilão ou descarte" 
+              icon={FileText} 
+              color="rose" 
+              onClick={generateInserviceReport}
+            />
+            <ReportAction 
+              title="Por Localização" 
+              description="Planilha completa por sala" 
+              icon={FileText} 
+              color="blue" 
+              onClick={generateLocationReport}
+            />
+            <ReportAction 
+              title="Sem Patrimônio" 
+              description="Itens para etiquetagem" 
+              icon={FileText} 
+              color="amber" 
+              onClick={generateNoPatrimonyReport}
+            />
+          </div>
         </div>
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
-           <ReportAction title="Lista de Inservíveis" description="Bens para leilão ou descarte" icon={FileText} color="rose" />
-           <ReportAction title="Por Localização" description="Planilha completa por sala" icon={FileText} color="blue" />
-           <ReportAction title="Sem Patrimônio" description="Itens para etiquetagem" icon={FileText} color="amber" />
+
+        <div className="flex flex-col gap-6">
+          <div className="flex items-center justify-between px-2">
+            <div className="flex flex-col">
+              <h3 className="text-sm font-black text-slate-900 uppercase tracking-[0.2em]">Ranking Atividade</h3>
+              <span className="text-[10px] font-bold text-slate-400">Performance dos Vistoriadores</span>
+            </div>
+          </div>
+          <div className="bg-white border border-slate-100 rounded-[2.5rem] p-8 shadow-sm flex flex-col gap-4">
+             {ranking.length > 0 ? ranking.slice(0, 5).map((item, idx) => (
+               <div key={item.id} className="flex items-center gap-4 group">
+                  <div className={cn(
+                    "w-10 h-10 rounded-xl flex items-center justify-center font-black text-xs transition-all duration-300",
+                    idx === 0 ? "bg-amber-100 text-amber-600" : "bg-slate-50 text-slate-400 group-hover:bg-slate-900 group-hover:text-white"
+                  )}>
+                    {idx === 0 ? <Award className="w-5 h-5" /> : idx + 1}
+                  </div>
+                  <div className="flex flex-col flex-1 overflow-hidden">
+                     <span className="font-bold text-slate-900 text-sm truncate">{item.name}</span>
+                     <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">{item.count} Vistorias</span>
+                  </div>
+                  {idx === 0 && <span className="text-[8px] font-black text-amber-600 bg-amber-50 px-2 py-0.5 rounded-full uppercase tracking-tighter">Líder</span>}
+               </div>
+             )) : (
+               <div className="py-10 flex flex-col items-center justify-center text-center opacity-50 grayscale">
+                  <Users className="w-10 h-10 mb-4 text-slate-300" />
+                  <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Sem dados suficientes</p>
+               </div>
+             )}
+          </div>
+        </div>
+      </div>
+
+      <div className="flex flex-col gap-6">
+        <div className="flex items-center justify-between px-2">
+          <div className="flex flex-col">
+            <h3 className="text-sm font-black text-slate-900 uppercase tracking-[0.2em]">Inventário por Localização</h3>
+            <span className="text-[10px] font-bold text-slate-400">Resumo quantitativo de itens por sala/prédio</span>
+          </div>
+        </div>
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
+           {locationSummary.map(loc => (
+             <Card 
+               key={loc.id} 
+               className="p-6 flex flex-col gap-4 border-slate-50 hover:border-blue-200 transition-all group"
+               onClick={() => generateSingleLocationReport(loc.id)}
+             >
+                <div className="flex items-center justify-between">
+                   <div className="w-10 h-10 rounded-xl bg-slate-50 flex items-center justify-center text-slate-400 group-hover:bg-blue-600 group-hover:text-white transition-colors">
+                      <FileText className="w-5 h-5" />
+                   </div>
+                   <span className={cn(
+                     "text-[10px] font-black px-2 py-1 rounded-lg uppercase tracking-tighter",
+                     loc.itemCount > 0 ? "bg-emerald-50 text-emerald-600" : "bg-slate-50 text-slate-400"
+                   )}>
+                     {loc.itemCount} Itens
+                   </span>
+                </div>
+                <div className="flex flex-col">
+                   <span className="font-bold text-slate-900 group-hover:text-blue-600 transition-colors truncate">{loc.name}</span>
+                   <span className="text-[9px] text-slate-400 uppercase font-black tracking-widest mt-1 line-clamp-1">{loc.description}</span>
+                </div>
+                <button className="mt-2 text-[8px] font-black text-blue-600 uppercase tracking-widest flex items-center gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                   GERAR PDF SALA <Download className="w-3 h-3" />
+                </button>
+             </Card>
+           ))}
         </div>
       </div>
     </div>
   );
 }
 
-function ReportAction({ title, description, icon: Icon, color = 'blue' }: { title: string, description: string, icon: any, color?: string }) {
+function ReportAction({ title, description, icon: Icon, color = 'blue', onClick }: { title: string, description: string, icon: any, color?: string, onClick: () => void }) {
   const colorClasses = {
     rose: "bg-rose-50 text-rose-600 border-rose-100",
     blue: "bg-blue-50 text-blue-600 border-blue-100",
@@ -75,7 +330,7 @@ function ReportAction({ title, description, icon: Icon, color = 'blue' }: { titl
   }[color] || "bg-slate-50 text-slate-600 border-slate-100";
 
   return (
-    <Card className="p-8 flex flex-col gap-6 rounded-[2.5rem] border-slate-50 hover:border-slate-200 cursor-pointer group transition-all duration-500 hover:shadow-2xl hover:shadow-slate-200/50">
+    <Card className="p-8 flex flex-col gap-6 rounded-[2.5rem] border-slate-50 hover:border-slate-200 cursor-pointer group transition-all duration-500 hover:shadow-2xl hover:shadow-slate-200/50" onClick={onClick}>
        <div className={cn("w-16 h-16 rounded-[1.5rem] flex items-center justify-center transition-all duration-500 group-hover:bg-slate-900 group-hover:text-white", colorClasses)}>
           <Icon className="w-8 h-8 transition-transform group-hover:rotate-12" />
        </div>

@@ -9,6 +9,7 @@ import { formatDate, cn } from '../lib/utils';
 import { QRCodeSVG } from 'qrcode.react';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
+import { compressImage } from '../lib/image';
 
 export function InspectionView({ id, onBack }: { id: string, onBack: () => void }) {
   const { user } = useAuth();
@@ -37,6 +38,14 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
     photos: [] as string[]
   });
   const [duplicateWarning, setDuplicateWarning] = useState<string | null>(null);
+  const [successMessage, setSuccessMessage] = useState<string | null>(null);
+
+  React.useEffect(() => {
+    if (successMessage) {
+      const timer = setTimeout(() => setSuccessMessage(null), 3000);
+      return () => clearTimeout(timer);
+    }
+  }, [successMessage]);
 
   const handleAddItem = async () => {
     if (!newItem.name || !user) return;
@@ -46,9 +55,20 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
     // Duplication Check (only for new items)
     if (!editingAssetId) {
       const existing = await db.assets.where('hash').equals(hash).first();
-      if (existing && !duplicateWarning) {
+      if (existing) {
         setDuplicateWarning("Este item já foi cadastrado nesta vistoria ou local.");
         return;
+      }
+
+      // GLOBAL Patrimony check
+      if (newItem.patrimonyNumber) {
+        const globalExisting = await db.assets.where('patrimonyNumber').equals(newItem.patrimonyNumber).first();
+        if (globalExisting) {
+          const otherInsp = await db.inspections.get(globalExisting.inspectionId);
+          const otherLoc = otherInsp ? await db.locations.get(otherInsp.locationId) : null;
+          setDuplicateWarning(`O patrimônio ${newItem.patrimonyNumber} já existe no local "${otherLoc?.name || 'outro setor'}".`);
+          return;
+        }
       }
     }
 
@@ -62,6 +82,7 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
         hash: hash,
         needsSync: true
       });
+      setSuccessMessage("Salvado com sucesso!");
     } else {
       const assetId = generateId();
       await db.assets.add({
@@ -77,6 +98,7 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
         hash: hash,
         needsSync: true
       });
+      setSuccessMessage("Adicionado com sucesso!");
     }
 
     setNewItem({ name: '', patrimonyNumber: '', condition: 'bom', observations: '', photos: [] });
@@ -118,12 +140,19 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
 
     Array.from(files).forEach((file: any) => {
       const reader = new FileReader();
-      reader.onloadend = () => {
-        const base64String = reader.result as string;
-        setNewItem(prev => ({
-          ...prev,
-          photos: [...prev.photos, base64String].slice(-4) // Limit to 4 photos
-        }));
+      reader.onloadend = async () => {
+        try {
+          const rawBase64 = reader.result as string;
+          // COMPRESS to avoid storage quota issues
+          const compressedBase64 = await compressImage(rawBase64, 800, 0.6);
+          setNewItem(prev => ({
+            ...prev,
+            photos: [...prev.photos, compressedBase64].slice(-4) // Limit to 4 photos
+          }));
+        } catch (err) {
+          console.error("Erro ao processar imagem:", err);
+          setError("Falha ao otimizar foto.");
+        }
       };
       reader.readAsDataURL(file);
     });
@@ -150,6 +179,12 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
     console.log("Tentando concluir vistoria ID:", id);
     
     try {
+      // 0. Safety check: must have assets
+      const assetsCount = await db.assets.where('inspectionId').equals(id).count();
+      if (assetsCount === 0) {
+        throw new Error("Não é possível concluir uma vistoria sem itens registrados.");
+      }
+
       // 1. Verify existence check
       const current = await db.inspections.get(id);
       if (!current) {
@@ -159,7 +194,9 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
       // 2. Perform update using the most robust method (put)
       await db.inspections.put({
         ...current,
-        status: 'concluida'
+        status: 'concluida',
+        concludedBy: user?.userId,
+        concludedAt: Date.now()
       });
       
       console.log("Status atualizado para 'concluida'.");
@@ -263,7 +300,17 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
       doc.setFontSize(11);
       doc.text(`Local: ${location?.name}`, 14, 32);
       doc.text(`Data: ${formatDate(inspection?.date || 0)}`, 14, 38);
-      doc.text(`Responsável: ${user?.name}`, 14, 44);
+      
+      // Show who concluded vs who authorized
+      if (inspection?.concludedBy) {
+        doc.text(`Vistoriador: ${inspection.concludedBy === user?.userId ? user?.name : 'Identificado no Sistema'}`, 14, 44);
+      } else {
+        doc.text(`Responsável: ${user?.name}`, 14, 44);
+      }
+      
+      if (inspection?.status === 'finalizada') {
+        doc.text(`Homologado por: ${inspection.finalizedBy === user?.userId ? user?.name : 'Autoridade Municipal'}`, 14, 50);
+      }
 
       const tableData = assets?.map(a => [
         a.name,
@@ -383,6 +430,13 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
            <button onClick={() => setError(null)} className="p-1 hover:bg-rose-100 rounded-lg transition-colors">
               <X className="w-4 h-4" />
            </button>
+        </div>
+      )}
+
+      {successMessage && (
+        <div className="bg-emerald-50 border border-emerald-100 p-4 rounded-2xl flex items-center gap-3 text-emerald-600 animate-in slide-in-from-top-4 duration-300">
+           <CheckCircle2 className="w-5 h-5 shrink-0" />
+           <p className="text-xs font-bold uppercase tracking-tight flex-1">{successMessage}</p>
         </div>
       )}
       <header className="flex items-center justify-between sticky top-0 md:relative z-40 py-4 bg-bg/80 backdrop-blur-md md:bg-transparent">
@@ -712,28 +766,39 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
       {!isFinalized && (
         <div className="mt-10 flex flex-col gap-4 max-w-lg mx-auto w-full group">
           {inspection.status === 'em_andamento' ? (
-            <div className="flex flex-col gap-2">
-              <Button 
-                className={cn(
-                  "h-20 text-xl font-black uppercase tracking-widest shadow-2xl rounded-[1.5rem] transition-all duration-500",
-                  isConfirmingConclude 
-                    ? "bg-amber-500 hover:bg-amber-600 shadow-amber-500/20" 
-                    : "bg-emerald-500 hover:bg-emerald-600 shadow-emerald-500/20"
-                )} 
-                icon={isConfirmingConclude ? AlertCircle : CheckCircle2} 
-                onClick={handleConclude}
-                loading={isConcluding}
-              >
-                {isConfirmingConclude ? "CONFIRMAR CONCLUSÃO?" : "CONCLUIR VISTORIA"}
-              </Button>
-              {isConfirmingConclude && (
-                <button 
-                  onClick={() => setIsConfirmingConclude(false)}
-                  className="text-[10px] font-black text-slate-400 uppercase tracking-widest hover:text-slate-900 transition-colors py-2"
-                >
-                  CANCELAR
-                </button>
+            <div className="flex flex-col gap-3">
+              {(assets?.length || 0) === 0 && (
+                <div className="bg-amber-50 border border-amber-100 p-4 rounded-2xl flex items-center gap-3 text-amber-700 animate-in slide-in-from-bottom-4 duration-300 mb-2">
+                   <AlertCircle className="w-5 h-5 shrink-0" />
+                   <p className="text-[10px] font-black uppercase tracking-tight">Adicione ao menos um item para concluir a vistoria.</p>
+                </div>
               )}
+              <div className="flex flex-col gap-2">
+                <Button 
+                  disabled={(assets?.length || 0) === 0}
+                  className={cn(
+                    "h-20 text-xl font-black uppercase tracking-widest shadow-2xl rounded-[1.5rem] transition-all duration-500",
+                    (assets?.length || 0) === 0 
+                      ? "bg-slate-100 text-slate-400 border-slate-200 cursor-not-allowed shadow-none" 
+                      : isConfirmingConclude 
+                        ? "bg-amber-500 hover:bg-amber-600 shadow-amber-500/20" 
+                        : "bg-emerald-500 hover:bg-emerald-600 shadow-emerald-500/20"
+                  )} 
+                  icon={isConfirmingConclude ? AlertCircle : CheckCircle2} 
+                  onClick={handleConclude}
+                  loading={isConcluding}
+                >
+                  {isConfirmingConclude ? "CONFIRMAR CONCLUSÃO?" : "CONCLUIR VISTORIA"}
+                </Button>
+                {isConfirmingConclude && (
+                  <button 
+                    onClick={() => setIsConfirmingConclude(false)}
+                    className="text-[10px] font-black text-slate-400 uppercase tracking-widest hover:text-slate-900 transition-colors py-2"
+                  >
+                    CANCELAR
+                  </button>
+                )}
+              </div>
             </div>
           ) : (
             <div className="flex flex-col gap-3">

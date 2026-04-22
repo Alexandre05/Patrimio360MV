@@ -41,6 +41,8 @@ export interface Inspection {
   participants: string[];
   status: InspectionStatus;
   qrCodeData?: string;
+  concludedBy?: string;
+  concludedAt?: number;
   finalizedBy?: string;
   finalizedAt?: number;
   lastSync?: number;
@@ -69,11 +71,11 @@ export class PatrimonyDatabase extends Dexie {
 
   constructor() {
     super('PatrimonyDB');
-    this.version(4).stores({
+    this.version(5).stores({
       users: 'userId, email, role',
       locations: 'id, name, internalCode',
       inspections: 'id, locationId, status, date',
-      assets: 'id, inspectionId, hash, needsSync, createdAt',
+      assets: 'id, inspectionId, hash, needsSync, createdAt, patrimonyNumber',
       notifications: 'id, type, date, read, targetUserId'
     });
   }
