@@ -1,0 +1,70 @@
+{
+  "entities": {
+    "User": {
+      "title": "User",
+      "description": "System user with roles",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "name": { "type": "string" },
+        "email": { "type": "string" },
+        "role": { "type": "string", "enum": ["prefeito", "responsavel", "membro"] },
+        "status": { "type": "string", "enum": ["ativo", "inativo"] },
+        "cargo": { "type": "string" }
+      },
+      "required": ["userId", "name", "email", "role", "status"]
+    },
+    "Location": {
+      "title": "Location",
+      "description": "Physical location for assets",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "description": { "type": "string" },
+        "internalCode": { "type": "string" }
+      },
+      "required": ["id", "name"]
+    },
+    "Inspection": {
+      "title": "Inspection",
+      "description": "Inspection session for a location",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "locationId": { "type": "string" },
+        "date": { "type": "string", "format": "date-time" },
+        "participants": { "type": "array", "items": { "type": "string" } },
+        "status": { "type": "string", "enum": ["em_andamento", "concluida", "finalizada"] },
+        "qrCodeData": { "type": "string" },
+        "finalizedBy": { "type": "string" },
+        "finalizedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "locationId", "date", "status"]
+    },
+    "Asset": {
+      "title": "Asset",
+      "description": "Inventory item within an inspection",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "inspectionId": { "type": "string" },
+        "name": { "type": "string" },
+        "patrimonyNumber": { "type": "string" },
+        "condition": { "type": "string", "enum": ["novo", "bom", "regular", "ruim", "inservivel"] },
+        "photos": { "type": "array", "items": { "type": "string" } },
+        "observations": { "type": "string" },
+        "createdBy": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "hash": { "type": "string" }
+      },
+      "required": ["id", "inspectionId", "name", "condition", "createdBy", "createdAt"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": { "schema": "User", "description": "User profiles" },
+    "/locations/{locationId}": { "schema": "Location", "description": "Manage locations" },
+    "/inspections/{inspectionId}": { "schema": "Inspection", "description": "Inspection records" },
+    "/inspections/{inspectionId}/assets/{assetId}": { "schema": "Asset", "description": "Items found in locations" }
+  }
+}

@@ -1,0 +1,6 @@
+{
+  "name": "PATRI-MV",
+  "description": "Sistema Moderno de Gestão Patrimonial Pública - Prefeitura de Manoel Viana.",
+  "requestFramePermissions": ["camera"],
+  "majorCapabilities": []
+}
