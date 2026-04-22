@@ -13,6 +13,7 @@ import { compressImage } from '../lib/image';
 
 export function InspectionView({ id, onBack }: { id: string, onBack: () => void }) {
   const { user } = useAuth();
+  const isAdmin = user?.role === 'prefeito' || user?.role === 'responsavel';
   const isOnline = useOnlineStatus();
   const inspection = useLiveQuery(() => db.inspections.get(id), [id]);
   const location = useLiveQuery(() => inspection ? db.locations.get(inspection.locationId) : undefined, [inspection]);
@@ -108,6 +109,10 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
   };
 
   const handleDeleteAsset = async (assetId: string) => {
+    if (!isAdmin) {
+      setError("Apenas administradores podem excluir itens registrados.");
+      return;
+    }
     if (confirmDeleteId !== assetId) {
       setConfirmDeleteId(assetId);
       return;
@@ -258,6 +263,10 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
   };
 
   const handleReopen = async () => {
+    if (!isAdmin) {
+      setError("Apenas administradores podem reabrir vistorias concluídas.");
+      return;
+    }
     if (!id || isReopening) return;
 
     // First click: ask for confirmation in-UI
@@ -828,18 +837,20 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
                 </div>
               )}
               <div className="flex flex-col gap-2">
-                <Button 
-                  variant="secondary"
-                  className={cn(
-                    "h-14 font-black uppercase tracking-widest rounded-xl transition-all duration-500",
-                    isConfirmingReopen ? "bg-rose-50 text-rose-600 border-rose-200" : ""
-                  )} 
-                  icon={isConfirmingReopen ? AlertCircle : History} 
-                  onClick={handleReopen}
-                  loading={isReopening}
-                >
-                  {isConfirmingReopen ? "CONFIRMAR REABERTURA?" : "REABRIR PARA EDIÇÃO"}
-                </Button>
+                {isAdmin && (
+                  <Button 
+                    variant="secondary"
+                    className={cn(
+                      "h-14 font-black uppercase tracking-widest rounded-xl transition-all duration-500",
+                      isConfirmingReopen ? "bg-rose-50 text-rose-600 border-rose-200" : ""
+                    )} 
+                    icon={isConfirmingReopen ? AlertCircle : History} 
+                    onClick={handleReopen}
+                    loading={isReopening}
+                  >
+                    {isConfirmingReopen ? "CONFIRMAR REABERTURA?" : "REABRIR PARA EDIÇÃO"}
+                  </Button>
+                )}
                 {isConfirmingReopen && (
                   <button 
                     onClick={() => setIsConfirmingReopen(false)}

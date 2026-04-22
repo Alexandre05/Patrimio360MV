@@ -5,6 +5,14 @@ export async function seedDatabase() {
   if (userCount === 0) {
     await db.users.bulkAdd([
       {
+        userId: 'admin-dev',
+        name: 'Administrador Senior',
+        email: 'henri199@gmail.com',
+        role: 'prefeito',
+        status: 'ativo',
+        cargo: 'Desenvolvedor / Administrador'
+      },
+      {
         userId: 'admin-1',
         name: 'Prefeito João',
         email: 'prefeito@exemplo.com',

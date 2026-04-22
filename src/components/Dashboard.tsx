@@ -44,6 +44,7 @@ export function Dashboard() {
   const totalAssetsCount = useLiveQuery(() => db.assets.count());
   const unreadNotifications = useLiveQuery(() => user ? db.notifications.where('targetUserId').equals(user.userId).and(n => !n.read).count() : 0, [user]);
   const unsyncedCount = useLiveQuery(() => db.assets.where('needsSync').equals(1).count()) || 0;
+  const isAdmin = user?.role === 'prefeito' || user?.role === 'responsavel';
 
   useEffect(() => {
     if (user) {
@@ -98,7 +99,7 @@ export function Dashboard() {
                 <QuickActionButton icon={Plus} label="Nova Vistoria" onClick={() => setActiveTab('locations')} primary />
                 <QuickActionButton icon={Search} label="Ver Vistorias" onClick={() => setActiveTab('inspections')} />
                 <QuickActionButton icon={Building2} label="Localizações" onClick={() => setActiveTab('locations')} />
-                <QuickActionButton icon={BarChart3} label="Relatórios" onClick={() => setActiveTab('reports')} />
+                {isAdmin && <QuickActionButton icon={BarChart3} label="Relatórios" onClick={() => setActiveTab('reports')} />}
               </div>
             </div>
 
@@ -178,9 +179,9 @@ export function Dashboard() {
           </div>
         );
       case 'reports':
-        return <ReportsView />;
+        return isAdmin ? <ReportsView /> : <div className="p-20 text-center text-slate-400 font-bold uppercase tracking-widest">Acesso restrito a administradores.</div>;
       case 'users':
-        return <UsersView />;
+        return isAdmin ? <UsersView /> : <div className="p-20 text-center text-slate-400 font-bold uppercase tracking-widest">Acesso restrito a administradores.</div>;
       case 'notifications':
         return <NotificationsView onBack={() => setActiveTab('home')} />;
       default:
@@ -229,8 +230,8 @@ export function Dashboard() {
           <NavItem active={activeTab === 'notifications'} label="Notificações" icon={Bell} onClick={() => setActiveTab('notifications')} badge={unreadNotifications || 0} />
           <NavItem active={activeTab === 'inspections'} label="Vistorias" icon={ClipboardList} onClick={() => setActiveTab('inspections')} />
           <NavItem active={activeTab === 'locations'} label="Localizações" icon={Building2} onClick={() => setActiveTab('locations')} />
-          <NavItem active={activeTab === 'reports'} label="Relatórios" icon={BarChart3} onClick={() => setActiveTab('reports')} />
-          {user?.role === 'prefeito' && (
+          {isAdmin && <NavItem active={activeTab === 'reports'} label="Relatórios" icon={BarChart3} onClick={() => setActiveTab('reports')} />}
+          {isAdmin && (
             <NavItem active={activeTab === 'users'} label="Membros" icon={Users} onClick={() => setActiveTab('users')} />
           )}
         </nav>
@@ -299,7 +300,11 @@ export function Dashboard() {
              <Plus className="w-6 h-6" />
            </button>
         </div>
-        <MobileNavItem active={activeTab === 'reports'} icon={BarChart3} onClick={() => setActiveTab('reports')} />
+        {isAdmin ? (
+          <MobileNavItem active={activeTab === 'reports'} icon={BarChart3} onClick={() => setActiveTab('reports')} />
+        ) : (
+          <div className="w-11 h-11" /> // Placeholder to keep layout balanced if 5 items were expected
+        )}
         <MobileNavItem active={activeTab === 'notifications'} icon={Bell} onClick={() => setActiveTab('notifications')} />
       </nav>
     </div>

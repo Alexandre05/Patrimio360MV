@@ -4,8 +4,12 @@ import { Building2, Plus, ArrowRight, Trash2, AlertCircle, X, Search } from 'luc
 import { db, generateId } from '../lib/db';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { cn } from '../lib/utils';
+import { useAuth } from '../lib/AuthContext';
 
 export function LocationsView({ onSelectInspection }: { onSelectInspection: (id: string) => void }) {
+  const { user } = useAuth();
+  const isAdmin = user?.role === 'prefeito' || user?.role === 'responsavel';
+
   const locations = useLiveQuery(() => db.locations.toArray());
   const inspections = useLiveQuery(() => db.inspections.toArray());
   const [searchTerm, setSearchTerm] = useState('');
@@ -106,7 +110,7 @@ export function LocationsView({ onSelectInspection }: { onSelectInspection: (id:
                 className="pl-11 pr-6 py-3 bg-white border border-slate-100 rounded-2xl text-sm font-bold text-slate-900 shadow-sm focus:ring-2 focus:ring-slate-900 focus:outline-none transition-all w-full md:w-64"
               />
            </div>
-           {!isAdding && (
+           {!isAdding && isAdmin && (
              <Button variant="accent" icon={Plus} onClick={() => setIsAdding(true)} className="rounded-2xl h-12 shadow-xl shadow-slate-900/10">
                NOVO LOCAL
              </Button>
@@ -150,15 +154,17 @@ export function LocationsView({ onSelectInspection }: { onSelectInspection: (id:
                       {status.replace('_', ' ')}
                     </div>
                   )}
-                  <button 
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      handleDeleteLocation(loc.id, loc.name);
-                    }}
-                    className="opacity-0 group-hover:opacity-100 p-2 text-slate-300 hover:text-rose-500 hover:bg-rose-50 rounded-xl transition-all duration-300"
-                  >
-                    <Trash2 className="w-5 h-5" />
-                  </button>
+                  {isAdmin && (
+                    <button 
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleDeleteLocation(loc.id, loc.name);
+                      }}
+                      className="opacity-0 group-hover:opacity-100 p-2 text-slate-300 hover:text-rose-500 hover:bg-rose-50 rounded-xl transition-all duration-300"
+                    >
+                      <Trash2 className="w-5 h-5" />
+                    </button>
+                  )}
                 </div>
               </div>
               
