@@ -1,7 +1,7 @@
 import React, { useState, useRef } from 'react';
-import { Card, Button, Input, Select } from './UI';
+import { Card, Button, Input, Select, Textarea } from './UI';
 import { useOnlineStatus } from '../lib/hooks';
-import { ArrowLeft, Plus, Image as ImageIcon, Trash2, Camera, UserPlus, Save, CheckCircle2, History, Eye, PlayCircle, ArrowRight, X, Edit2, Search, ShieldCheck, AlertCircle, Home } from 'lucide-react';
+import { ArrowLeft, Plus, Image as ImageIcon, Trash2, Camera, UserPlus, Save, CheckCircle2, History, Eye, PlayCircle, ArrowRight, X, Edit2, Search, ShieldCheck, AlertCircle, Home, ChevronLeft, ChevronRight, Zap } from 'lucide-react';
 import { db, Asset, generateAssetHash, generateId, AssetCondition, InspectionStatus } from '../lib/db';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { useAuth } from '../lib/AuthContext';
@@ -13,7 +13,7 @@ import { compressImage } from '../lib/image';
 
 export function InspectionView({ id, onBack }: { id: string, onBack: () => void }) {
   const { user } = useAuth();
-  const isManager = user?.role === 'administrador' || user?.role === 'responsavel';
+  const isManager = user?.role === 'administrador' || user?.role === 'responsavel' || user?.role === 'prefeito';
   const isOnline = useOnlineStatus();
   const inspection = useLiveQuery(() => db.inspections.get(id), [id]);
   const location = useLiveQuery(() => inspection ? db.locations.get(inspection.locationId) : undefined, [inspection]);
@@ -27,10 +27,50 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
   const [isConfirmingConclude, setIsConfirmingConclude] = useState(false);
   const [isConfirmingFinalize, setIsConfirmingFinalize] = useState(false);
   const [isConfirmingReopen, setIsConfirmingReopen] = useState(false);
+  const [isDeletingInspection, setIsDeletingInspection] = useState(false);
+  const [isConfirmingDeleteInspection, setIsConfirmingDeleteInspection] = useState(false);
+  const [transferAssetId, setTransferAssetId] = useState<string | null>(null);
+  const [isTransferring, setIsTransferring] = useState(false);
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [editingAssetId, setEditingAssetId] = useState<string | null>(null);
+  const allLocations = useLiveQuery(() => db.locations.toArray());
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const nameRef = useRef<HTMLInputElement>(null);
+  const patrimonyRef = useRef<HTMLInputElement>(null);
+  const conditionRef = useRef<HTMLSelectElement>(null);
+  const obsRef = useRef<HTMLTextAreaElement>(null);
+
+  const formRefs = [nameRef, patrimonyRef, conditionRef, obsRef];
+
+  const navigateFields = (direction: 'next' | 'prev') => {
+    const currentIndex = formRefs.findIndex(ref => ref.current === document.activeElement);
+    if (direction === 'next') {
+      const nextIndex = (currentIndex + 1) % formRefs.length;
+      formRefs[nextIndex].current?.focus();
+    } else {
+      const prevIndex = (currentIndex - 1 + formRefs.length) % formRefs.length;
+      formRefs[prevIndex].current?.focus();
+    }
+  };
+
+  const handleKeyDown = (e: React.KeyboardEvent, fieldIndex: number) => {
+    if (e.key === 'ArrowRight' && (e.currentTarget as any).selectionEnd === (e.currentTarget as any).value?.length) {
+      navigateFields('next');
+    } else if (e.key === 'ArrowLeft' && (e.currentTarget as any).selectionStart === 0) {
+      navigateFields('prev');
+    } else if (e.key === 'Enter' && e.currentTarget.tagName !== 'TEXTAREA') {
+      e.preventDefault();
+      if (fieldIndex === formRefs.length - 2) { // Before Observations (which is a textarea)
+         obsRef.current?.focus();
+      } else if (fieldIndex === formRefs.length - 1) { // Current is Observations or we hit enter on a select
+         handleAddItem();
+      } else {
+         navigateFields('next');
+      }
+    }
+  };
+
   const [newItem, setNewItem] = useState({
     name: '',
     patrimonyNumber: '',
@@ -49,7 +89,7 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
   }, [successMessage]);
 
   const handleAddItem = async () => {
-    if (!newItem.name || !user) return;
+    if (!newItem.name || !user || isLocked) return;
 
     const hash = generateAssetHash(newItem.name, newItem.patrimonyNumber, inspection?.locationId || '');
     
@@ -219,8 +259,8 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
   };
 
   const handleFinalize = async () => {
-    if (!user || (user.role !== 'prefeito' && user.role !== 'responsavel')) {
-      setError("Apenas o Prefeito ou Responsável podem finalizar vistorias.");
+    if (!user || (user.role !== 'prefeito' && user.role !== 'responsavel' && user.role !== 'administrador')) {
+      setError("Apenas o Prefeito, Responsável ou Administrador podem homologar vistorias.");
       return;
     }
 
@@ -296,6 +336,87 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
       setError(`Erro ao reabrir: ${err.message || 'Erro desconhecido'}`);
     } finally {
       setIsReopening(false);
+    }
+  };
+
+  const handleDeleteInspection = async () => {
+    if (!id || isDeletingInspection) return;
+    
+    if (!isConfirmingDeleteInspection) {
+      setIsConfirmingDeleteInspection(true);
+      setError(null);
+      return;
+    }
+
+    setIsDeletingInspection(true);
+    setError(null);
+    try {
+      // 1. Apagar Itens primeiro
+      await db.assets.where('inspectionId').equals(id).delete();
+      // 2. Apagar Vistoria
+      await db.inspections.delete(id);
+      
+      console.log("Vistoria excluída com sucesso:", id);
+      onBack();
+    } catch (err: any) {
+      console.error("Erro ao excluir vistoria:", err);
+      setError(`Erro ao excluir: ${err.message || 'Falha no banco de dados'}`);
+    } finally {
+      setIsDeletingInspection(false);
+      setIsConfirmingDeleteInspection(false);
+    }
+  };
+
+  const handleTransfer = async (targetLocationId: string) => {
+    if (!transferAssetId || isTransferring || !user) return;
+    setIsTransferring(true);
+    try {
+      const asset = await db.assets.get(transferAssetId);
+      if (!asset) throw new Error("Item não encontrado");
+
+      // 1. Procurar ou criar vistoria ativa no destino
+      let targetInspection = await db.inspections
+        .where({ locationId: targetLocationId })
+        .filter(i => i.status === 'em_andamento')
+        .reverse()
+        .first();
+
+      if (!targetInspection) {
+        const newId = generateId();
+        await db.inspections.add({
+          id: newId,
+          locationId: targetLocationId,
+          date: Date.now(),
+          participants: [],
+          status: 'em_andamento'
+        });
+        targetInspection = await db.inspections.get(newId);
+      }
+
+      if (!targetInspection) throw new Error("Falha ao preparar destino");
+
+      // 2. Atualizar o item
+      const newHash = generateAssetHash(asset.name, asset.patrimonyNumber, targetLocationId);
+      
+      // Verificar se já existe no destino
+      const existingInTarget = await db.assets.where('hash').equals(newHash).first();
+      if (existingInTarget) {
+        throw new Error("Já existe um item idêntico no local de destino");
+      }
+
+      await db.assets.update(transferAssetId, {
+        inspectionId: targetInspection.id,
+        hash: newHash,
+        needsSync: true
+      });
+
+      setSuccessMessage(`Item transferido para ${allLocations?.find(l => l.id === targetLocationId)?.name}`);
+      setTransferAssetId(null);
+    } catch (err: any) {
+      console.error("Erro na transferência:", err);
+      setError(err.message || "Erro ao transferir item");
+    } finally {
+      setIsTransferring(false);
     }
   };
 
@@ -428,7 +549,7 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
 
   const isFinalized = inspection.status === 'finalizada';
   const isConcluded = inspection.status === 'concluida';
-  const isLocked = isFinalized; // Only 'finalizada' locks the inspection
+  const isLocked = isFinalized || isConcluded; // Bloquear se concluída ou finalizada
 
   return (
     <div className="flex flex-col gap-8 animate-in slide-in-from-right-4 duration-500 pb-20">
@@ -468,6 +589,35 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
           </button>
         </div>
         <div className="flex items-center gap-4">
+           {!isLocked && isManager && (
+             <div className="flex items-center mr-2">
+               {isConfirmingDeleteInspection ? (
+                 <div className="flex items-center gap-2 bg-rose-50 border border-rose-100 p-1 rounded-xl animate-in slide-in-from-right-4 duration-300">
+                   <button 
+                     onClick={handleDeleteInspection}
+                     disabled={isDeletingInspection}
+                     className="px-3 py-1.5 bg-rose-600 text-white rounded-lg shadow-lg shadow-rose-600/20 hover:bg-rose-700 transition-all font-black text-[9px] uppercase"
+                   >
+                     {isDeletingInspection ? "..." : "EXCLUIR"}
+                   </button>
+                   <button 
+                     onClick={() => setIsConfirmingDeleteInspection(false)}
+                     className="px-3 py-1.5 bg-white text-slate-400 hover:text-slate-900 rounded-lg border border-slate-100 transition-all font-black text-[9px] uppercase"
+                   >
+                     X
+                   </button>
+                 </div>
+               ) : (
+                 <button 
+                   onClick={() => setIsConfirmingDeleteInspection(true)}
+                   className="p-2 text-slate-300 hover:text-rose-500 hover:bg-rose-50 rounded-xl transition-all"
+                   title="Excluir esta Vistoria"
+                 >
+                   <Trash2 className="w-5 h-5" />
+                 </button>
+               )}
+             </div>
+           )}
            {isOnline && <div className="hidden md:flex flex-col items-end leading-none">
               <span className="text-[9px] font-black uppercase text-slate-400 tracking-widest">Estado Local</span>
               <span className="text-[10px] font-bold text-emerald-600 uppercase">Sincronizado</span>
@@ -596,7 +746,7 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
 
         {isAdding && (
           <Card className="p-8 flex flex-col gap-6 ring-4 ring-slate-900/5 animate-in zoom-in-95 duration-300 rounded-[2.5rem] border-slate-200 shadow-2xl relative z-10">
-            <div className="flex items-center justify-between">
+             <div className="flex items-center justify-between">
                 <div className="flex flex-col">
                    <h3 className="font-black text-slate-900 text-lg uppercase tracking-tight">
                     {editingAssetId ? 'Editar Registro' : 'Novo Registro'}
@@ -605,30 +755,58 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
                     {editingAssetId ? 'Atualize os dados do bem patrimonial' : 'Preencha os dados do bem patrimonial'}
                    </span>
                 </div>
-                <button onClick={() => { setIsAdding(false); setEditingAssetId(null); setDuplicateWarning(null); }} className="w-10 h-10 rounded-full bg-slate-50 flex items-center justify-center text-slate-400 hover:text-rose-500 hover:bg-rose-50 transition-all">
-                  <X className="w-5 h-5" />
-                </button>
+                <div className="flex items-center gap-2">
+                   <div className="flex items-center bg-slate-100 rounded-xl p-1 mr-2">
+                      <button 
+                        type="button"
+                        onClick={() => navigateFields('prev')}
+                        className="p-2 hover:bg-white rounded-lg text-slate-400 hover:text-slate-900 transition-all shadow-sm"
+                        title="Anterior (Seta Esquerda)"
+                      >
+                        <ChevronLeft className="w-4 h-4" />
+                      </button>
+                      <div className="w-px h-4 bg-slate-300 mx-1" />
+                      <button 
+                        type="button"
+                        onClick={() => navigateFields('next')}
+                        className="p-2 hover:bg-white rounded-lg text-slate-400 hover:text-slate-900 transition-all shadow-sm"
+                        title="Próximo (Seta Direita / Enter)"
+                      >
+                        <ChevronRight className="w-4 h-4" />
+                      </button>
+                   </div>
+                   <button type="button" onClick={() => { setIsAdding(false); setEditingAssetId(null); setDuplicateWarning(null); }} className="w-10 h-10 rounded-full bg-slate-50 flex items-center justify-center text-slate-400 hover:text-rose-500 hover:bg-rose-50 transition-all">
+                     <X className="w-5 h-5" />
+                   </button>
+                </div>
              </div>
              
              <Input 
+               ref={nameRef}
                label="Nome do Item" 
                placeholder="Ex: Mesa de Escritório em L" 
                value={newItem.name}
                onChange={e => setNewItem({...newItem, name: e.target.value})}
+               onKeyDown={e => handleKeyDown(e, 0)}
                error={duplicateWarning || undefined}
+               autoFocus
              />
              
              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                <Input 
-                 label="Nº Patrimonial" 
+                 ref={patrimonyRef}
+                 label="Número Patrimonial" 
                  placeholder="Cód. Identificador" 
                  value={newItem.patrimonyNumber}
                  onChange={e => setNewItem({...newItem, patrimonyNumber: e.target.value})}
+                 onKeyDown={e => handleKeyDown(e, 1)}
                />
                <Select 
+                 ref={conditionRef}
                  label="Estado de Conservação" 
                  value={newItem.condition}
                  onChange={e => setNewItem({...newItem, condition: e.target.value as any})}
+                 onKeyDown={e => handleKeyDown(e, 2)}
                  options={[
                    { value: 'novo', label: 'Novo (Sem uso)' },
                    { value: 'bom', label: 'Bom (Funcional)' },
@@ -639,11 +817,13 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
                />
              </div>
 
-             <Input 
+             <Textarea 
+               ref={obsRef}
                label="Observações Adicionais" 
                placeholder="Avarias, marcas, detalhes de localização..." 
                value={newItem.observations}
                onChange={e => setNewItem({...newItem, observations: e.target.value})}
+               onKeyDown={e => handleKeyDown(e, 3)}
              />
 
              {newItem.photos.length > 0 && (
@@ -728,6 +908,15 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
                       >
                         <Trash2 className="w-4 h-4" />
                       </button>
+                      {isManager && (
+                        <button 
+                          onClick={() => setTransferAssetId(asset.id)}
+                          className="p-2 bg-white text-slate-400 hover:text-amber-600 rounded-xl border border-slate-100 hover:border-amber-100 shadow-sm transition-all"
+                          title="Transferir Item"
+                        >
+                          <Zap className="w-4 h-4" />
+                        </button>
+                      )}
                     </>
                   )}
                 </div>
@@ -781,6 +970,16 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
                </div>
                <p className="font-black uppercase tracking-widest text-[11px] text-slate-400">Nenhum bem registrado</p>
                <p className="text-xs mt-1">Inicie o inventário clicando em adicionar.</p>
+                {isManager && (
+                  <Button 
+                    variant="secondary" 
+                    icon={Trash2} 
+                    onClick={() => setIsConfirmingDeleteInspection(true)}
+                    className="mt-6 rounded-2xl border-rose-100 text-rose-500 hover:bg-rose-500 hover:text-white transition-all px-8 h-10 uppercase font-black tracking-widest text-[9px]"
+                  >
+                    DESCARTAR ESTA VISTORIA
+                  </Button>
+                )}
              </div>
           )}
         </div>
@@ -826,7 +1025,7 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
             </div>
           ) : (
             <div className="flex flex-col gap-3">
-              {(user?.role === 'prefeito' || user?.role === 'responsavel') && (
+              {(user?.role === 'prefeito' || user?.role === 'responsavel' || user?.role === 'administrador') && (
                 <div className="flex flex-col gap-2">
                   <Button 
                     className={cn(
@@ -878,8 +1077,55 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
             </div>
           )}
           <p className="text-[10px] font-bold text-center text-slate-400 uppercase tracking-widest px-8 leading-relaxed mt-2">
-            Apenas a homologação final (Prefeito/Responsável) bloqueia permanentemente as edições e gera o QR Code oficial.
+            A conclusão bloqueia novas edições. A homologação gera o QR Code oficial e o selo de autenticidade.
           </p>
+        </div>
+      )}
+
+      {/* 🚀 Modal de Transferência */}
+      {transferAssetId && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 md:p-10">
+          <div className="absolute inset-0 bg-slate-900/60 backdrop-blur-md" onClick={() => setTransferAssetId(null)} />
+          <Card className="w-full max-w-lg flex flex-col p-8 overflow-hidden shadow-2xl animate-in zoom-in-95 duration-300 rounded-[3rem] border-none bg-white relative z-10 text-slate-900">
+             <div className="flex items-center justify-between mb-8">
+                <div className="flex items-center gap-4">
+                   <div className="w-12 h-12 bg-amber-100 rounded-2xl flex items-center justify-center">
+                      <Zap className="w-6 h-6 text-amber-600" />
+                   </div>
+                   <div className="flex flex-col">
+                      <h3 className="font-black text-xl uppercase tracking-tight">Transferir Item</h3>
+                      <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest leading-none mt-1">Mudar de localização</span>
+                   </div>
+                </div>
+                <button onClick={() => setTransferAssetId(null)} className="p-2 hover:bg-slate-100 rounded-xl transition-colors">
+                   <X className="w-6 h-6 text-slate-400" />
+                </button>
+             </div>
+
+             <div className="flex flex-col gap-3 max-h-[50vh] overflow-y-auto pr-2 custom-scrollbar">
+                <p className="text-xs font-bold text-slate-500 mb-2 uppercase tracking-widest">Selecione o Destino:</p>
+                {allLocations?.filter(l => l.id !== location.id).map(loc => (
+                  <button 
+                    key={loc.id}
+                    onClick={() => handleTransfer(loc.id)}
+                    disabled={isTransferring}
+                    className="flex flex-col p-5 bg-slate-50 border border-slate-100 rounded-2xl hover:bg-slate-900 hover:text-white group transition-all text-left"
+                  >
+                     <span className="font-black text-sm uppercase tracking-tight transition-colors">{loc.name}</span>
+                     <span className="text-[10px] text-slate-400 group-hover:text-slate-500 transition-colors mt-1">{loc.description}</span>
+                  </button>
+                ))}
+             </div>
+
+             {isTransferring && (
+               <div className="absolute inset-0 bg-white/80 backdrop-blur-sm flex items-center justify-center rounded-[3rem]">
+                  <div className="flex flex-col items-center gap-3">
+                     <div className="w-10 h-10 border-4 border-slate-900 border-t-transparent rounded-full animate-spin"></div>
+                     <span className="text-[10px] font-black text-slate-900 uppercase tracking-[0.2em]">Processando...</span>
+                  </div>
+               </div>
+             )}
+          </Card>
         </div>
       )}
     </div>

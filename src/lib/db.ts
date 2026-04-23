@@ -1,7 +1,7 @@
 import Dexie, { type Table } from 'dexie';
 import { v4 as uuidv4 } from 'uuid';
 
-export type UserRole = 'administrador' | 'responsavel' | 'vistoriador';
+export type UserRole = 'administrador' | 'responsavel' | 'vistoriador' | 'prefeito';
 export type UserStatus = 'ativo' | 'inativo';
 export type AssetCondition = 'novo' | 'bom' | 'regular' | 'ruim' | 'inservivel';
 export type InspectionStatus = 'em_andamento' | 'concluida' | 'finalizada';

@@ -96,57 +96,81 @@ interface InputProps {
   id?: string;
 }
 
-export function Input({ label, error, className, id, ...props }: InputProps) {
-  return (
-    <div className="flex flex-col gap-2 w-full">
-      {label && <label className="text-[11px] font-black uppercase tracking-widest text-slate-400 ml-1">{label}</label>}
-      <input
-        id={id}
-        className={cn(
-          "px-5 py-4 rounded-2xl border-2 border-slate-100 focus:border-slate-900 outline-none transition-all bg-slate-50/50 font-medium placeholder:text-slate-300",
-          error && "border-red-100 bg-red-50/30 focus:border-red-500",
-          className
-        )}
-        {...props}
-      />
-      {error && <span className="text-[10px] font-bold text-red-500 ml-1 uppercase tracking-tight">{error}</span>}
-    </div>
-  );
-}
-
-interface SelectProps {
-  label?: string;
-  options: { value: string; label: string }[];
-  value?: string;
-  onChange?: (e: any) => void;
-  className?: string;
-  id?: string;
-}
-
-export function Select({ label, options, className, id, ...props }: SelectProps) {
-  return (
-    <div className="flex flex-col gap-2 w-full">
-      {label && <label className="text-[11px] font-black uppercase tracking-widest text-slate-400 ml-1">{label}</label>}
-      <div className="relative">
-        <select
+export const Input = React.forwardRef<HTMLInputElement, InputProps>(
+  ({ label, error, className, id, ...props }, ref) => {
+    return (
+      <div className="flex flex-col gap-2 w-full">
+        {label && <label className="text-[11px] font-black uppercase tracking-widest text-slate-400 ml-1">{label}</label>}
+        <input
           id={id}
+          ref={ref}
           className={cn(
-            "w-full px-5 py-4 rounded-2xl border-2 border-slate-100 focus:border-slate-900 outline-none transition-all bg-slate-50/50 font-medium appearance-none",
+            "px-5 py-4 rounded-2xl border-2 border-slate-100 focus:border-slate-900 outline-none transition-all bg-slate-50/50 font-medium placeholder:text-slate-300",
+            error && "border-red-100 bg-red-50/30 focus:border-red-500",
             className
           )}
           {...props}
-        >
-          {options.map(opt => (
-            <option key={opt.value} value={opt.value}>{opt.label}</option>
-          ))}
-        </select>
-        <div className="absolute right-4 top-1/2 -translate-y-1/2 pointer-events-none text-slate-400">
-          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 9l-7 7-7-7" /></svg>
+        />
+        {error && <span className="text-[10px] font-bold text-red-500 ml-1 uppercase tracking-tight">{error}</span>}
+      </div>
+    );
+  }
+);
+
+export const Textarea = React.forwardRef<HTMLTextAreaElement, InputProps>(
+  ({ label, error, className, id, ...props }, ref) => {
+    return (
+      <div className="flex flex-col gap-2 w-full">
+        {label && <label className="text-[11px] font-black uppercase tracking-widest text-slate-400 ml-1">{label}</label>}
+        <textarea
+          id={id}
+          ref={ref}
+          rows={3}
+          className={cn(
+            "px-5 py-4 rounded-[2rem] border-2 border-slate-100 focus:border-slate-900 outline-none transition-all bg-slate-50/50 font-medium placeholder:text-slate-300 resize-none",
+            error && "border-red-100 bg-red-50/30 focus:border-red-500",
+            className
+          )}
+          {...props}
+        />
+        {error && <span className="text-[10px] font-bold text-red-500 ml-1 uppercase tracking-tight">{error}</span>}
+      </div>
+    );
+  }
+);
+
+interface SelectProps extends React.SelectHTMLAttributes<HTMLSelectElement> {
+  label?: string;
+  options: { value: string; label: string }[];
+}
+
+export const Select = React.forwardRef<HTMLSelectElement, SelectProps>(
+  ({ label, options, className, id, ...props }, ref) => {
+    return (
+      <div className="flex flex-col gap-2 w-full">
+        {label && <label className="text-[11px] font-black uppercase tracking-widest text-slate-400 ml-1">{label}</label>}
+        <div className="relative">
+          <select
+            id={id}
+            ref={ref}
+            className={cn(
+              "w-full px-5 py-4 rounded-2xl border-2 border-slate-100 focus:border-slate-900 outline-none transition-all bg-slate-50/50 font-medium appearance-none",
+              className
+            )}
+            {...props}
+          >
+            {options.map(opt => (
+              <option key={opt.value} value={opt.value}>{opt.label}</option>
+            ))}
+          </select>
+          <div className="absolute right-4 top-1/2 -translate-y-1/2 pointer-events-none text-slate-400">
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 9l-7 7-7-7" /></svg>
+          </div>
         </div>
       </div>
-    </div>
-  );
-}
+    );
+  }
+);
 
 
 

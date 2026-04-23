@@ -4,11 +4,14 @@ import { UserPlus, Trash2, Edit2, X, ShieldCheck, Mail, Briefcase } from 'lucide
 import { db, User, generateId } from '../lib/db';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { cn } from '../lib/utils';
+import { useAuth } from '../lib/AuthContext';
 
 export function UsersView() {
+  const { user: currentUser } = useAuth();
   const users = useLiveQuery(() => db.users.toArray());
   const [isAdding, setIsAdding] = useState(false);
   const [editingUserId, setEditingUserId] = useState<string | null>(null);
+  const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
   const [formData, setFormData] = useState<Partial<User>>({
     name: '',
     email: '',
@@ -44,9 +47,14 @@ export function UsersView() {
   };
 
   const handleDelete = async (userId: string) => {
-    if (confirm("Deseja realmente remover este membro?")) {
-      await db.users.delete(userId);
+    if (userId === currentUser?.userId) {
+      alert("Você não pode excluir sua própria conta.");
+      setDeleteConfirmId(null);
+      return;
     }
+    
+    await db.users.delete(userId);
+    setDeleteConfirmId(null);
   };
 
   const resetForm = () => {
@@ -150,23 +158,41 @@ export function UsersView() {
                   <span className="flex items-center gap-1.5 mt-0.5"><Briefcase className="w-3 h-3" /> {u.cargo || 'Comissão'}</span>
                 </div>
              </div>
-             <div className="flex flex-col items-end gap-3">
+             <div className="flex flex-col items-end gap-3 min-w-[100px]">
                 <div className={cn(
-                  "text-[9px] font-black uppercase px-3 py-1 rounded-full border shadow-sm",
-                  u.role === 'administrador' ? "bg-slate-900 text-white border-slate-900" : 
-                  u.role === 'responsavel' ? "bg-blue-50 text-blue-700 border-blue-100" :
-                  "bg-slate-50 text-slate-600 border-slate-100"
+                   "text-[9px] font-black uppercase px-3 py-1 rounded-full border shadow-sm",
+                   u.role === 'administrador' ? "bg-slate-900 text-white border-slate-900" : 
+                   u.role === 'responsavel' ? "bg-blue-50 text-blue-700 border-blue-100" :
+                   "bg-slate-50 text-slate-600 border-slate-100"
                 )}>
                   {u.role === 'administrador' ? 'Administrador' : u.role === 'responsavel' ? 'Responsável' : 'Vistoriador'}
                 </div>
-                <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                   <button onClick={() => handleEdit(u)} className="p-2 text-slate-300 hover:text-slate-900 hover:bg-slate-50 rounded-xl transition-all">
-                    <Edit2 className="w-4 h-4" />
-                   </button>
-                   <button onClick={() => handleDelete(u.userId)} className="p-2 text-slate-300 hover:text-rose-500 hover:bg-rose-50 rounded-xl transition-all">
-                    <Trash2 className="w-4 h-4" />
-                   </button>
-                </div>
+                
+                {deleteConfirmId === u.userId ? (
+                  <div className="flex items-center gap-2 animate-in slide-in-from-right-4 duration-300">
+                    <button 
+                      onClick={() => handleDelete(u.userId)}
+                      className="p-2 bg-rose-600 text-white text-[9px] font-black px-4 rounded-xl shadow-lg shadow-rose-600/20"
+                    >
+                      SIM
+                    </button>
+                    <button 
+                      onClick={() => setDeleteConfirmId(null)}
+                      className="p-2 bg-slate-100 text-slate-400 text-[9px] font-black px-4 rounded-xl"
+                    >
+                      NÃO
+                    </button>
+                  </div>
+                ) : (
+                  <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                    <button onClick={() => handleEdit(u)} className="p-2 text-slate-300 hover:text-slate-900 hover:bg-slate-50 rounded-xl transition-all">
+                      <Edit2 className="w-4 h-4" />
+                    </button>
+                    <button onClick={() => setDeleteConfirmId(u.userId)} className="p-2 text-slate-300 hover:text-rose-500 hover:bg-rose-50 rounded-xl transition-all">
+                      <Trash2 className="w-4 h-4" />
+                    </button>
+                  </div>
+                )}
              </div>
           </Card>
         ))}
