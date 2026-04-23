@@ -10,6 +10,7 @@ import { QRCodeSVG } from 'qrcode.react';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import { compressImage } from '../lib/image';
+import { pushLocalChanges, syncInspection } from '../lib/syncService';
 
 export function InspectionView({ id, onBack }: { id: string, onBack: () => void }) {
   const { user } = useAuth();
@@ -142,6 +143,9 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
       setSuccessMessage("Adicionado com sucesso!");
     }
 
+    // Trigger sync
+    pushLocalChanges();
+
     setNewItem({ name: '', patrimonyNumber: '', condition: 'bom', observations: '', photos: [] });
     setIsAdding(false);
     setEditingAssetId(null);
@@ -246,6 +250,9 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
       
       console.log("Status atualizado para 'concluida'.");
       
+      await syncInspection(id);
+      await pushLocalChanges();
+      
       // Safety delay for reaction
       await new Promise(resolve => setTimeout(resolve, 400));
       setIsConfirmingConclude(false);
@@ -290,6 +297,9 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
         finalizedAt: Date.now(),
         qrCodeData: publicUrl
       });
+      
+      await syncInspection(id);
+      await pushLocalChanges();
       
       generatePDF();
       await new Promise(resolve => setTimeout(resolve, 400));

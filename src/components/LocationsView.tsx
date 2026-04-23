@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import React, { useState, MouseEvent } from 'react';
 import { Card, Button, Input } from './UI';
 import { Building2, Plus, ArrowRight, Trash2, AlertCircle, X, Search, History, Calendar, CheckSquare } from 'lucide-react';
 import { db, generateId, Inspection } from '../lib/db';
@@ -113,7 +113,7 @@ export function LocationsView({ onSelectInspection }: { onSelectInspection: (id:
     setDeleteConfirmId(null);
   };
 
-  const handleDeleteInspection = async (e: React.MouseEvent, inspectionId: string) => {
+  const handleDeleteInspection = async (e: MouseEvent, inspectionId: string) => {
     e.stopPropagation();
     try {
       const assetsCount = await db.assets.where('inspectionId').equals(inspectionId).count();

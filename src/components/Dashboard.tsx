@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import React, { useState, useEffect, ChangeEvent } from 'react';
 import { useAuth } from '../lib/AuthContext';
 import { useOnlineStatus } from '../lib/hooks';
 import { Card, Button, Input } from './UI';
@@ -23,7 +23,9 @@ import {
   Home,
   User as UserIcon,
   Zap,
-  Clock
+  Clock,
+  Download,
+  Upload
 } from 'lucide-react';
 import { db, Inspection, Location } from '../lib/db';
 import { useLiveQuery } from 'dexie-react-hooks';
@@ -35,6 +37,7 @@ import { UsersView } from './UsersView';
 import { NotificationsView } from './NotificationsView';
 import { checkAndGenerateNotifications } from '../lib/NotificationService';
 import { cn } from '../lib/utils';
+import { setupSync, pushLocalChanges } from '../lib/syncService';
 
 export function Dashboard() {
   const { user, signOut } = useAuth();
@@ -55,6 +58,9 @@ export function Dashboard() {
 
   useEffect(() => {
     if (user) {
+      setupSync();
+      pushLocalChanges();
+      
       checkAndGenerateNotifications(user.userId).catch(err => {
         console.error("Erro ao gerar notificações:", err);
       });
@@ -99,6 +105,72 @@ export function Dashboard() {
     } finally {
       setIsResetting(false);
     }
+  };
+
+  const handleExportData = async () => {
+    try {
+      const users = await db.users.toArray();
+      const locations = await db.locations.toArray();
+      const inspections = await db.inspections.toArray();
+      const assets = await db.assets.toArray();
+      const notifications = await db.notifications.toArray();
+
+      const data = {
+        users,
+        locations,
+        inspections,
+        assets,
+        notifications,
+        exportDate: Date.now(),
+        version: "v16.4.2"
+      };
+
+      const blob = new Blob([JSON.stringify(data)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `backup-patri-mv-${new Date().toISOString().split('T')[0]}.json`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      console.error("Erro ao exportar dados:", err);
+      alert("Falha ao exportar backup.");
+    }
+  };
+
+  const handleImportData = async (e: ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = async (event) => {
+      try {
+        const data = JSON.parse(event.target?.result as string);
+        if (!data.inspections || !data.assets) throw new Error("Formato de backup inválido.");
+
+        const confirm = window.confirm("Deseja importar estes dados? Os dados atuais em conflito podem ser substituídos.");
+        if (!confirm) return;
+
+        // Limpar bancos para importação limpa (opcional, aqui vamos mesclar)
+        // Usando bulkPut para mesclar
+        await Promise.all([
+          db.users.bulkPut(data.users || []),
+          db.locations.bulkPut(data.locations || []),
+          db.inspections.bulkPut(data.inspections || []),
+          db.assets.bulkPut(data.assets || []),
+          db.notifications.bulkPut(data.notifications || [])
+        ]);
+
+        alert("✅ DADOS IMPORTADOS: O sistema foi atualizado com as informações do backup.");
+        window.location.reload();
+      } catch (err) {
+        console.error("Erro na importação:", err);
+        alert("Erro ao importar arquivo. Verifique se o formato está correto.");
+      }
+    };
+    reader.readAsText(file);
   };
 
   const renderContent = () => {
@@ -316,6 +388,40 @@ export function Dashboard() {
                     </Button>
                   </Card>
                 )}
+
+                <Card className="p-8 flex flex-col gap-6 rounded-[2.5rem]">
+                    <div className="flex items-center gap-4">
+                       <div className="w-12 h-12 bg-blue-100 rounded-2xl flex items-center justify-center text-blue-600">
+                          <Download className="w-6 h-6" />
+                       </div>
+                       <div className="flex flex-col">
+                          <h3 className="font-black text-slate-900 uppercase tracking-tight">Gestão de Dados</h3>
+                          <span className="text-[10px] font-bold text-blue-500 uppercase tracking-widest">Sincronização Manual (Arquivos)</span>
+                       </div>
+                    </div>
+                    
+                    <p className="text-xs text-slate-500 leading-relaxed font-medium">
+                      Como o storage em nuvem está em manutenção, use esta função para mover dados entre dispositivos (ex: do PC para o Celular).
+                    </p>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-2">
+                       <Button 
+                         variant="secondary" 
+                         icon={Download} 
+                         onClick={handleExportData}
+                         className="rounded-2xl h-14 font-black uppercase tracking-widest text-[9px] bg-slate-50 border-slate-100"
+                       >
+                         EXPORTAR BACKUP
+                       </Button>
+                       <label className="cursor-pointer">
+                          <div className="flex items-center justify-center gap-2 w-full h-14 bg-slate-900 text-white rounded-2xl font-black uppercase tracking-widest text-[9px] hover:bg-slate-800 transition-all">
+                             <Upload className="w-4 h-4" />
+                             IMPORTAR DADOS
+                          </div>
+                          <input type="file" className="hidden" accept=".json" onChange={handleImportData} />
+                       </label>
+                    </div>
+                </Card>
 
                 <Card className="p-8 flex flex-col gap-6 rounded-[2.5rem]">
                     <div className="flex items-center gap-4">

@@ -1,0 +1,84 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // 0. Default Deny
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // 1. Primitives & Helpers
+    function isSignedIn() { return request.auth != null; }
+    function isVerified() { return isSignedIn() && request.auth.token.email_verified == true; }
+    function isValidId(id) { return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$'); }
+    function incoming() { return request.resource.data; }
+    function existing() { return resource.data; }
+
+    // Helper for Admin Check (Checks a trusted admins collection)
+    function isAdmin() { return isSignedIn() && exists(/databases/$(database)/documents/admins/$(request.auth.uid)); }
+
+    // 2. Users Collection
+    match /users/{userId} {
+      function isValidUser(data) {
+        return data.userId == userId &&
+               data.name is string && data.name.size() <= 100 &&
+               data.email is string && data.email.size() <= 100 &&
+               data.role in ['administrador', 'prefeito', 'responsavel', 'vistoriador'];
+      }
+
+      allow read: if isSignedIn();
+      allow create: if isVerified() && isValidUser(incoming());
+      allow update: if isVerified() && (request.auth.uid == userId || isAdmin()) && isValidUser(incoming()) && (
+        incoming().diff(existing()).affectedKeys().hasOnly(['name', 'email', 'role'])
+      );
+      allow delete: if isAdmin();
+    }
+
+    // 3. Locations Collection
+    match /locations/{locationId} {
+      function isValidLocation(data) {
+        return isValidId(data.id) &&
+               data.name is string && data.name.size() <= 150 &&
+               data.description is string && data.description.size() <= 500;
+       }
+
+      allow read: if isSignedIn();
+      allow write: if isVerified(); // Ideally restricted to managers in future
+    }
+
+    // 4. Inspections Collection
+    match /inspections/{inspectionId} {
+      function isValidInspection(data) {
+        return isValidId(data.id) &&
+               data.locationId is string &&
+               data.status in ['em_andamento', 'concluida', 'finalizada'];
+      }
+
+      allow get: if true; // Public read for QR scan
+      allow list: if isSignedIn(); // Prevent public scraping
+      allow create: if isVerified() && isValidInspection(incoming());
+      allow update: if isVerified() && isValidInspection(incoming()) && (
+        // Prevent update if already finalized unless admin
+        (existing().status != 'finalizada' || isAdmin()) &&
+        incoming().diff(existing()).affectedKeys().hasAny(['status', 'concludedBy', 'concludedAt', 'finalizedBy', 'finalizedAt', 'qrCodeData'])
+      );
+      allow delete: if isAdmin();
+    }
+
+    // 5. Assets Collection
+    match /assets/{assetId} {
+      function isValidAsset(data) {
+        return isValidId(data.id) &&
+               data.name is string && data.name.size() <= 150 &&
+               data.inspectionId is string &&
+               data.condition in ['bom', 'regular', 'danificado', 'inservivel'];
+      }
+
+      allow get: if true; // Public check via QR
+      allow list: if isSignedIn() || (request.query.limit <= 100 && request.query.filters.size() > 0); 
+      // Optimized Asset query rule
+      allow read: if true; // Simplify for public view filter queries
+      
+      allow write: if isVerified() && isValidAsset(incoming());
+    }
+  }
+}

@@ -2,69 +2,80 @@
   "entities": {
     "User": {
       "title": "User",
-      "description": "System user with roles",
+      "description": "User profile data",
       "type": "object",
       "properties": {
         "userId": { "type": "string" },
         "name": { "type": "string" },
         "email": { "type": "string" },
-        "role": { "type": "string", "enum": ["prefeito", "responsavel", "membro"] },
-        "status": { "type": "string", "enum": ["ativo", "inativo"] },
-        "cargo": { "type": "string" }
+        "role": { "type": "string", "enum": ["administrador", "prefeito", "responsavel", "vistoriador"] },
+        "createdAt": { "type": "integer" }
       },
-      "required": ["userId", "name", "email", "role", "status"]
+      "required": ["userId", "name", "email", "role"]
     },
     "Location": {
       "title": "Location",
-      "description": "Physical location for assets",
+      "description": "A physical location or sector being inspected",
       "type": "object",
       "properties": {
         "id": { "type": "string" },
         "name": { "type": "string" },
-        "description": { "type": "string" },
-        "internalCode": { "type": "string" }
+        "description": { "type": "string" }
       },
       "required": ["id", "name"]
     },
     "Inspection": {
       "title": "Inspection",
-      "description": "Inspection session for a location",
+      "description": "An inspection event at a location",
       "type": "object",
       "properties": {
         "id": { "type": "string" },
         "locationId": { "type": "string" },
-        "date": { "type": "string", "format": "date-time" },
-        "participants": { "type": "array", "items": { "type": "string" } },
+        "date": { "type": "integer" },
         "status": { "type": "string", "enum": ["em_andamento", "concluida", "finalizada"] },
-        "qrCodeData": { "type": "string" },
+        "concludedBy": { "type": "string" },
+        "concludedAt": { "type": "integer" },
         "finalizedBy": { "type": "string" },
-        "finalizedAt": { "type": "string", "format": "date-time" }
+        "finalizedAt": { "type": "integer" },
+        "qrCodeData": { "type": "string" }
       },
       "required": ["id", "locationId", "date", "status"]
     },
     "Asset": {
       "title": "Asset",
-      "description": "Inventory item within an inspection",
+      "description": "An item registered during an inspection",
       "type": "object",
       "properties": {
         "id": { "type": "string" },
         "inspectionId": { "type": "string" },
         "name": { "type": "string" },
         "patrimonyNumber": { "type": "string" },
-        "condition": { "type": "string", "enum": ["novo", "bom", "regular", "ruim", "inservivel"] },
-        "photos": { "type": "array", "items": { "type": "string" } },
+        "condition": { "type": "string", "enum": ["bom", "regular", "danificado", "inservivel"] },
         "observations": { "type": "string" },
+        "photos": { "type": "array", "items": { "type": "string" } },
         "createdBy": { "type": "string" },
-        "createdAt": { "type": "string", "format": "date-time" },
+        "createdAt": { "type": "integer" },
         "hash": { "type": "string" }
       },
       "required": ["id", "inspectionId", "name", "condition", "createdBy", "createdAt"]
     }
   },
   "firestore": {
-    "/users/{userId}": { "schema": "User", "description": "User profiles" },
-    "/locations/{locationId}": { "schema": "Location", "description": "Manage locations" },
-    "/inspections/{inspectionId}": { "schema": "Inspection", "description": "Inspection records" },
-    "/inspections/{inspectionId}/assets/{assetId}": { "schema": "Asset", "description": "Items found in locations" }
+    "/users/{userId}": {
+      "schema": "User",
+      "description": "Global user profiles"
+    },
+    "/locations/{locationId}": {
+      "schema": "Location",
+      "description": "Registered locations"
+    },
+    "/inspections/{inspectionId}": {
+      "schema": "Inspection",
+      "description": "Inspection records"
+    },
+    "/assets/{assetId}": {
+      "schema": "Asset",
+      "description": "Assets registered across all inspections"
+    }
   }
 }
