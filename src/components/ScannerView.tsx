@@ -167,7 +167,28 @@ export function ScannerView({ onOpenInspection }: { onOpenInspection: (id: strin
 
       <div style={{ display: scanResult ? 'none' : 'block' }}>
         <Card className="p-4 overflow-hidden shadow-2xl relative max-w-md mx-auto w-full">
-           <div id="qr-reader" className="w-full text-center qr-reader-container [&_#qr-reader-results]:hidden" />
+           <div className="relative rounded-2xl overflow-hidden bg-slate-900 isolate">
+             <div id="qr-reader" className="w-full text-center qr-reader-container [&_#qr-reader-results]:hidden !border-none" />
+             
+             {/* Scanner Overlay (Mira) */}
+             <div className="absolute inset-0 z-10 pointer-events-none flex flex-col items-center justify-center space-y-4">
+                 <div className="w-48 h-48 sm:w-64 sm:h-64 border-2 border-white/40 border-dashed rounded-3xl relative">
+                    {/* Corner marks */}
+                    <div className="absolute -top-1 -left-1 w-8 h-8 border-t-4 border-l-4 border-emerald-500 rounded-tl-2xl"></div>
+                    <div className="absolute -top-1 -right-1 w-8 h-8 border-t-4 border-r-4 border-emerald-500 rounded-tr-2xl"></div>
+                    <div className="absolute -bottom-1 -left-1 w-8 h-8 border-b-4 border-l-4 border-emerald-500 rounded-bl-2xl"></div>
+                    <div className="absolute -bottom-1 -right-1 w-8 h-8 border-b-4 border-r-4 border-emerald-500 rounded-br-2xl"></div>
+                    
+                    {/* Scanning animation line */}
+                    <div className="absolute -top-1 left-2 tracking-line w-[calc(100%-1rem)] h-[2px] bg-emerald-500 shadow-[0_0_8px_2px_rgba(16,185,129,0.5)]"></div>
+                 </div>
+                 
+                 <div className="bg-black/50 backdrop-blur-sm text-white text-xs font-semibold px-4 py-2 rounded-full absolute bottom-6 max-w-[80%] text-center">
+                   Posicione o QR Code centralizado na área pontilhada
+                 </div>
+             </div>
+           </div>
+           
            {error && (
              <div className="text-rose-500 mt-4 text-center font-bold bg-rose-50 p-3 rounded-xl border border-rose-100">{error}</div>
            )}

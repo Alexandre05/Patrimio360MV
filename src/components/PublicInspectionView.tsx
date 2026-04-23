@@ -11,6 +11,7 @@ export function PublicInspectionView({ id: propId }: { id?: string }) {
   const [assets, setAssets] = useState<Asset[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [searchTerm, setSearchTerm] = useState('');
 
   useEffect(() => {
     let id = propId;
@@ -111,6 +112,18 @@ export function PublicInspectionView({ id: propId }: { id?: string }) {
     );
   }
 
+  const stats = {
+    total: assets.length,
+    bons: assets.filter(a => a.condition === 'bom' || a.condition === 'novo').length,
+    ruins: assets.filter(a => a.condition === 'ruim' || a.condition === 'inservivel').length,
+    regular: assets.filter(a => a.condition === 'regular').length
+  };
+
+  const filteredAssets = assets.filter(asset => 
+    (asset.name || '').toLowerCase().includes(searchTerm.toLowerCase()) || 
+    (asset.patrimonyNumber || '').toLowerCase().includes(searchTerm.toLowerCase())
+  );
+
   return (
     <div className="min-h-screen bg-slate-50 font-sans pb-20">
       {/* Header Banner */}
@@ -188,8 +201,34 @@ export function PublicInspectionView({ id: propId }: { id?: string }) {
             </h3>
           </div>
 
+          <div className="grid grid-cols-3 gap-2 mb-6">
+            <div className="bg-emerald-50 p-3 rounded-2xl border border-emerald-100 text-center shadow-sm">
+              <span className="text-2xl font-black text-emerald-600">{stats.bons}</span>
+              <p className="text-[10px] font-bold text-emerald-800 uppercase tracking-wider">Bons/Novos</p>
+            </div>
+            <div className="bg-amber-50 p-3 rounded-2xl border border-amber-100 text-center shadow-sm">
+              <span className="text-2xl font-black text-amber-600">{stats.regular}</span>
+              <p className="text-[10px] font-bold text-amber-800 uppercase tracking-wider">Regulares</p>
+            </div>
+            <div className="bg-rose-50 p-3 rounded-2xl border border-rose-100 text-center shadow-sm">
+              <span className="text-2xl font-black text-rose-600">{stats.ruins}</span>
+              <p className="text-[10px] font-bold text-rose-800 uppercase tracking-wider">Críticos</p>
+            </div>
+          </div>
+
+          <div className="relative mb-6">
+            <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+            <input 
+              type="text" 
+              placeholder="Buscar por nome ou nº de patrimônio..." 
+              value={searchTerm}
+              onChange={e => setSearchTerm(e.target.value)}
+              className="w-full pl-11 pr-4 py-3.5 bg-white border border-slate-200 rounded-2xl text-sm shadow-sm focus:ring-2 focus:ring-emerald-500 focus:outline-none placeholder:text-slate-400"
+            />
+          </div>
+
           <div className="flex flex-col gap-4">
-            {assets.map((asset) => (
+            {filteredAssets.map((asset) => (
               <div key={asset.id} className="bg-white rounded-[2rem] p-5 shadow-lg shadow-slate-200/50 border border-slate-100 overflow-hidden relative group">
                  {/* Top row */}
                  <div className="flex justify-between items-start gap-4 mb-4">
@@ -212,13 +251,24 @@ export function PublicInspectionView({ id: propId }: { id?: string }) {
                    </div>
                  )}
 
-                 {asset.photoUrl && (
-                    <div className="rounded-2xl overflow-hidden aspect-video relative outline outline-1 outline-slate-100">
-                       <img src={asset.photoUrl} alt={asset.name} className="absolute inset-0 w-full h-full object-cover" loading="lazy" />
-                    </div>
+                 {(asset.photos && asset.photos.length > 0) && (
+                   <div className="flex gap-2 overflow-x-auto snap-x pb-2 [&::-webkit-scrollbar]:hidden">
+                     {asset.photos.map((photo, idx) => (
+                       <div key={idx} className="rounded-2xl shrink-0 w-[85%] overflow-hidden aspect-video relative outline outline-1 outline-slate-100 snap-center">
+                          <img src={photo} alt={`${asset.name} - Foto ${idx + 1}`} className="absolute inset-0 w-full h-full object-cover" loading="lazy" />
+                       </div>
+                     ))}
+                   </div>
                  )}
               </div>
             ))}
+
+            {filteredAssets.length === 0 && assets.length > 0 && (
+              <div className="text-center py-10 px-6 bg-white rounded-3xl border border-slate-100 text-slate-500">
+                <Search className="w-10 h-10 mx-auto mb-3 text-slate-300" />
+                <p className="font-medium">Nenhum item encontrado na busca.</p>
+              </div>
+            )}
 
             {assets.length === 0 && (
               <div className="text-center py-10 px-6 bg-white rounded-3xl border border-slate-100 text-slate-500">
