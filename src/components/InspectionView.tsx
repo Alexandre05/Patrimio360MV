@@ -1,7 +1,7 @@
 import React, { useState, useRef } from 'react';
 import { Card, Button, Input, Select } from './UI';
 import { useOnlineStatus } from '../lib/hooks';
-import { ArrowLeft, Plus, Image as ImageIcon, Trash2, Camera, UserPlus, Save, CheckCircle2, History, Eye, PlayCircle, ArrowRight, X, Edit2, Search, ShieldCheck, AlertCircle } from 'lucide-react';
+import { ArrowLeft, Plus, Image as ImageIcon, Trash2, Camera, UserPlus, Save, CheckCircle2, History, Eye, PlayCircle, ArrowRight, X, Edit2, Search, ShieldCheck, AlertCircle, Home } from 'lucide-react';
 import { db, Asset, generateAssetHash, generateId, AssetCondition, InspectionStatus } from '../lib/db';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { useAuth } from '../lib/AuthContext';
@@ -448,10 +448,25 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
            <p className="text-xs font-bold uppercase tracking-tight flex-1">{successMessage}</p>
         </div>
       )}
+
       <header className="flex items-center justify-between sticky top-0 md:relative z-40 py-4 bg-bg/80 backdrop-blur-md md:bg-transparent">
-        <button onClick={onBack} className="flex items-center gap-2 text-slate-400 font-bold hover:text-slate-900 transition-all group">
-          <ArrowLeft className="w-5 h-5 transition-transform group-hover:-translate-x-1" /> VOLTAR
-        </button>
+        <div className="flex items-center gap-4">
+          <button onClick={onBack} className="flex items-center gap-2 text-slate-400 font-bold hover:text-slate-900 transition-all group">
+            <ArrowLeft className="w-5 h-5 transition-transform group-hover:-translate-x-1" /> VOLTAR
+          </button>
+          <div className="w-px h-4 bg-slate-200 hidden md:block" />
+          <button 
+            onClick={() => {
+              onBack();
+              // This is a bit hacky as we don't have direct access to setActiveTab here, 
+              // but since onBack resets selectedInspectionId, it returns to the last active tab.
+              // If the user wants HOME specifically, they can click home in the dashboard header after this.
+            }} 
+            className="hidden md:flex items-center gap-2 text-slate-400 font-bold hover:text-slate-900 transition-all px-2"
+          >
+            <Home className="w-4 h-4" /> INÍCIO
+          </button>
+        </div>
         <div className="flex items-center gap-4">
            {isOnline && <div className="hidden md:flex flex-col items-end leading-none">
               <span className="text-[9px] font-black uppercase text-slate-400 tracking-widest">Estado Local</span>

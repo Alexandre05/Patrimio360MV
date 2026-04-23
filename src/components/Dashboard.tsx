@@ -18,7 +18,11 @@ import {
   PlayCircle, 
   Eye, 
   ArrowRight,
-  ShieldCheck
+  ShieldCheck,
+  Home,
+  User as UserIcon,
+  Zap,
+  Clock
 } from 'lucide-react';
 import { db, Inspection, Location } from '../lib/db';
 import { useLiveQuery } from 'dexie-react-hooks';
@@ -62,7 +66,57 @@ export function Dashboard() {
     switch (activeTab) {
       case 'home':
         return (
-          <div className="flex flex-col gap-8 animate-in fade-in slide-in-from-bottom-4 duration-500">
+          <div className="flex flex-col gap-10 animate-in fade-in slide-in-from-bottom-4 duration-700">
+            {/* 🏰 Hero Moderno */}
+            <div className="relative overflow-hidden rounded-[3rem] bg-slate-900 px-8 py-12 text-white shadow-2xl shadow-slate-900/40 group">
+              <div className="relative z-10 flex flex-col md:flex-row items-center justify-between gap-10">
+                <div className="flex flex-col gap-4 text-center md:text-left max-w-xl">
+                  <div className="inline-flex items-center gap-2 px-4 py-2 bg-white/10 backdrop-blur-md rounded-full w-fit mx-auto md:mx-0">
+                    <Zap className="w-4 h-4 text-amber-400 fill-amber-400" />
+                    <span className="text-[10px] font-black uppercase tracking-widest text-slate-300">Resumo Operacional • Manoel Viana</span>
+                  </div>
+                  <h2 className="text-4xl md:text-5xl font-black tracking-tighter leading-[0.9] text-white">
+                    Gestão <br /> 
+                    <span className="text-slate-500">Patrimonial</span>
+                  </h2>
+                  <p className="text-slate-400 text-sm font-medium leading-relaxed">
+                    Painel inteligente para monitoramento, vistoria e homologação dos bens públicos municipais. Segurança e transparência em tempo real.
+                  </p>
+                  <div className="flex flex-wrap items-center justify-center md:justify-start gap-4 mt-2">
+                    <Button variant="accent" icon={Plus} onClick={() => setActiveTab('locations')} className="rounded-2xl px-10 h-14 uppercase tracking-widest font-black text-[10px] shadow-2xl shadow-blue-600/30">
+                      Iniciar Vistoria
+                    </Button>
+                    <div className="hidden sm:flex items-center gap-3 px-6 py-4 bg-white/5 border border-white/10 rounded-2xl backdrop-blur-sm">
+                      <Clock className="w-5 h-5 text-slate-500" />
+                      <div className="flex flex-col leading-none">
+                        <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Último Login</span>
+                        <span className="text-sm font-bold text-slate-300 mt-1">{new Date().toLocaleTimeString()}</span>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+                
+                <div className="hidden lg:flex flex-col gap-4 relative">
+                   <div className="p-8 bg-white/5 backdrop-blur-xl border border-white/10 rounded-[2.5rem] shadow-2xl flex flex-col items-center gap-2 transform rotate-2 hover:rotate-0 transition-transform duration-500 cursor-pointer group/card" onClick={() => setActiveTab('notifications')}>
+                      <div className="w-16 h-16 bg-white rounded-3xl flex items-center justify-center shadow-2xl shadow-white/10 mb-2 group-hover/card:scale-110 transition-transform">
+                        <Bell className="w-8 h-8 text-slate-900" />
+                      </div>
+                      <span className="text-3xl font-black text-white">{unreadNotifications || 0}</span>
+                      <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Avisos Pendentes</span>
+                   </div>
+                   <div className="absolute -top-12 -left-20 p-6 bg-blue-600/20 backdrop-blur-md border border-blue-500/20 rounded-[2rem] shadow-2xl flex flex-col items-center gap-1 transform -rotate-6 scale-90">
+                      <ShieldCheck className="w-6 h-6 text-blue-400" />
+                      <span className="text-[10px] font-black text-blue-300 uppercase tracking-widest mt-1">Concluídas</span>
+                      <span className="text-xl font-bold text-white">{concludedInspectionsCount || 0}</span>
+                   </div>
+                </div>
+              </div>
+              
+              {/* Background Accents */}
+              <Building2 className="absolute -bottom-20 -right-20 w-96 h-96 text-white/5 transform -rotate-12 pointer-events-none transition-transform duration-1000 group-hover:scale-110" />
+              <div className="absolute top-0 right-0 w-64 h-64 bg-blue-600/20 blur-[100px] rounded-full -translate-y-1/2 translate-x-1/2"></div>
+            </div>
+
             {/* 📊 2. Cards de Resumo */}
             <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
               <SummaryCard 
@@ -92,29 +146,22 @@ export function Dashboard() {
               />
             </div>
 
-            {/* ⚡ 3. Ações Rápidas */}
-            <div className="flex flex-col gap-4">
-              <h3 className="text-xs font-black text-slate-400 uppercase tracking-[0.2em] ml-1">Ações Rápidas</h3>
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-                <QuickActionButton icon={Plus} label="Nova Vistoria" onClick={() => setActiveTab('locations')} primary />
-                <QuickActionButton icon={Search} label="Ver Vistorias" onClick={() => setActiveTab('inspections')} />
-                <QuickActionButton icon={Building2} label="Localizações" onClick={() => setActiveTab('locations')} />
-                {isAdmin && <QuickActionButton icon={BarChart3} label="Relatórios" onClick={() => setActiveTab('reports')} />}
-              </div>
-            </div>
-
             {/* 📋 4. Lista de Vistorias Recentes */}
-            <div className="flex flex-col gap-4">
-              <div className="flex items-center justify-between ml-1">
-                <h3 className="text-xs font-black text-slate-400 uppercase tracking-[0.2em]">Últimas Vistorias</h3>
-                <button onClick={() => setActiveTab('inspections')} className="text-[10px] font-black text-slate-900 border-b-2 border-slate-900 pb-0.5 hover:opacity-70 transition-opacity">VER TODAS</button>
+            <div className="flex flex-col gap-6">
+              <div className="flex items-center justify-between ml-1 leading-none">
+                <div className="flex flex-col">
+                  <h3 className="text-xs font-black text-slate-400 uppercase tracking-[0.2em]">Fluxo de Atividades</h3>
+                  <span className="text-[10px] font-bold text-slate-300 uppercase tracking-widest mt-1">Vistorias recentes no sistema</span>
+                </div>
+                <button onClick={() => setActiveTab('inspections')} className="flex items-center gap-2 text-[10px] font-black text-slate-900 border-2 border-slate-900 px-4 py-2 rounded-xl hover:bg-slate-900 hover:text-white transition-all">VER TODAS <ArrowRight className="w-3 h-3" /></button>
               </div>
               <div className="grid grid-cols-1 gap-3">
                 {inspections?.length === 0 ? (
-                  <Card className="flex items-center justify-center py-16 text-slate-400 border-dashed border-2">
+                  <Card className="flex items-center justify-center py-20 text-slate-400 border-dashed border-2 border-slate-100 bg-slate-50/50 rounded-[3rem]">
                     <div className="text-center">
-                      <ClipboardList className="w-10 h-10 mx-auto opacity-10 mb-2" />
-                      <p className="text-sm font-medium">Nenhuma vistoria registrada</p>
+                      <ClipboardList className="w-16 h-16 mx-auto opacity-10 mb-4" />
+                      <p className="text-sm font-black uppercase tracking-widest text-slate-300">Nenhuma vistoria registrada</p>
+                      <p className="text-xs text-slate-400 mt-1">Selecione um local para iniciar o inventário.</p>
                     </div>
                   </Card>
                 ) : (
@@ -132,24 +179,26 @@ export function Dashboard() {
 
             {/* 📡 5. Status Offline/Sync */}
             {!isOnline ? (
-              <div className="bg-red-50 border border-red-100 rounded-2xl p-4 flex items-center gap-3 animate-pulse text-red-700">
-                <AlertCircle className="w-5 h-5 flex-shrink-0" />
-                <div className="flex flex-col">
-                  <span className="text-sm font-bold">Modo Offline Ativado</span>
-                  <span className="text-xs opacity-80">Você está offline. {unsyncedCount > 0 ? `${unsyncedCount} itens aguardando conexão.` : 'Os dados serão sincronizados automaticamente ao retornar.'}</span>
+              <div className="bg-rose-50 border border-rose-100 rounded-[2.5rem] p-6 flex flex-col md:flex-row items-center gap-6 animate-in zoom-in-95 duration-500 shadow-xl shadow-rose-500/5">
+                <div className="w-20 h-20 bg-white rounded-3xl flex items-center justify-center shadow-lg shadow-rose-500/10 shrink-0">
+                  <AlertCircle className="w-10 h-10 text-rose-500" />
+                </div>
+                <div className="flex flex-col gap-1 text-center md:text-left">
+                  <span className="text-lg font-black text-rose-900 tracking-tight uppercase leading-none">Conectividade Interrompida</span>
+                  <span className="text-xs font-bold text-rose-600/70">O modo offline-first está mantendo seus dados salvos localmente. {unsyncedCount > 0 ? `Existem ${unsyncedCount} itens pendentes de sincronização.` : 'Tudo pronto para subir assim que a internet voltar.'}</span>
                 </div>
               </div>
             ) : (
-              <div className="flex flex-col items-center gap-2 py-4">
+              <div className="flex flex-col items-center gap-3 py-6 bg-slate-50/50 rounded-[2.5rem] border border-slate-100 mt-4 group">
                 <div className="flex items-center gap-2">
-                  <div className="w-2 h-2 rounded-full bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.5)]"></div>
-                  <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">
-                    {unsyncedCount > 0 ? `Sincronizando ${unsyncedCount} itens...` : 'Sincronizado com o servidor central'}
+                  <div className="w-2 h-2 rounded-full bg-emerald-500 shadow-[0_0_12px_#10b981] animate-pulse"></div>
+                  <span className="text-[10px] font-black text-slate-500 uppercase tracking-[0.2em] leading-none">
+                    {unsyncedCount > 0 ? `Sincronizando ${unsyncedCount} registros com a prefeitura...` : 'Nuvem e Dispositivo Sincronizados (100%)'}
                   </span>
                 </div>
                 {unsyncedCount > 0 && (
-                  <div className="w-48 h-1 bg-slate-100 rounded-full overflow-hidden">
-                    <div className="h-full bg-emerald-400 animate-progress origin-left"></div>
+                  <div className="w-64 h-1.5 bg-slate-200 rounded-full overflow-hidden shadow-inner translate-y-1">
+                    <div className="h-full bg-emerald-500 animate-progress origin-left rounded-full"></div>
                   </div>
                 )}
               </div>
@@ -193,22 +242,19 @@ export function Dashboard() {
     <div className="flex flex-col lg:flex-row min-h-screen bg-bg">
       {/* 📱 Mobile Header */}
       <div className="lg:hidden flex items-center justify-between p-4 bg-white border-b border-slate-100 sticky top-0 z-50">
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2" onClick={() => setActiveTab('home')}>
            <div className="w-8 h-8 bg-slate-900 rounded-lg flex items-center justify-center">
               <ShieldCheck className="w-5 h-5 text-white" />
            </div>
            <span className="font-black tracking-tighter text-slate-900 uppercase">PATRI-MV</span>
         </div>
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-2">
           <div className="flex items-center gap-1.5 px-2 py-1 bg-slate-50 rounded-full">
             <div className={cn("w-2 h-2 rounded-full animate-pulse", isOnline ? "bg-emerald-500" : "bg-rose-500")} />
             <span className="text-[10px] font-black text-slate-400">{isOnline ? "ON" : "OFF"}</span>
           </div>
-          <button onClick={() => setActiveTab('notifications')} className="relative p-2 text-slate-400">
-            <Bell className="w-6 h-6" />
-            {unreadNotifications > 0 && (
-              <span className="absolute top-2 right-2 w-2 h-2 bg-rose-500 rounded-full border-2 border-white" />
-            )}
+          <button onClick={signOut} className="p-2 text-rose-500">
+            <LogOut className="w-5 h-5" />
           </button>
         </div>
       </div>
@@ -259,20 +305,41 @@ export function Dashboard() {
       <main className="flex-1 flex flex-col min-w-0">
         {/* Desktop Header */}
         <header className="hidden lg:flex items-center justify-between px-12 py-8 bg-bg/80 backdrop-blur-sm sticky top-0 z-30">
-          <div className="flex flex-col">
-            <h2 className="text-2xl font-black text-slate-900 tracking-tight">
-              {activeTab === 'home' ? `Olá, ${user?.name.split(' ')[0]}` : activeTab.charAt(0).toUpperCase() + activeTab.slice(1)}
-            </h2>
-            <p className="text-slate-400 text-sm font-medium">Benvindo ao painel de gestão patrimonial.</p>
+          <div className="flex items-center gap-6">
+            {activeTab !== 'home' && (
+              <button 
+                onClick={() => setActiveTab('home')}
+                className="w-12 h-12 bg-white border border-slate-100 rounded-2xl flex items-center justify-center text-slate-400 hover:text-slate-900 hover:shadow-lg transition-all"
+                title="Voltar ao Início"
+              >
+                <Home className="w-6 h-6" />
+              </button>
+            )}
+            <div className="flex flex-col">
+              <h2 className="text-2xl font-black text-slate-900 tracking-tight leading-none">
+                {activeTab === 'home' ? `Olá, ${user?.name.split(' ')[0]}` : activeTab.charAt(0).toUpperCase() + activeTab.slice(1)}
+              </h2>
+              <p className="text-slate-400 text-[10px] font-black uppercase tracking-widest mt-1">Painel Governamental • Manoel Viana</p>
+            </div>
           </div>
           
           <div className="flex items-center gap-6">
-             <div className="flex items-center gap-2 px-4 py-2 bg-white border border-slate-100 rounded-full shadow-sm">
-                <div className={cn("w-2 h-2 rounded-full", isOnline ? "bg-emerald-500 shadow-[0_0_8px_#10b981]" : "bg-rose-500")} />
-                <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest leading-none">{isOnline ? "Sistema Online" : "Modo Offline"}</span>
+             <div className="flex items-center gap-3 pr-6 border-r border-slate-200">
+                <div className="flex flex-col items-end leading-none">
+                   <span className="text-[10px] font-black text-slate-900 uppercase tracking-tighter shrink-0">{user?.name}</span>
+                   <span className="text-[8px] font-bold text-slate-400 uppercase tracking-widest mt-1">{user?.role}</span>
+                </div>
+                <div className="w-10 h-10 bg-slate-900 rounded-xl flex items-center justify-center text-white">
+                   <UserIcon className="w-5 h-5" />
+                </div>
              </div>
 
-             <button onClick={() => setActiveTab('notifications')} className="relative p-2 text-slate-400 hover:text-slate-900 transition-colors">
+             <div className="flex items-center gap-2 px-4 py-2 bg-white border border-slate-100 rounded-full shadow-sm">
+                <div className={cn("w-2 h-2 rounded-full", isOnline ? "bg-emerald-500 shadow-[0_0_8px_#10b981]" : "bg-rose-500")} />
+                <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest leading-none">{isOnline ? "Conectado" : "Offline"}</span>
+             </div>
+
+             <button onClick={() => setActiveTab('notifications')} className="relative w-12 h-12 flex items-center justify-center bg-white border border-slate-100 rounded-2xl text-slate-400 hover:text-slate-900 transition-all hover:bg-slate-50">
                <Bell className="w-6 h-6" />
                {unreadNotifications > 0 && (
                  <span className="absolute top-2 right-2 w-4 h-4 bg-rose-500 text-[10px] text-white flex items-center justify-center rounded-full border-2 border-white font-bold">
