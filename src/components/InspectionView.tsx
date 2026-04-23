@@ -11,6 +11,8 @@ import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import { compressImage } from '../lib/image';
 import { pushLocalChanges, syncInspection } from '../lib/syncService';
+import { db as firestore } from '../lib/firebase';
+import { doc, deleteDoc } from 'firebase/firestore';
 
 export function InspectionView({ id, onBack }: { id: string, onBack: () => void }) {
   const { user } = useAuth();
@@ -164,6 +166,7 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
 
     try {
       await db.assets.delete(assetId);
+      try { await deleteDoc(doc(firestore, 'assets', assetId)); } catch(e) {}
       setConfirmDeleteId(null);
     } catch (err: any) {
       console.error("Erro ao deletar item:", err);
@@ -879,8 +882,8 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
           {assets?.filter(asset => 
-            asset.name.toLowerCase().includes(searchTermAssets.toLowerCase()) || 
-            asset.patrimonyNumber?.toLowerCase().includes(searchTermAssets.toLowerCase())
+            (asset.name || '').toLowerCase().includes(searchTermAssets.toLowerCase()) || 
+            (asset.patrimonyNumber || '').toLowerCase().includes(searchTermAssets.toLowerCase())
           ).map(asset => (
             <Card key={asset.id} className="flex flex-col gap-4 group hover:border-slate-300 transition-all duration-300 rounded-[2rem] p-7 relative">
               {!isLocked && (

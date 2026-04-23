@@ -57,14 +57,17 @@ export function setupSync() {
 
 // Push local changes to cloud
 export async function pushLocalChanges() {
-  const unsyncedAssets = await dexie.assets.where('needsSync').equals(1).toArray();
+  const allAssets = await dexie.assets.toArray();
+  const unsyncedAssets = allAssets.filter(a => a.needsSync === true);
   if (unsyncedAssets.length === 0) return;
+
+  window.dispatchEvent(new CustomEvent('app-sync-start'));
 
   try {
     const batch = writeBatch(firestore);
     for (const asset of unsyncedAssets) {
-      const { id, needsSync, ...data } = asset;
-      const assetRef = doc(firestore, 'assets', id);
+      const { needsSync, ...data } = asset;
+      const assetRef = doc(firestore, 'assets', asset.id);
       batch.set(assetRef, data);
     }
   
@@ -72,8 +75,14 @@ export async function pushLocalChanges() {
     
     // Mark as synced locally
     await dexie.assets.where('id').anyOf(unsyncedAssets.map(a => a.id)).modify({ needsSync: false as any });
+    
+    // Add small delay for UI polish
+    setTimeout(() => {
+      window.dispatchEvent(new CustomEvent('app-sync-end', { detail: { success: true } }));
+    }, 800);
   } catch (error) {
     handleFirestoreError(error, 'write', 'assets/batch');
+    window.dispatchEvent(new CustomEvent('app-sync-end', { detail: { success: false } }));
   }
 }
 
@@ -81,10 +90,13 @@ export async function pushLocalChanges() {
 export async function syncInspection(inspectionId: string) {
   const inspection = await dexie.inspections.get(inspectionId);
   if (inspection) {
+    window.dispatchEvent(new CustomEvent('app-sync-start'));
     try {
       await setDoc(doc(firestore, 'inspections', inspection.id), inspection);
+      setTimeout(() => window.dispatchEvent(new CustomEvent('app-sync-end', { detail: { success: true } })), 800);
     } catch (error) {
       handleFirestoreError(error, 'write', `inspections/${inspectionId}`);
+      window.dispatchEvent(new CustomEvent('app-sync-end', { detail: { success: false } }));
     }
   }
 }
@@ -92,10 +104,13 @@ export async function syncInspection(inspectionId: string) {
 export async function syncLocation(locationId: string) {
   const location = await dexie.locations.get(locationId);
   if (location) {
+    window.dispatchEvent(new CustomEvent('app-sync-start'));
     try {
       await setDoc(doc(firestore, 'locations', location.id), location);
+      setTimeout(() => window.dispatchEvent(new CustomEvent('app-sync-end', { detail: { success: true } })), 800);
     } catch (error) {
       handleFirestoreError(error, 'write', `locations/${locationId}`);
+      window.dispatchEvent(new CustomEvent('app-sync-end', { detail: { success: false } }));
     }
   }
 }

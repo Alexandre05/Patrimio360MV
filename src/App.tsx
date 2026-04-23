@@ -9,8 +9,14 @@ import { Dashboard } from './components/Dashboard';
 import { Card, Button, Input } from './components/UI';
 import { Building2, LogIn, ShieldCheck } from 'lucide-react';
 import { seedDatabase } from './lib/seed';
+import { db } from './lib/db';
+import { db as firestore } from './lib/firebase';
+import { doc, deleteDoc } from 'firebase/firestore';
 
 import { UserPlus, UserCheck } from 'lucide-react';
+
+const params = new URLSearchParams(window.location.search);
+const publicViewId = params.get('view');
 
 function SetupScreen() {
   const { signUp } = useAuth();
@@ -190,19 +196,43 @@ function LoginScreen() {
 
 function Main() {
   const { user, loading, isFirstUser } = useAuth();
-  const [publicInspectionId, setPublicInspectionId] = useState<string | null>(null);
 
   useEffect(() => {
     seedDatabase().catch(err => {
       console.error("Erro ao inicializar banco de dados:", err);
     });
-
-    const params = new URLSearchParams(window.location.search);
-    const viewId = params.get('view');
-    if (viewId) {
-      setPublicInspectionId(viewId);
-    }
   }, []);
+
+  // Tarefa de limpeza invisível (Limpar concluídas com 0 itens)
+  useEffect(() => {
+    async function cleanupEmptyInspections() {
+      if (!user) return; // run when authenticated
+      try {
+        const allInspections = await db.inspections.toArray();
+        const completed = allInspections.filter(i => i.status === 'concluida' || i.status === 'finalizada');
+        
+        for (const insp of completed) {
+          const count = await db.assets.where('inspectionId').equals(insp.id).count();
+          if (count === 0) {
+            console.log(`Removendo vistoria órfã/vazia: ${insp.id}`);
+            await db.inspections.delete(insp.id);
+            try { await deleteDoc(doc(firestore, 'inspections', insp.id)); } catch(e){}
+          }
+        }
+      } catch (err) {
+        console.error("Erro na limpeza automática:", err);
+      }
+    }
+    cleanupEmptyInspections();
+  }, [user]);
+
+  // Se tem public view ID na URL, ignora qualquer auth loading e mostra direto.
+  if (publicViewId) {
+    return <PublicView id={publicViewId} onBack={() => {
+      window.history.replaceState({}, '', window.location.pathname);
+      window.location.reload();
+    }} />;
+  }
 
   if (loading) {
     return (
@@ -215,13 +245,6 @@ function Main() {
     );
   }
 
-  if (publicInspectionId) {
-    return <PublicView id={publicInspectionId} onBack={() => {
-      setPublicInspectionId(null);
-      window.history.replaceState({}, '', window.location.pathname);
-    }} />;
-  }
-
   if (isFirstUser) return <SetupScreen />;
 
   return user ? <Dashboard /> : <LoginScreen />;
@@ -229,10 +252,13 @@ function Main() {
 
 import { InspectionPublicView as PublicView } from './components/InspectionPublicView';
 
+import { SyncToast } from './components/UI';
+
 export default function App() {
   return (
     <AuthProvider>
       <Main />
+      <SyncToast />
     </AuthProvider>
   );
 }

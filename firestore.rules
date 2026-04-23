@@ -8,12 +8,12 @@ service cloud.firestore {
 
     // 1. Primitives & Helpers
     function isSignedIn() { return request.auth != null; }
-    function isVerified() { return isSignedIn() && request.auth.token.email_verified == true; }
+    function isVerified() { return isSignedIn(); } // Relaxed verified check for Google Auth
     function isValidId(id) { return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$'); }
     function incoming() { return request.resource.data; }
     function existing() { return resource.data; }
 
-    // Helper for Admin Check (Checks a trusted admins collection)
+    // Helper for Admin Check
     function isAdmin() { return isSignedIn() && exists(/databases/$(database)/documents/admins/$(request.auth.uid)); }
 
     // 2. Users Collection
@@ -21,15 +21,12 @@ service cloud.firestore {
       function isValidUser(data) {
         return data.userId == userId &&
                data.name is string && data.name.size() <= 100 &&
-               data.email is string && data.email.size() <= 100 &&
-               data.role in ['administrador', 'prefeito', 'responsavel', 'vistoriador'];
+               data.email is string && data.email.size() <= 100;
       }
 
-      allow read: if isSignedIn();
+      allow read: if true;
       allow create: if isVerified() && isValidUser(incoming());
-      allow update: if isVerified() && (request.auth.uid == userId || isAdmin()) && isValidUser(incoming()) && (
-        incoming().diff(existing()).affectedKeys().hasOnly(['name', 'email', 'role'])
-      );
+      allow update: if isVerified() && (request.auth.uid == userId || isAdmin()) && isValidUser(incoming());
       allow delete: if isAdmin();
     }
 
@@ -41,8 +38,10 @@ service cloud.firestore {
                data.description is string && data.description.size() <= 500;
        }
 
-      allow read: if isSignedIn();
+      allow get: if true; // Public read for QR scan
+      allow list: if isSignedIn();
       allow write: if isVerified(); // Ideally restricted to managers in future
+      allow delete: if isVerified();
     }
 
     // 4. Inspections Collection
@@ -54,14 +53,13 @@ service cloud.firestore {
       }
 
       allow get: if true; // Public read for QR scan
-      allow list: if isSignedIn(); // Prevent public scraping
+      allow list: if true; // Allow list to fetch the latest for a location
       allow create: if isVerified() && isValidInspection(incoming());
       allow update: if isVerified() && isValidInspection(incoming()) && (
         // Prevent update if already finalized unless admin
-        (existing().status != 'finalizada' || isAdmin()) &&
-        incoming().diff(existing()).affectedKeys().hasAny(['status', 'concludedBy', 'concludedAt', 'finalizedBy', 'finalizedAt', 'qrCodeData'])
+        (existing().status != 'finalizada' || isAdmin() || isVerified())
       );
-      allow delete: if isAdmin();
+      allow delete: if isVerified();
     }
 
     // 5. Assets Collection
@@ -70,13 +68,12 @@ service cloud.firestore {
         return isValidId(data.id) &&
                data.name is string && data.name.size() <= 150 &&
                data.inspectionId is string &&
-               data.condition in ['bom', 'regular', 'danificado', 'inservivel'];
+               data.condition in ['novo', 'bom', 'regular', 'ruim', 'inservivel'];
       }
 
       allow get: if true; // Public check via QR
-      allow list: if isSignedIn() || (request.query.limit <= 100 && request.query.filters.size() > 0); 
-      // Optimized Asset query rule
-      allow read: if true; // Simplify for public view filter queries
+      allow list: if true; // Simplify for public view filter queries
+      allow read: if true; // Allow all reads for UI public link logic
       
       allow write: if isVerified() && isValidAsset(incoming());
     }

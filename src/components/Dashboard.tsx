@@ -1,7 +1,7 @@
 import React, { useState, useEffect, ChangeEvent } from 'react';
 import { useAuth } from '../lib/AuthContext';
 import { useOnlineStatus } from '../lib/hooks';
-import { Card, Button, Input } from './UI';
+import { Card, Button, Input, ErrorBoundary } from './UI';
 import { 
   Building2, 
   ClipboardList, 
@@ -38,6 +38,8 @@ import { NotificationsView } from './NotificationsView';
 import { checkAndGenerateNotifications } from '../lib/NotificationService';
 import { cn } from '../lib/utils';
 import { setupSync, pushLocalChanges } from '../lib/syncService';
+import { db as firestore } from '../lib/firebase';
+import { doc, deleteDoc } from 'firebase/firestore';
 
 export function Dashboard() {
   const { user, signOut } = useAuth();
@@ -52,7 +54,7 @@ export function Dashboard() {
   const concludedInspectionsCount = useLiveQuery(() => db.inspections.where('status').anyOf('concluida', 'finalizada').count());
   const totalAssetsCount = useLiveQuery(() => db.assets.count());
   const unreadNotifications = useLiveQuery(() => user ? db.notifications.where('targetUserId').equals(user.userId).and(n => !n.read).count() : 0, [user]);
-  const unsyncedCount = useLiveQuery(() => db.assets.where('needsSync').equals(1).count()) || 0;
+  const unsyncedCount = useLiveQuery(() => db.assets.filter(a => a.needsSync === true).count()) || 0;
   const isAdmin = user?.role === 'administrador' || user?.role === 'prefeito';
   const isManager = user?.role === 'administrador' || user?.role === 'responsavel' || user?.role === 'prefeito';
 
@@ -177,7 +179,15 @@ export function Dashboard() {
     if (selectedInspectionId) {
       return (
         <div className="animate-in fade-in slide-in-from-right-4 duration-500">
-           <InspectionView id={selectedInspectionId} onBack={() => setSelectedInspectionId(null)} />
+           <ErrorBoundary fallback={
+             <div className="p-10 text-center">
+               <h2 className="text-xl font-bold text-rose-500 mb-2">Erro ao carregar a vistoria</h2>
+               <p className="text-slate-500 mb-6">Ocorreu um erro inesperado ao tentar exibir esta vistoria.</p>
+               <Button onClick={() => setSelectedInspectionId(null)}>Voltar ao Início</Button>
+             </div>
+           }>
+             <InspectionView id={selectedInspectionId} onBack={() => setSelectedInspectionId(null)} />
+           </ErrorBoundary>
         </div>
       );
     }
@@ -205,6 +215,24 @@ export function Dashboard() {
                     <Button variant="accent" icon={Plus} onClick={() => setActiveTab('locations')} className="rounded-2xl px-10 h-14 uppercase tracking-widest font-black text-[10px] shadow-2xl shadow-blue-600/30">
                       Iniciar Vistoria
                     </Button>
+                    {isManager && (
+                      <button onClick={async () => {
+                        const allInspections = await db.inspections.toArray();
+                        let cleared = 0;
+                        for (const i of allInspections) {
+                           if (i.status === 'concluida' || i.status === 'finalizada') {
+                             const c = await db.assets.where('inspectionId').equals(i.id).count();
+                             if (c === 0) {
+                               await db.inspections.delete(i.id);
+                               try { await deleteDoc(doc(firestore, 'inspections', i.id)); } catch(e){}
+                               cleared++;
+                             }
+                           }
+                        }
+                        if (cleared > 0) window.location.reload();
+                        else alert('Nenhuma vistoria vazia encontrada.');
+                      }} className="text-[10px] font-black uppercase text-slate-400 hover:text-rose-500 transition-colors underline underline-offset-4">Limpar Fantasmas</button>
+                    )}
                     <div className="hidden sm:flex items-center gap-3 px-6 py-4 bg-white/5 border border-white/10 rounded-2xl backdrop-blur-sm">
                       <Clock className="w-5 h-5 text-slate-500" />
                       <div className="flex flex-col leading-none">
@@ -532,30 +560,56 @@ export function Dashboard() {
 
       {/* 🚀 Main Content */}
       <main className="flex-1 flex flex-col min-w-0">
-        {/* Desktop Header */}
+        {/* 🗺️ Universal Header with Breadcrumbs */}
         <header className={cn(
-          "hidden lg:flex items-center justify-between px-12 py-8 bg-bg/80 backdrop-blur-sm sticky top-0 z-30 transition-all",
+          "flex items-center justify-between px-6 lg:px-12 py-6 lg:py-8 bg-bg/80 backdrop-blur-xl sticky top-0 z-30 transition-all",
           selectedInspectionId ? "pb-4" : ""
         )}>
-          <div className="flex items-center gap-6">
+          <div className="flex items-center gap-4 lg:gap-6 w-full lg:w-auto">
             {(activeTab !== 'home' || selectedInspectionId) && (
               <button 
                 onClick={() => handleTabChange('home')}
-                className="w-12 h-12 bg-white border border-slate-100 rounded-2xl flex items-center justify-center text-slate-400 hover:text-slate-900 hover:shadow-lg transition-all"
+                className="w-10 h-10 lg:w-12 lg:h-12 shrink-0 bg-white border border-slate-100 rounded-[1rem] lg:rounded-2xl flex items-center justify-center text-slate-400 hover:text-slate-900 hover:shadow-lg hover:border-slate-300 transition-all active:scale-95"
                 title="Voltar ao Início"
               >
-                <Home className="w-6 h-6" />
+                <Home className="w-5 h-5 lg:w-6 lg:h-6" />
               </button>
             )}
-            <div className="flex flex-col">
-              <h2 className="text-2xl font-black text-slate-900 tracking-tight leading-none">
-                {selectedInspectionId ? "Detalhes da Vistoria" : activeTab === 'home' ? `Olá, ${user?.name.split(' ')[0]}` : activeTab.charAt(0).toUpperCase() + activeTab.slice(1)}
+            <div className="flex flex-col min-w-0">
+              <div className="flex items-center gap-2 mb-1.5 overflow-x-auto no-scrollbar mask-fade-right pr-4">
+                <span 
+                  onClick={() => handleTabChange('home')}
+                  className="text-[9px] lg:text-[10px] font-black text-slate-400 hover:text-blue-600 uppercase tracking-widest cursor-pointer transition-colors shrink-0"
+                >
+                  Dashboard
+                </span>
+                {activeTab !== 'home' && (
+                  <>
+                    <ArrowRight className="w-3 h-3 text-slate-300 shrink-0" />
+                    <span 
+                      onClick={() => setSelectedInspectionId(null)}
+                      className={cn("text-[9px] lg:text-[10px] font-black uppercase tracking-widest cursor-pointer transition-colors shrink-0", selectedInspectionId ? "text-slate-400 hover:text-blue-600" : "text-blue-600")}
+                    >
+                      {activeTab === 'locations' ? 'Ambientes' : activeTab === 'inspections' ? 'Vistorias' : activeTab === 'reports' ? 'Auditoria' : activeTab === 'users' ? 'Equipe' : activeTab === 'settings' ? 'Global' : activeTab === 'notifications' ? 'Alertas' : activeTab}
+                    </span>
+                  </>
+                )}
+                {selectedInspectionId && (
+                  <>
+                    <ArrowRight className="w-3 h-3 text-slate-300 shrink-0" />
+                    <span className="text-[9px] lg:text-[10px] font-black text-blue-600 uppercase tracking-widest shrink-0 truncate">
+                      Modo Inspeção
+                    </span>
+                  </>
+                )}
+              </div>
+              <h2 className="text-xl lg:text-3xl font-black text-slate-900 tracking-tighter leading-none truncate">
+                {selectedInspectionId ? "Auditoria de Ambiente" : activeTab === 'home' ? `Olá, ${user?.name.split(' ')[0]}` : activeTab === 'locations' ? 'Registro de Ambientes' : activeTab === 'inspections' ? 'Dossiê de Vistorias' : activeTab === 'reports' ? 'Painel de Transparência' : activeTab === 'users' ? 'Gestão de Agentes' : activeTab === 'settings' ? 'Configurações de Instância' : activeTab === 'notifications' ? 'Centro de Controle' : activeTab}
               </h2>
-              <p className="text-slate-400 text-[10px] font-black uppercase tracking-widest mt-1">Painel Governamental • Manoel Viana</p>
             </div>
           </div>
           
-          <div className="flex items-center gap-6">
+          <div className="hidden lg:flex items-center gap-6 shrink-0">
              <div className="flex items-center gap-3 pr-6 border-r border-slate-200">
                 <div className="flex flex-col items-end leading-none">
                    <span className="text-[10px] font-black text-slate-900 uppercase tracking-tighter shrink-0">{user?.name}</span>

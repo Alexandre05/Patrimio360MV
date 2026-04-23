@@ -1,6 +1,70 @@
-import React, { ReactNode } from 'react';
-import { LucideIcon } from 'lucide-react';
+import React, { ReactNode, Component, useState, useEffect } from 'react';
+import { LucideIcon, CloudUpload, CheckCircle2, AlertCircle } from 'lucide-react';
 import { cn } from '../lib/utils';
+
+export function SyncToast() {
+  const [status, setStatus] = useState<'idle' | 'syncing' | 'success' | 'error'>('idle');
+
+  useEffect(() => {
+    const handleStart = () => setStatus('syncing');
+    const handleEnd = (e: any) => {
+      setStatus(e.detail?.success ? 'success' : 'error');
+      setTimeout(() => setStatus('idle'), 3000);
+    };
+
+    window.addEventListener('app-sync-start', handleStart);
+    window.addEventListener('app-sync-end', handleEnd);
+    return () => {
+      window.removeEventListener('app-sync-start', handleStart);
+      window.removeEventListener('app-sync-end', handleEnd);
+    };
+  }, []);
+
+  if (status === 'idle') return null;
+
+  return (
+    <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-[100] animate-in slide-in-from-bottom-5 fade-in duration-300">
+      <div className={cn(
+        "flex items-center gap-3 px-6 py-3 rounded-full border shadow-2xl backdrop-blur-md transition-all duration-500",
+        status === 'syncing' ? "bg-slate-900/90 border-slate-700 text-white" :
+        status === 'success' ? "bg-emerald-500/90 border-emerald-400 text-white" :
+        "bg-rose-500/90 border-rose-400 text-white"
+      )}>
+        {status === 'syncing' && <CloudUpload className="w-5 h-5 animate-pulse" />}
+        {status === 'success' && <CheckCircle2 className="w-5 h-5 animate-in zoom-in" />}
+        {status === 'error' && <AlertCircle className="w-5 h-5 animate-in zoom-in" />}
+        
+        <span className="font-bold text-xs uppercase tracking-widest whitespace-nowrap">
+          {status === 'syncing' && "Sincronizando com a Nuvem..."}
+          {status === 'success' && "Nuvem Atualizada"}
+          {status === 'error' && "Falha na Sincronização"}
+        </span>
+      </div>
+    </div>
+  );
+}
+
+export class ErrorBoundary extends Component<{children: ReactNode, fallback?: ReactNode}, {hasError: boolean, error: any}> {
+  constructor(props: any) {
+    super(props);
+    this.state = { hasError: false, error: null };
+  }
+  static getDerivedStateFromError(error: any) {
+    return { hasError: true, error };
+  }
+  render() {
+    if (this.state.hasError) {
+      return this.props.fallback || (
+        <div className="p-8 text-center text-rose-500 bg-white m-4 rounded-xl shadow-lg border border-rose-100">
+          <h2 className="text-xl font-bold mb-2">Erro de Renderização</h2>
+          <p className="text-sm border p-4 bg-rose-50 rounded-lg">{String(this.state.error?.message || this.state.error)}</p>
+          <p className="text-xs mt-2 text-rose-400">{String(this.state.error?.stack)}</p>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
 
 interface CardProps {
   children: ReactNode;

@@ -44,10 +44,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const checkFirstUser = async () => {
-    // We check both local and firestore for first user logic
-    const q = query(collection(firestore, 'users'));
-    const snapshot = await getDocs(q);
-    setIsFirstUser(snapshot.empty);
+    try {
+      const q = query(collection(firestore, 'users'));
+      const snapshot = await getDocs(q);
+      setIsFirstUser(snapshot.empty);
+    } catch (e) {
+      console.warn("Could not check users count. Defaulting to login.", e);
+      setIsFirstUser(false); 
+    }
   };
 
   const signIn = async (email?: string) => {

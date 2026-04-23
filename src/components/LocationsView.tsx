@@ -5,6 +5,9 @@ import { db, generateId, Inspection } from '../lib/db';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { cn, formatDate } from '../lib/utils';
 import { useAuth } from '../lib/AuthContext';
+import { syncLocation, syncInspection, pushLocalChanges } from '../lib/syncService';
+import { db as firestore } from '../lib/firebase';
+import { doc, deleteDoc } from 'firebase/firestore';
 
 export function LocationsView({ onSelectInspection }: { onSelectInspection: (id: string) => void }) {
   const { user } = useAuth();
@@ -61,7 +64,13 @@ export function LocationsView({ onSelectInspection }: { onSelectInspection: (id:
       }
     }
 
-    // 2. Criar nova única v2
+    // 2. Clone assets from the last "finalizada" inspection for this location
+    const history = await db.inspections.where('locationId').equals(locationId).toArray();
+    const lastFinalized = history
+      .filter(i => i.status === 'finalizada')
+      .sort((a, b) => b.date - a.date)[0];
+
+    // 3. Criar nova única v2
     const id = generateId();
     await db.inspections.add({
       id,
@@ -70,16 +79,38 @@ export function LocationsView({ onSelectInspection }: { onSelectInspection: (id:
       participants: [],
       status: 'em_andamento'
     });
+    try { await syncInspection(id); } catch(e) { console.error(e) }
+
+    // 4. Herança de Patrimônio: Inject assets into the new inspection
+    if (lastFinalized) {
+      const previousAssets = await db.assets.where('inspectionId').equals(lastFinalized.id).toArray();
+      if (previousAssets.length > 0) {
+        const clonedAssets = previousAssets.map(asset => ({
+          ...asset, // Copy general properties
+          id: generateId(),
+          inspectionId: id, // Point to the new inspection
+          createdBy: user?.userId || 'sistema',
+          createdAt: Date.now(),
+          needsSync: true
+        }));
+        await db.assets.bulkAdd(clonedAssets);
+        // Trigger background sync for these new assets
+        pushLocalChanges();
+      }
+    }
+
     onSelectInspection(id);
   };
 
   const handleAddLocation = async () => {
     if (!newLoc.name.trim()) return;
+    const locId = generateId();
     await db.locations.add({
-      id: generateId(),
+      id: locId,
       name: newLoc.name,
       description: newLoc.description
     });
+    try { await syncLocation(locId); } catch(e) { console.error("Sync error", e) }
     setNewLoc({ name: '', description: '' });
     setIsAdding(false);
   };
@@ -106,9 +137,13 @@ export function LocationsView({ onSelectInspection }: { onSelectInspection: (id:
 
     // Excluir vistorias vazias primeiro
     if (inspectionIds.length > 0) {
+      for (const invId of inspectionIds) {
+        try { await deleteDoc(doc(firestore, 'inspections', invId)); } catch(e) {}
+      }
       await db.inspections.bulkDelete(inspectionIds);
     }
     // Excluir o local
+    try { await deleteDoc(doc(firestore, 'locations', locId)); } catch(e) {}
     await db.locations.delete(locId);
     setDeleteConfirmId(null);
   };
@@ -124,6 +159,7 @@ export function LocationsView({ onSelectInspection }: { onSelectInspection: (id:
         return;
       }
 
+      try { await deleteDoc(doc(firestore, 'inspections', inspectionId)); } catch(e) {}
       await db.inspections.delete(inspectionId);
       setDeleteInspectionConfirmId(null);
     } catch (err) {
