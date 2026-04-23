@@ -12,7 +12,7 @@ export function UsersView() {
   const [formData, setFormData] = useState<Partial<User>>({
     name: '',
     email: '',
-    role: 'membro',
+    role: 'vistoriador',
     cargo: '',
     status: 'ativo'
   });
@@ -55,7 +55,7 @@ export function UsersView() {
     setFormData({
       name: '',
       email: '',
-      role: 'membro',
+      role: 'vistoriador',
       cargo: '',
       status: 'ativo'
     });
@@ -117,9 +117,9 @@ export function UsersView() {
                 value={formData.role}
                 onChange={e => setFormData({ ...formData, role: e.target.value as User['role'] })}
                 options={[
-                  { value: 'membro', label: 'Vistoriador (Comissão)' },
+                  { value: 'vistoriador', label: 'Vistoriador (Comissão)' },
                   { value: 'responsavel', label: 'Responsável (Patrimônio)' },
-                  { value: 'prefeito', label: 'Administrador Geral (Prefeito)' },
+                  { value: 'administrador', label: 'Administrador Geral' },
                 ]}
               />
             </div>
@@ -140,10 +140,10 @@ export function UsersView() {
              <div className="w-16 h-16 bg-slate-50 border border-slate-100 rounded-[1.5rem] flex items-center justify-center text-slate-400 group-hover:bg-slate-900 group-hover:text-white transition-all duration-500 font-black text-xl uppercase shadow-inner">
                {u.name.charAt(0)}
              </div>
-             <div className="flex-1 flex flex-col min-w-0">
+              <div className="flex-1 flex flex-col min-w-0">
                 <div className="flex items-center gap-2">
                   <span className="font-black text-slate-900 tracking-tight text-lg line-clamp-1">{u.name}</span>
-                  {u.role === 'prefeito' && <ShieldCheck className="w-4 h-4 text-slate-900 shrink-0" />}
+                  {u.role === 'administrador' && <ShieldCheck className="w-4 h-4 text-slate-900 shrink-0" />}
                 </div>
                 <div className="flex flex-col text-[10px] font-bold text-slate-400 uppercase tracking-widest mt-1">
                   <span className="flex items-center gap-1.5"><Mail className="w-3 h-3" /> {u.email}</span>
@@ -153,11 +153,11 @@ export function UsersView() {
              <div className="flex flex-col items-end gap-3">
                 <div className={cn(
                   "text-[9px] font-black uppercase px-3 py-1 rounded-full border shadow-sm",
-                  u.role === 'prefeito' ? "bg-slate-900 text-white border-slate-900" : 
+                  u.role === 'administrador' ? "bg-slate-900 text-white border-slate-900" : 
                   u.role === 'responsavel' ? "bg-blue-50 text-blue-700 border-blue-100" :
                   "bg-slate-50 text-slate-600 border-slate-100"
                 )}>
-                  {u.role === 'prefeito' ? 'Administrador' : u.role === 'responsavel' ? 'Responsável' : 'Vistoriador'}
+                  {u.role === 'administrador' ? 'Administrador' : u.role === 'responsavel' ? 'Responsável' : 'Vistoriador'}
                 </div>
                 <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
                    <button onClick={() => handleEdit(u)} className="p-2 text-slate-300 hover:text-slate-900 hover:bg-slate-50 rounded-xl transition-all">

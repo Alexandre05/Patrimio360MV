@@ -18,6 +18,7 @@ import {
   PlayCircle, 
   Eye, 
   ArrowRight,
+  ArrowLeft,
   ShieldCheck,
   Home,
   User as UserIcon,
@@ -48,7 +49,8 @@ export function Dashboard() {
   const totalAssetsCount = useLiveQuery(() => db.assets.count());
   const unreadNotifications = useLiveQuery(() => user ? db.notifications.where('targetUserId').equals(user.userId).and(n => !n.read).count() : 0, [user]);
   const unsyncedCount = useLiveQuery(() => db.assets.where('needsSync').equals(1).count()) || 0;
-  const isAdmin = user?.role === 'prefeito' || user?.role === 'responsavel';
+  const isAdmin = user?.role === 'administrador';
+  const isManager = user?.role === 'administrador' || user?.role === 'responsavel';
 
   useEffect(() => {
     if (user) {
@@ -62,7 +64,20 @@ export function Dashboard() {
     return <InspectionView id={selectedInspectionId} onBack={() => setSelectedInspectionId(null)} />;
   }
 
+  const handleTabChange = (tab: typeof activeTab) => {
+    setActiveTab(tab);
+    setSelectedInspectionId(null);
+  };
+
   const renderContent = () => {
+    if (selectedInspectionId) {
+      return (
+        <div className="animate-in fade-in slide-in-from-right-4 duration-500">
+           <InspectionView id={selectedInspectionId} onBack={() => setSelectedInspectionId(null)} />
+        </div>
+      );
+    }
+
     switch (activeTab) {
       case 'home':
         return (
@@ -228,7 +243,7 @@ export function Dashboard() {
           </div>
         );
       case 'reports':
-        return isAdmin ? <ReportsView /> : <div className="p-20 text-center text-slate-400 font-bold uppercase tracking-widest">Acesso restrito a administradores.</div>;
+        return isManager ? <ReportsView /> : <div className="p-20 text-center text-slate-400 font-bold uppercase tracking-widest">Acesso restrito.</div>;
       case 'users':
         return isAdmin ? <UsersView /> : <div className="p-20 text-center text-slate-400 font-bold uppercase tracking-widest">Acesso restrito a administradores.</div>;
       case 'notifications':
@@ -242,11 +257,20 @@ export function Dashboard() {
     <div className="flex flex-col lg:flex-row min-h-screen bg-bg">
       {/* 📱 Mobile Header */}
       <div className="lg:hidden flex items-center justify-between p-4 bg-white border-b border-slate-100 sticky top-0 z-50">
-        <div className="flex items-center gap-2" onClick={() => setActiveTab('home')}>
-           <div className="w-8 h-8 bg-slate-900 rounded-lg flex items-center justify-center">
-              <ShieldCheck className="w-5 h-5 text-white" />
-           </div>
-           <span className="font-black tracking-tighter text-slate-900 uppercase">PATRI-MV</span>
+        <div className="flex items-center gap-2">
+           {selectedInspectionId ? (
+             <button onClick={() => setSelectedInspectionId(null)} className="flex items-center gap-2 text-slate-900 font-black">
+                <ArrowLeft className="w-5 h-5 text-slate-400" /> 
+                <span className="text-xs uppercase tracking-widest text-slate-500">Detalhes</span>
+             </button>
+           ) : (
+             <div className="flex items-center gap-2" onClick={() => handleTabChange('home')}>
+                <div className="w-8 h-8 bg-slate-900 rounded-lg flex items-center justify-center">
+                   <ShieldCheck className="w-5 h-5 text-white" />
+                </div>
+                <span className="font-black tracking-tighter text-slate-900 uppercase">PATRI-MV</span>
+             </div>
+           )}
         </div>
         <div className="flex items-center gap-2">
           <div className="flex items-center gap-1.5 px-2 py-1 bg-slate-50 rounded-full">
@@ -272,13 +296,13 @@ export function Dashboard() {
         </div>
 
         <nav className="flex flex-col gap-2 flex-1">
-          <NavItem active={activeTab === 'home'} label="Início" icon={LayoutGrid} onClick={() => setActiveTab('home')} />
-          <NavItem active={activeTab === 'notifications'} label="Notificações" icon={Bell} onClick={() => setActiveTab('notifications')} badge={unreadNotifications || 0} />
-          <NavItem active={activeTab === 'inspections'} label="Vistorias" icon={ClipboardList} onClick={() => setActiveTab('inspections')} />
-          <NavItem active={activeTab === 'locations'} label="Localizações" icon={Building2} onClick={() => setActiveTab('locations')} />
-          {isAdmin && <NavItem active={activeTab === 'reports'} label="Relatórios" icon={BarChart3} onClick={() => setActiveTab('reports')} />}
+          <NavItem active={activeTab === 'home' && !selectedInspectionId} label="Início" icon={LayoutGrid} onClick={() => handleTabChange('home')} />
+          <NavItem active={activeTab === 'notifications'} label="Notificações" icon={Bell} onClick={() => handleTabChange('notifications')} badge={unreadNotifications || 0} />
+          <NavItem active={activeTab === 'inspections'} label="Vistorias" icon={ClipboardList} onClick={() => handleTabChange('inspections')} />
+          <NavItem active={activeTab === 'locations'} label="Localizações" icon={Building2} onClick={() => handleTabChange('locations')} />
+          {isManager && <NavItem active={activeTab === 'reports'} label="Relatórios" icon={BarChart3} onClick={() => handleTabChange('reports')} />}
           {isAdmin && (
-            <NavItem active={activeTab === 'users'} label="Membros" icon={Users} onClick={() => setActiveTab('users')} />
+            <NavItem active={activeTab === 'users'} label="Membros" icon={Users} onClick={() => handleTabChange('users')} />
           )}
         </nav>
 
@@ -304,11 +328,14 @@ export function Dashboard() {
       {/* 🚀 Main Content */}
       <main className="flex-1 flex flex-col min-w-0">
         {/* Desktop Header */}
-        <header className="hidden lg:flex items-center justify-between px-12 py-8 bg-bg/80 backdrop-blur-sm sticky top-0 z-30">
+        <header className={cn(
+          "hidden lg:flex items-center justify-between px-12 py-8 bg-bg/80 backdrop-blur-sm sticky top-0 z-30 transition-all",
+          selectedInspectionId ? "pb-4" : ""
+        )}>
           <div className="flex items-center gap-6">
-            {activeTab !== 'home' && (
+            {(activeTab !== 'home' || selectedInspectionId) && (
               <button 
-                onClick={() => setActiveTab('home')}
+                onClick={() => handleTabChange('home')}
                 className="w-12 h-12 bg-white border border-slate-100 rounded-2xl flex items-center justify-center text-slate-400 hover:text-slate-900 hover:shadow-lg transition-all"
                 title="Voltar ao Início"
               >
@@ -317,7 +344,7 @@ export function Dashboard() {
             )}
             <div className="flex flex-col">
               <h2 className="text-2xl font-black text-slate-900 tracking-tight leading-none">
-                {activeTab === 'home' ? `Olá, ${user?.name.split(' ')[0]}` : activeTab.charAt(0).toUpperCase() + activeTab.slice(1)}
+                {selectedInspectionId ? "Detalhes da Vistoria" : activeTab === 'home' ? `Olá, ${user?.name.split(' ')[0]}` : activeTab.charAt(0).toUpperCase() + activeTab.slice(1)}
               </h2>
               <p className="text-slate-400 text-[10px] font-black uppercase tracking-widest mt-1">Painel Governamental • Manoel Viana</p>
             </div>
@@ -357,22 +384,22 @@ export function Dashboard() {
 
       {/* 🤳 Mobile Bottom Tab Bar */}
       <nav className="fixed bottom-0 left-0 right-0 lg:hidden bg-white/80 backdrop-blur-xl border-t border-slate-100 flex items-center justify-around p-4 z-50">
-        <MobileNavItem active={activeTab === 'home'} icon={LayoutGrid} onClick={() => setActiveTab('home')} />
-        <MobileNavItem active={activeTab === 'inspections'} icon={ClipboardList} onClick={() => setActiveTab('inspections')} />
+        <MobileNavItem active={activeTab === 'home' && !selectedInspectionId} icon={LayoutGrid} onClick={() => handleTabChange('home')} />
+        <MobileNavItem active={activeTab === 'inspections'} icon={ClipboardList} onClick={() => handleTabChange('inspections')} />
         <div className="relative -top-6">
            <button 
-             onClick={() => setActiveTab('locations')}
+             onClick={() => handleTabChange('locations')}
              className="w-14 h-14 bg-slate-900 rounded-2xl flex items-center justify-center shadow-xl shadow-slate-900/30 text-white"
            >
              <Plus className="w-6 h-6" />
            </button>
         </div>
-        {isAdmin ? (
-          <MobileNavItem active={activeTab === 'reports'} icon={BarChart3} onClick={() => setActiveTab('reports')} />
+        {isManager ? (
+          <MobileNavItem active={activeTab === 'reports'} icon={BarChart3} onClick={() => handleTabChange('reports')} />
         ) : (
           <div className="w-11 h-11" /> // Placeholder to keep layout balanced if 5 items were expected
         )}
-        <MobileNavItem active={activeTab === 'notifications'} icon={Bell} onClick={() => setActiveTab('notifications')} />
+        <MobileNavItem active={activeTab === 'notifications'} icon={Bell} onClick={() => handleTabChange('notifications')} />
       </nav>
     </div>
   );

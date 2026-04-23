@@ -13,7 +13,7 @@ import { compressImage } from '../lib/image';
 
 export function InspectionView({ id, onBack }: { id: string, onBack: () => void }) {
   const { user } = useAuth();
-  const isAdmin = user?.role === 'prefeito' || user?.role === 'responsavel';
+  const isManager = user?.role === 'administrador' || user?.role === 'responsavel';
   const isOnline = useOnlineStatus();
   const inspection = useLiveQuery(() => db.inspections.get(id), [id]);
   const location = useLiveQuery(() => inspection ? db.locations.get(inspection.locationId) : undefined, [inspection]);
@@ -109,7 +109,7 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
   };
 
   const handleDeleteAsset = async (assetId: string) => {
-    if (!isAdmin) {
+    if (!isManager) {
       setError("Apenas administradores podem excluir itens registrados.");
       return;
     }
@@ -263,7 +263,7 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
   };
 
   const handleReopen = async () => {
-    if (!isAdmin) {
+    if (!isManager) {
       setError("Apenas administradores podem reabrir vistorias concluídas.");
       return;
     }
@@ -852,7 +852,7 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
                 </div>
               )}
               <div className="flex flex-col gap-2">
-                {isAdmin && (
+                {isManager && (
                   <Button 
                     variant="secondary"
                     className={cn(

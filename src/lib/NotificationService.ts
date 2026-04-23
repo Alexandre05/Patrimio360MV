@@ -34,8 +34,8 @@ export async function checkAndGenerateNotifications(userId: string) {
 
   // 2. Check for critical items (Alerts)
   // Assets marked as 'ruim' or 'inservivel' in the last 72 hours (3 days)
-  // Only sent to 'prefeito' (Mayor) and 'responsavel' (Asset Manager)
-  if (user.role === 'prefeito' || user.role === 'responsavel') {
+  // Only sent to 'administrador' and 'responsavel' (Asset Manager)
+  if (user.role === 'administrador' || user.role === 'responsavel') {
     const seventyTwoHoursAgo = now - (3 * 24 * 60 * 60 * 1000);
     const criticalAssets = await db.assets
       .where('createdAt')

@@ -10,8 +10,116 @@ import { Card, Button, Input } from './components/UI';
 import { Building2, LogIn, ShieldCheck } from 'lucide-react';
 import { seedDatabase } from './lib/seed';
 
+import { UserPlus, UserCheck } from 'lucide-react';
+
+function SetupScreen() {
+  const { signUp } = useAuth();
+  const [formData, setFormData] = useState({ 
+    name: '', 
+    email: '', 
+    cargo: 'Administrador Senior',
+    setupCode: ''
+  });
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setLoading(true);
+    setError('');
+
+    // Security check: 
+    // 1. Check if it matches the environment key
+    // 2. Or allow the specific dev email (henri199@gmail.com)
+    const expectedKey = (import.meta as any).env.VITE_SETUP_KEY || 'admin123';
+    const isDev = formData.email === 'henri199@gmail.com';
+    
+    if (formData.setupCode !== expectedKey && !isDev) {
+      setError('Chave de segurança inválida. Entre em contato com o administrador do servidor.');
+      setLoading(false);
+      return;
+    }
+
+    await signUp({
+      name: formData.name,
+      email: formData.email,
+      role: 'administrador',
+      status: 'ativo',
+      cargo: formData.cargo
+    });
+    setLoading(false);
+  };
+
+  return (
+    <div className="min-h-screen bg-slate-50 flex items-center justify-center p-6 bg-[radial-gradient(#e5e7eb_1px,transparent_1px)] [background-size:16px_16px]">
+      <Card className="w-full max-w-md p-10 flex flex-col items-center gap-8 shadow-2xl border-none ring-1 ring-slate-200">
+        <div className="flex flex-col items-center gap-4">
+          <div className="w-20 h-20 bg-blue-600 rounded-[2.5rem] flex items-center justify-center shadow-2xl shadow-blue-200 animate-bounce">
+            <UserPlus className="text-white w-10 h-10" />
+          </div>
+          <div className="text-center">
+            <h1 className="text-2xl font-black tracking-tighter text-slate-900 leading-none">PRIMEIRO ACESSO</h1>
+            <p className="text-slate-500 text-xs font-medium mt-3">Configuração do Administrador Mestre</p>
+          </div>
+        </div>
+
+        <form onSubmit={handleSubmit} className="w-full flex flex-col gap-5">
+          <div className="flex flex-col gap-4">
+            <Input 
+              label="Seu Nome Completo" 
+              placeholder="Ex: João da Silva"
+              required
+              value={formData.name}
+              onChange={e => setFormData({ ...formData, name: e.target.value })}
+            />
+            <Input 
+              label="Seu E-mail de Acesso" 
+              placeholder="Ex: joao@manoelviana.rs.gov.br"
+              type="email"
+              required
+              value={formData.email}
+              onChange={e => setFormData({ ...formData, email: e.target.value })}
+            />
+             <Input 
+              label="Seu Cargo" 
+              placeholder="Ex: Prefeito, Chefe de TI"
+              required
+              value={formData.cargo}
+              onChange={e => setFormData({ ...formData, cargo: e.target.value })}
+            />
+            <div className="relative">
+              <div className="absolute inset-x-0 -top-3 flex justify-center">
+                <span className="bg-white px-2 text-[9px] font-black text-blue-600 uppercase tracking-widest leading-none">Segurança</span>
+              </div>
+              <Input 
+                label="Chave de Ativação" 
+                placeholder="Código de segurança do sistema"
+                type="password"
+                required={formData.email !== 'henri199@gmail.com'}
+                value={formData.setupCode}
+                onChange={e => setFormData({ ...formData, setupCode: e.target.value })}
+                error={error}
+              />
+            </div>
+          </div>
+          
+          <Button type="submit" loading={loading} icon={UserCheck} className="h-14 text-lg bg-blue-600 hover:bg-blue-700 shadow-blue-200">
+            CRIAR CONTA ADMIN
+          </Button>
+        </form>
+
+        <div className="flex flex-col gap-2 text-[10px] font-bold text-slate-400 uppercase tracking-widest text-center">
+           A chave padrão é <code className="text-blue-600">admin123</code> (alterável nas configs do servidor).
+           <br />
+           Seu e-mail dev tem acesso automático.
+        </div>
+      </Card>
+    </div>
+  );
+}
+
 function LoginScreen() {
-  const { signIn } = useAuth();
+  const { signIn, isFirstUser } = useAuth();
   const [email, setEmail] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
@@ -65,15 +173,9 @@ function LoginScreen() {
            <div className="grid grid-cols-1 gap-2">
               <button 
                 onClick={() => setEmail('prefeito@exemplo.com')}
-                className="text-xs text-slate-400 hover:text-slate-900 font-bold p-2 text-left bg-slate-50 rounded-lg border border-transparent hover:border-slate-200 transition-all"
+                className="text-xs text-slate-400 hover:text-slate-900 font-bold p-2 text-left bg-slate-50 rounded-lg border border-transparent hover:border-slate-200 transition-all text-center"
               >
-                🔑 Prefeito (Gestão Total)
-              </button>
-              <button 
-                onClick={() => setEmail('comissao@exemplo.com')}
-                className="text-xs text-slate-400 hover:text-slate-900 font-bold p-2 text-left bg-slate-50 rounded-lg border border-transparent hover:border-slate-200 transition-all"
-              >
-                🔍 Comissão (Vistorias)
+                Pelo menos um Administrador deve ser cadastrado primeiro.
               </button>
            </div>
         </div>
@@ -87,7 +189,7 @@ function LoginScreen() {
 }
 
 function Main() {
-  const { user, loading } = useAuth();
+  const { user, loading, isFirstUser } = useAuth();
   const [publicInspectionId, setPublicInspectionId] = useState<string | null>(null);
 
   useEffect(() => {
@@ -119,6 +221,8 @@ function Main() {
       window.history.replaceState({}, '', window.location.pathname);
     }} />;
   }
+
+  if (isFirstUser) return <SetupScreen />;
 
   return user ? <Dashboard /> : <LoginScreen />;
 }
