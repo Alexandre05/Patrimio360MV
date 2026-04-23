@@ -39,14 +39,69 @@ import { checkAndGenerateNotifications } from '../lib/NotificationService';
 import { cn } from '../lib/utils';
 import { setupSync, pushLocalChanges } from '../lib/syncService';
 import { db as firestore } from '../lib/firebase';
-import { doc, deleteDoc } from 'firebase/firestore';
+import { doc, deleteDoc, getDoc } from 'firebase/firestore';
+import { ScannerView } from './ScannerView';
 
 export function Dashboard() {
   const { user, signOut } = useAuth();
-  const [activeTab, setActiveTab] = useState<'home' | 'inspections' | 'locations' | 'reports' | 'users' | 'settings' | 'notifications'>('home');
+  const [activeTab, setActiveTab] = useState<'home' | 'inspections' | 'locations' | 'reports' | 'users' | 'settings' | 'notifications' | 'scanner'>('home');
   const [selectedInspectionId, setSelectedInspectionId] = useState<string | null>(null);
+
+  const handleScannerOpen = (inspectionId: string, locationId: string) => {
+    if (inspectionId === 'NEW') {
+      const startNew = async () => {
+         const newId = crypto.randomUUID();
+         await db.inspections.put({
+            id: newId,
+            locationId: locationId,
+            date: Date.now(),
+            participants: [],
+            status: 'em_andamento'
+         });
+         setActiveTab('home');
+         setSelectedInspectionId(newId);
+      };
+      startNew();
+    } else {
+      setActiveTab('home');
+      setSelectedInspectionId(inspectionId);
+    }
+  };
   const [isResetting, setIsResetting] = useState(false);
   const isOnline = useOnlineStatus();
+
+  useEffect(() => {
+    const processScanned = async () => {
+      const scanned = sessionStorage.getItem('scanned_id');
+      if (scanned) {
+         sessionStorage.removeItem('scanned_id');
+         
+         const localInsp = await db.inspections.get(scanned);
+         if (localInsp) {
+            handleScannerOpen(scanned, localInsp.locationId);
+            return;
+         }
+
+         const inspRef = doc(firestore, 'inspections', scanned);
+         const inspSnap = await getDoc(inspRef);
+         if (inspSnap.exists()) {
+            const data = inspSnap.data() as Inspection;
+            await db.inspections.put({ id: inspSnap.id, ...data } as any);
+            handleScannerOpen(inspSnap.id, data.locationId);
+            return;
+         }
+
+         // If it's a location ID
+         const locRef = doc(firestore, 'locations', scanned);
+         const locSnap = await getDoc(locRef);
+         if (locSnap.exists()) {
+            handleScannerOpen('NEW', locSnap.id);
+            return;
+         }
+      }
+    };
+    processScanned();
+  }, []);
 
   const inspections = useLiveQuery(() => db.inspections.orderBy('date').reverse().limit(10).toArray());
   const locations = useLiveQuery(() => db.locations.toArray());
@@ -193,6 +248,8 @@ export function Dashboard() {
     }
 
     switch (activeTab) {
+      case 'scanner':
+        return <ScannerView onOpenInspection={handleScannerOpen} />;
       case 'home':
         return (
           <div className="flex flex-col gap-10 animate-in fade-in slide-in-from-bottom-4 duration-700">
@@ -214,6 +271,9 @@ export function Dashboard() {
                   <div className="flex flex-wrap items-center justify-center md:justify-start gap-4 mt-2">
                     <Button variant="accent" icon={Plus} onClick={() => setActiveTab('locations')} className="rounded-2xl px-10 h-14 uppercase tracking-widest font-black text-[10px] shadow-2xl shadow-blue-600/30">
                       Iniciar Vistoria
+                    </Button>
+                    <Button variant="secondary" onClick={() => setActiveTab('scanner')} className="rounded-2xl px-10 h-14 uppercase tracking-widest font-black text-[10px] border-white/20 text-white hover:bg-white/10 hover:text-white">
+                      Escanear QR Code
                     </Button>
                     {isManager && (
                       <button onClick={async () => {
@@ -529,6 +589,7 @@ export function Dashboard() {
 
         <nav className="flex flex-col gap-2 flex-1">
           <NavItem active={activeTab === 'home' && !selectedInspectionId} label="Início" icon={LayoutGrid} onClick={() => handleTabChange('home')} />
+          <NavItem active={activeTab === 'scanner'} label="Escanear Vistoria" icon={Search} onClick={() => handleTabChange('scanner')} />
           <NavItem active={activeTab === 'notifications'} label="Notificações" icon={Bell} onClick={() => handleTabChange('notifications')} badge={unreadNotifications || 0} />
           <NavItem active={activeTab === 'inspections'} label="Vistorias" icon={ClipboardList} onClick={() => handleTabChange('inspections')} />
           <NavItem active={activeTab === 'locations'} label="Localizações" icon={Building2} onClick={() => handleTabChange('locations')} />

@@ -291,14 +291,14 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
       const current = await db.inspections.get(id);
       if (!current) throw new Error("Vistoria não encontrada.");
 
-      const publicUrl = `${window.location.origin}${window.location.pathname}?view=${id}`;
+      const qrCodeDataPayload = `https://patrimv.web.app/vistoria/${id}`;
 
       await db.inspections.put({
         ...current,
         status: 'finalizada',
         finalizedBy: user.userId,
         finalizedAt: Date.now(),
-        qrCodeData: publicUrl
+        qrCodeData: qrCodeDataPayload
       });
       
       await syncInspection(id);

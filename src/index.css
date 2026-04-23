@@ -1,48 +1,74 @@
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap');
 @import "tailwindcss";
 
 @theme {
   --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
+  --font-display: "Outfit", ui-sans-serif, system-ui, sans-serif;
   --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
   
-  --color-primary: #0F172A;
-  --color-primary-light: #1E293B;
-  --color-accent: #2563EB;
-  --color-bg: #F8FAFC;
+  --color-primary: #09090B;
+  --color-primary-light: #27272A;
+  --color-accent: #18181B;
+  --color-bg: #FCFCFD;
   --color-card: #FFFFFF;
-  --color-border: #E2E8F0;
-  --color-text-muted: #64748B;
+  --color-border: #E4E4E7;
+  --color-text-muted: #71717A;
 }
 
 @layer base {
   body {
-    @apply bg-bg text-primary-light font-sans antialiased;
+    @apply bg-bg text-primary-light font-sans antialiased selection:bg-black selection:text-white;
+  }
+  h1, h2, h3, h4, h5, h6 {
+    @apply font-display tracking-tight text-primary;
   }
 }
 
 .glass-card {
-  @apply bg-white/80 backdrop-blur-md border border-white/20 shadow-xl;
+  @apply bg-white/70 backdrop-blur-xl border border-white/40 shadow-[0_8px_30px_rgb(0,0,0,0.04)] rounded-[2rem];
 }
 
 .bento-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
   gap: 1.5rem;
 }
 
 .stat-value {
-  @apply font-mono tracking-tighter;
+  @apply font-display font-light tracking-tighter text-black;
 }
 
 .no-scrollbar::-webkit-scrollbar {
   display: none;
 }
 .no-scrollbar {
-  -ms-overflow-style: none;  /* IE and Edge */
-  scrollbar-width: none;  /* Firefox */
+  -ms-overflow-style: none;
+  scrollbar-width: none;
 }
 
 .mask-fade-right {
   mask-image: linear-gradient(to right, black 80%, transparent 100%);
   -webkit-mask-image: linear-gradient(to right, black 80%, transparent 100%);
+}
+
+#qr-reader {
+  border: none !important;
+  border-radius: 1.5rem;
+  overflow: hidden;
+}
+
+#qr-reader__scan_region {
+  border-radius: 1rem;
+}
+
+#qr-reader button {
+  background-color: var(--color-primary);
+  color: white;
+  border: none;
+  padding: 0.75rem 1.5rem;
+  border-radius: 1rem;
+  font-family: var(--font-sans);
+  font-weight: 600;
+  cursor: pointer;
+  margin-top: 10px;
 }

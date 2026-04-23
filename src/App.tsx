@@ -15,8 +15,7 @@ import { doc, deleteDoc } from 'firebase/firestore';
 
 import { UserPlus, UserCheck } from 'lucide-react';
 
-const params = new URLSearchParams(window.location.search);
-const publicViewId = params.get('view');
+import { PublicInspectionView } from './components/PublicInspectionView';
 
 function SetupScreen() {
   const { signUp } = useAuth();
@@ -196,6 +195,14 @@ function LoginScreen() {
 
 function Main() {
   const { user, loading, isFirstUser } = useAuth();
+  const [scannedId, setScannedId] = useState<string | null>(() => {
+    const parts = window.location.pathname.split('/');
+    const vistoriaIndex = parts.indexOf('vistoria');
+    const routeViewId = vistoriaIndex !== -1 && parts[vistoriaIndex + 1] ? parts[vistoriaIndex + 1] : null;
+    const params = new URLSearchParams(window.location.search);
+    const queryViewId = params.get('view');
+    return routeViewId || queryViewId;
+  });
 
   useEffect(() => {
     seedDatabase().catch(err => {
@@ -226,12 +233,20 @@ function Main() {
     cleanupEmptyInspections();
   }, [user]);
 
-  // Se tem public view ID na URL, ignora qualquer auth loading e mostra direto.
-  if (publicViewId) {
-    return <PublicView id={publicViewId} onBack={() => {
-      window.history.replaceState({}, '', window.location.pathname);
-      window.location.reload();
-    }} />;
+  // Se tem public view ID na URL, ignora qlq coisa e decide:
+  if (scannedId) {
+    if (user && !loading) {
+       // Se está logado, entra na edição normal no Dashboard
+       // Vamos passar via sessionStorage ou apenas montar o Dashboard com esse ID
+       sessionStorage.setItem('scanned_id', scannedId);
+       setScannedId(null);
+       window.history.replaceState({}, '', '/');
+       return <Dashboard />;
+    } else if (!loading && !user) {
+       // Se tem certeza que não tá logado, mostra o Public View read-only
+       return <PublicInspectionView id={scannedId} />;
+    }
+    // se estiver em loading, ignora e espera
   }
 
   if (loading) {
@@ -249,8 +264,6 @@ function Main() {
 
   return user ? <Dashboard /> : <LoginScreen />;
 }
-
-import { InspectionPublicView as PublicView } from './components/InspectionPublicView';
 
 import { SyncToast } from './components/UI';
 
