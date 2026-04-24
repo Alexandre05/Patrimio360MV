@@ -195,13 +195,25 @@ function LoginScreen() {
 
 function Main() {
   const { user, loading, isFirstUser } = useAuth();
-  const [scannedId, setScannedId] = useState<string | null>(() => {
+  
+  const [routeInfo, setRouteInfo] = useState<{ id: string | null; mode: 'vistoria' | 'local' | null }>(() => {
     const parts = window.location.pathname.split('/');
+    
+    const localIndex = parts.indexOf('local');
+    if (localIndex !== -1 && parts[localIndex + 1]) {
+      return { id: parts[localIndex + 1], mode: 'local' };
+    }
+    
     const vistoriaIndex = parts.indexOf('vistoria');
-    const routeViewId = vistoriaIndex !== -1 && parts[vistoriaIndex + 1] ? parts[vistoriaIndex + 1] : null;
+    if (vistoriaIndex !== -1 && parts[vistoriaIndex + 1]) {
+      return { id: parts[vistoriaIndex + 1], mode: 'vistoria' };
+    }
+    
     const params = new URLSearchParams(window.location.search);
     const queryViewId = params.get('view');
-    return routeViewId || queryViewId;
+    if (queryViewId) return { id: queryViewId, mode: 'vistoria' };
+    
+    return { id: null, mode: null };
   });
 
   useEffect(() => {
@@ -234,17 +246,17 @@ function Main() {
   }, [user]);
 
   // Se tem public view ID na URL, ignora qlq coisa e decide:
-  if (scannedId) {
+  if (routeInfo.id) {
     if (user && !loading) {
-       // Se está logado, entra na edição normal no Dashboard
-       // Vamos passar via sessionStorage ou apenas montar o Dashboard com esse ID
-       sessionStorage.setItem('scanned_id', scannedId);
-       setScannedId(null);
+       // Se está logado, salva o ID (seja vistoria ou local) e entra no Dashboard
+       // O Dashboard já possui lógica para diferenciar se o ID é de uma vistoria ou de um local
+       sessionStorage.setItem('scanned_id', routeInfo.id);
+       setRouteInfo({ id: null, mode: null });
        window.history.replaceState({}, '', '/');
        return <Dashboard />;
     } else if (!loading && !user) {
        // Se tem certeza que não tá logado, mostra o Public View read-only
-       return <PublicInspectionView id={scannedId} />;
+       return <PublicInspectionView inspectionId={routeInfo.mode === 'vistoria' ? routeInfo.id : undefined} locationId={routeInfo.mode === 'local' ? routeInfo.id : undefined} />;
     }
     // se estiver em loading, ignora e espera
   }

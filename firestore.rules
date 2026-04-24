@@ -53,7 +53,7 @@ service cloud.firestore {
       }
 
       allow get: if resource.data.status == 'finalizada' || isVerified();
-      allow list: if isVerified(); 
+      allow list: if isVerified() || resource.data.status == 'finalizada'; 
       allow create: if isVerified() && isValidInspection(incoming());
       allow update: if isVerified() && isValidInspection(incoming());
       allow delete: if isAdmin();
@@ -68,12 +68,7 @@ service cloud.firestore {
                data.condition in ['novo', 'bom', 'regular', 'ruim', 'inservivel'];
       }
 
-      // Helper to check if parent inspection is finalized
-      function isInspectionFinalized(id) {
-        return get(/databases/$(database)/documents/inspections/$(id)).data.status == 'finalizada';
-      }
-
-      allow get, list: if isVerified() || isInspectionFinalized(resource.data.inspectionId);
+      allow get, list: if isVerified() || resource.data.isPublic == true;
       
       allow write: if isVerified() && isValidAsset(incoming());
     }

@@ -56,20 +56,21 @@ export function ScannerView({ onOpenInspection }: { onOpenInspection: (id: strin
     setScanResult(text);
     
     let isVistoria = false;
+    let isLocal = false;
     let id = "";
 
-    // Check for Deep Link URL pattern
-    if (text.startsWith("https://patrimv.web.app/vistoria/")) {
+    // Check for Deep Link URL patterns
+    if (text.includes("/vistoria/")) {
       isVistoria = true;
       id = text.split("/vistoria/")[1]?.split("?")[0];
-    } else if (text.startsWith(window.location.origin + "/vistoria/")) {
-      isVistoria = true;
-      id = text.split("/vistoria/")[1]?.split("?")[0];
+    } else if (text.includes("/local/")) {
+      isLocal = true;
+      id = text.split("/local/")[1]?.split("?")[0];
     } else if (text.startsWith("VISTORIA_ID:")) {
       isVistoria = true;
       id = text.replace("VISTORIA_ID:", "");
     } else if (text.startsWith("LOCAL_ID:")) {
-      isVistoria = false;
+      isLocal = true;
       id = text.replace("LOCAL_ID:", "");
     }
 
@@ -85,14 +86,10 @@ export function ScannerView({ onOpenInspection }: { onOpenInspection: (id: strin
     setLoading(true);
     setError(null);
     try {
-      // Small artificial delay for visual feedback of "QR Reconhecido"
-      await new Promise(r => setTimeout(r, 600));
-      
-      // Step 1: Let's check if it's an inspection ID in Dexie
+      // Step 1: Let's check if it's an inspection ID in Dexie (Fastest)
       if (isVistoria) {
          const localInsp = await db.inspections.get(id);
          if (localInsp) {
-           await new Promise(r => setTimeout(r, 400)); // Delay for UX "Carregando vistoria..."
            onOpenInspection(localInsp.id, localInsp.locationId);
            return;
          }
@@ -124,15 +121,13 @@ export function ScannerView({ onOpenInspection }: { onOpenInspection: (id: strin
            const assetsPromises = assetsSnap.docs.map(doc => db.assets.put({ id: doc.id, ...doc.data() } as any));
            await Promise.all(assetsPromises);
 
-           await new Promise(r => setTimeout(r, 400));
            onOpenInspection(inspSnap.id, data.locationId);
            return;
          }
-      } else {
+      } else if (isLocal) {
          const locRef = doc(firestore, 'locations', id);
          const locSnap = await getDoc(locRef);
          if (locSnap.exists()) {
-           await new Promise(r => setTimeout(r, 400));
            onOpenInspection('NEW', locSnap.id);
            return;
          }

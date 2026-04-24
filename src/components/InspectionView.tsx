@@ -301,6 +301,12 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
         qrCodeData: qrCodeDataPayload
       });
       
+      // Mark all assets as public for public view without O(N) get() in rules
+      const assets = await db.assets.where('inspectionId').equals(id).toArray();
+      for (const asset of assets) {
+        await db.assets.update(asset.id, { isPublic: true as any, needsSync: true as any });
+      }
+      
       await syncInspection(id);
       await pushLocalChanges();
       

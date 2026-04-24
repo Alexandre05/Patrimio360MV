@@ -1,11 +1,11 @@
 import React, { useState, useEffect } from 'react';
 import { db as firestore } from '../lib/firebase';
-import { doc, getDoc, collection, query, where, getDocs } from 'firebase/firestore';
+import { doc, getDoc, collection, query, where, getDocs, orderBy, limit } from 'firebase/firestore';
 import { Inspection, Location, Asset } from '../lib/db';
 import { formatDate } from '../lib/utils';
 import { ShieldCheck, MapPin, Search, Box, CheckCircle2, AlertTriangle, AlertCircle, XCircle } from 'lucide-react';
 
-export function PublicInspectionView({ id: propId }: { id?: string }) {
+export function PublicInspectionView({ inspectionId: propId, locationId: propLocationId }: { inspectionId?: string; locationId?: string }) {
   const [inspection, setInspection] = useState<Inspection | null>(null);
   const [location, setLocation] = useState<Location | null>(null);
   const [assets, setAssets] = useState<Asset[]>([]);
@@ -15,24 +15,73 @@ export function PublicInspectionView({ id: propId }: { id?: string }) {
 
   useEffect(() => {
     let id = propId;
-    if (!id) {
-      // Extract ID from URL
+    let locId = propLocationId;
+
+    if (!id && !locId) {
+      // Extract from URL if not through props
       const parts = window.location.pathname.split('/');
-      const idIndex = parts.indexOf('vistoria');
-      if (idIndex !== -1 && parts[idIndex + 1]) {
-        id = parts[idIndex + 1];
+      
+      const localIndex = parts.indexOf('local');
+      if (localIndex !== -1 && parts[localIndex + 1]) {
+        locId = parts[localIndex + 1];
+      } else {
+        const vistoriaIndex = parts.indexOf('vistoria');
+        if (vistoriaIndex !== -1 && parts[vistoriaIndex + 1]) {
+          id = parts[vistoriaIndex + 1];
+        }
       }
     }
     
     if (id) {
-      fetchData(id);
+      fetchDataByInspection(id);
+    } else if (locId) {
+      fetchDataByLocation(locId);
     } else {
       setError("Link inválido.");
       setLoading(false);
     }
-  }, [propId]);
+  }, [propId, propLocationId]);
 
-  const fetchData = async (id: string) => {
+  const fetchDataByLocation = async (locId: string) => {
+    try {
+      setLoading(true);
+      setError(null);
+
+      // Find latest finalized inspection for this location
+      const inspQuery = query(
+        collection(firestore, 'inspections'),
+        where('locationId', '==', locId),
+        where('status', '==', 'finalizada'),
+        orderBy('finalizedAt', 'desc'),
+        limit(1)
+      );
+
+      const inspSnap = await getDocs(inspQuery);
+      
+      if (inspSnap.empty) {
+        // Find location info anyway to show a better error
+        const locRef = doc(firestore, 'locations', locId);
+        const locSnap = await getDoc(locRef);
+        if (locSnap.exists()) {
+          setLocation({ id: locSnap.id, ...locSnap.data() } as Location);
+          setError("Esta sala ainda não possui vistorias homologadas.");
+        } else {
+          setError("Localização não encontrada.");
+        }
+        setLoading(false);
+        return;
+      }
+
+      const latestInsp = { id: inspSnap.docs[0].id, ...inspSnap.docs[0].data() } as Inspection;
+      await fetchDataByInspection(latestInsp.id);
+    } catch (err) {
+      console.error("Erro ao buscar por localização:", err);
+      setError("Falha ao buscar dados do local.");
+      setLoading(false);
+    }
+  };
+
+  const fetchDataByInspection = async (id: string) => {
     try {
       setLoading(true);
       setError(null);
@@ -55,7 +104,11 @@ export function PublicInspectionView({ id: propId }: { id?: string }) {
         setLocation({ id: locSnap.id, ...locSnap.data() } as Location);
       }
 
-      const assetsQuery = query(collection(firestore, 'assets'), where('inspectionId', '==', inspSnap.id));
+      const assetsQuery = query(
+        collection(firestore, 'assets'), 
+        where('inspectionId', '==', inspSnap.id),
+        where('isPublic', '==', true)
+      );
       const assetsSnap = await getDocs(assetsQuery);
       const loadedAssets = assetsSnap.docs.map(doc => ({ id: doc.id, ...doc.data() } as Asset));
       setAssets(loadedAssets.sort((a, b) => b.createdAt - a.createdAt));
