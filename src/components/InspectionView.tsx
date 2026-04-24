@@ -307,6 +307,12 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
       // We also ensure it uses the hash routing format.
       let baseUrl = window.location.origin;
       
+      // Se estiver no ambiente de desenvolvimento, tenta apontar para o Shared App (pre)
+      // para que o QR Code funcione para outras pessoas.
+      if (baseUrl.includes('ais-dev-')) {
+        baseUrl = baseUrl.replace('ais-dev-', 'ais-pre-');
+      }
+      
       // Remove trailing slash if exists
       baseUrl = baseUrl.replace(/\/$/, '');
       const qrCodeDataPayload = `${baseUrl}/#/vistoria/${id}`;

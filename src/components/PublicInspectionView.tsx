@@ -55,7 +55,8 @@ export function PublicInspectionView({ inspectionId: propId, locationId: propLoc
       const inspQuery = query(
         collection(firestore, 'inspections'),
         where('locationId', '==', locId),
-        where('status', '==', 'finalizada')
+        where('status', '==', 'finalizada'),
+        limit(5)
       );
 
       const inspSnap = await getDocs(inspQuery);
@@ -119,7 +120,7 @@ export function PublicInspectionView({ inspectionId: propId, locationId: propLoc
       const assetsQuery = query(
         collection(firestore, 'assets'), 
         where('inspectionId', '==', inspSnap.id),
-        where('isPublic', '==', true)
+        limit(100)
       );
       const assetsSnap = await getDocs(assetsQuery);
       const loadedAssets = assetsSnap.docs.map(doc => ({ id: doc.id, ...doc.data() } as Asset));
@@ -128,12 +129,13 @@ export function PublicInspectionView({ inspectionId: propId, locationId: propLoc
       
     } catch (err: any) {
       console.error("fetchDataByInspection error:", err);
+      const technicalInfo = err.code || err.message || "Erro desconhecido";
       if (err.message && err.message.toLowerCase().includes('permission')) {
-        setError("Acesso negado. Esta vistoria pode ser privada.");
+        setError(`Acesso negado (${technicalInfo}). Verifique se a vistoria foi finalizada.`);
       } else if (err.message && err.message.includes('index')) {
-        setError("Erro de configuração (índice ausente). O administrador precisa criar o índice no Firebase.");
+        setError(`Erro de índice (${technicalInfo}). O administrador precisa criar o índice no Firebase.`);
       } else {
-        setError("Erro ao carregar dados da vistoria.");
+        setError(`Erro ao carregar dados (${technicalInfo}).`);
       }
     } finally {
       setLoading(false);

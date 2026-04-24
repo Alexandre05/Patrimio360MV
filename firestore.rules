@@ -43,8 +43,7 @@ service cloud.firestore {
                data.description is string && data.description.size() <= 500;
        }
 
-      allow get: if true; // Public read for QR scan
-      allow list: if isSignedIn();
+      allow get, list: if true; 
       allow write: if isVerified(); // Ideally restricted to managers in future
       allow delete: if isVerified();
     }
@@ -57,8 +56,7 @@ service cloud.firestore {
                data.status in ['em_andamento', 'concluida', 'finalizada'];
       }
 
-      allow get: if true; 
-      allow list: if isSignedIn();
+      allow get, list: if true; 
       allow create: if isVerified() && isValidInspection(incoming());
       allow update: if isVerified() && isValidInspection(incoming());
       allow delete: if isVerified();
@@ -75,8 +73,7 @@ service cloud.firestore {
 
       // Public read if it belongs to an inspection that exists. 
       // We rely on the client to filter by finalized status or specific inspectionId.
-      allow get: if true;
-      allow list: if isSignedIn() || (request.query.limit <= 100); 
+      allow get, list: if true; 
       
       allow write: if isVerified() && isValidAsset(incoming());
       allow delete: if isVerified();

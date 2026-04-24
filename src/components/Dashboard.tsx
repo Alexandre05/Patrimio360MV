@@ -481,106 +481,6 @@ export function Dashboard() {
         return isAdmin ? <UsersView /> : <div className="p-20 text-center text-slate-400 font-bold uppercase tracking-widest">Acesso restrito a administradores.</div>;
       case 'notifications':
         return <NotificationsView onBack={() => setActiveTab('home')} />;
-      case 'settings':
-        return (
-          <div className="flex flex-col gap-10 animate-in fade-in slide-in-from-bottom-4 duration-700">
-             <div className="flex flex-col gap-2">
-                <h2 className="text-3xl font-black text-slate-900 tracking-tighter uppercase leading-none">Configurações</h2>
-                <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Ajustes e manutenção do sistema</span>
-             </div>
-
-             <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-                {isAdmin && (
-                  <Card className="p-8 border-rose-100 bg-rose-50/30 flex flex-col gap-6 rounded-[2.5rem]">
-                    <div className="flex items-center gap-4">
-                       <div className="w-12 h-12 bg-rose-100 rounded-2xl flex items-center justify-center text-rose-600">
-                          <AlertCircle className="w-6 h-6" />
-                       </div>
-                       <div className="flex flex-col">
-                          <h3 className="font-black text-slate-900 uppercase tracking-tight">Zona de Risco</h3>
-                          <span className="text-[10px] font-bold text-rose-500 uppercase tracking-widest">Ações Irreversíveis</span>
-                       </div>
-                    </div>
-                    
-                    <p className="text-xs text-slate-500 leading-relaxed font-medium">
-                      Esta função apaga permanentemente todas as vistorias, itens, fotos e notificações registradas no banco de dados local. 
-                      Use apenas para limpeza de dados de teste antes do uso oficial.
-                    </p>
-
-                    <Button 
-                      onClick={handleResetSystem} 
-                      loading={isResetting}
-                      variant="secondary" 
-                      className="bg-white border-rose-200 text-rose-600 hover:bg-rose-600 hover:text-white transition-all rounded-2xl h-14 font-black uppercase tracking-widest text-[10px]"
-                    >
-                      ZERAR TODOS OS DADOS DE VISTORIA
-                    </Button>
-                  </Card>
-                )}
-
-                <Card className="p-8 flex flex-col gap-6 rounded-[2.5rem]">
-                    <div className="flex items-center gap-4">
-                       <div className="w-12 h-12 bg-blue-100 rounded-2xl flex items-center justify-center text-blue-600">
-                          <Download className="w-6 h-6" />
-                       </div>
-                       <div className="flex flex-col">
-                          <h3 className="font-black text-slate-900 uppercase tracking-tight">Gestão de Dados</h3>
-                          <span className="text-[10px] font-bold text-blue-500 uppercase tracking-widest">Sincronização Manual (Arquivos)</span>
-                       </div>
-                    </div>
-                    
-                    <p className="text-xs text-slate-500 leading-relaxed font-medium">
-                      Como o storage em nuvem está em manutenção, use esta função para mover dados entre dispositivos (ex: do PC para o Celular).
-                    </p>
-
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-2">
-                       <Button 
-                         variant="secondary" 
-                         icon={Download} 
-                         onClick={handleExportData}
-                         className="rounded-2xl h-14 font-black uppercase tracking-widest text-[9px] bg-slate-50 border-slate-100"
-                       >
-                         EXPORTAR BACKUP
-                       </Button>
-                       <label className="cursor-pointer">
-                          <div className="flex items-center justify-center gap-2 w-full h-14 bg-slate-900 text-white rounded-2xl font-black uppercase tracking-widest text-[9px] hover:bg-slate-800 transition-all">
-                             <Upload className="w-4 h-4" />
-                             IMPORTAR DADOS
-                          </div>
-                          <input type="file" className="hidden" accept=".json" onChange={handleImportData} />
-                       </label>
-                    </div>
-                </Card>
-
-                <Card className="p-8 flex flex-col gap-6 rounded-[2.5rem]">
-                    <div className="flex items-center gap-4">
-                       <div className="w-12 h-12 bg-slate-900 rounded-2xl flex items-center justify-center text-white">
-                          <ShieldCheck className="w-6 h-6" />
-                       </div>
-                       <div className="flex flex-col">
-                          <h3 className="font-black text-slate-900 uppercase tracking-tight">Sobre o Sistema</h3>
-                          <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Informações Técnicas</span>
-                       </div>
-                    </div>
-                    
-                    <div className="flex flex-col gap-3">
-                       <div className="flex justify-between items-center py-3 border-b border-slate-50">
-                          <span className="text-xs font-bold text-slate-500 uppercase tracking-widest">Nome</span>
-                          <span className="text-sm font-black text-slate-900 text-right uppercase">PATRI-MV</span>
-                       </div>
-                       <div className="flex justify-between items-center py-3 border-b border-slate-50">
-                          <span className="text-xs font-bold text-slate-500 uppercase tracking-widest">Versão</span>
-                          <span className="text-sm font-black text-slate-900 text-right uppercase">v16.2.1 • Transparência</span>
-                       </div>
-                       <div className="flex justify-between items-center py-3 border-b border-slate-50">
-                          <span className="text-xs font-bold text-slate-500 uppercase tracking-widest">Jurisdição</span>
-                          <span className="text-sm font-black text-slate-900 text-right uppercase">Manoel Viana - RS</span>
-                       </div>
-                    </div>
-                </Card>
-             </div>
-          </div>
-        );
       default:
         return <div className="flex items-center justify-center py-20 text-slate-400 font-medium italic">Selecione uma opção no menu.</div>;
     }
@@ -638,7 +538,6 @@ export function Dashboard() {
           {isAdmin && (
             <NavItem active={activeTab === 'users'} label="Membros" icon={Users} onClick={() => handleTabChange('users')} />
           )}
-          <NavItem active={activeTab === 'settings'} label="Configurações" icon={Settings} onClick={() => handleTabChange('settings')} />
         </nav>
 
         <div className="mt-auto flex flex-col gap-4">
