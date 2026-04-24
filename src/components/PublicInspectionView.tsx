@@ -50,17 +50,20 @@ export function PublicInspectionView({ inspectionId: propId, locationId: propLoc
       setError(null);
 
       // Find latest finalized inspection for this location
+      // Using only one where clause to avoid index requirements
       const inspQuery = query(
         collection(firestore, 'inspections'),
-        where('locationId', '==', locId),
-        where('status', '==', 'finalizada'),
-        orderBy('finalizedAt', 'desc'),
-        limit(1)
+        where('locationId', '==', locId)
       );
 
       const inspSnap = await getDocs(inspQuery);
       
-      if (inspSnap.empty) {
+      const finishedInspections = inspSnap.docs
+        .map(d => ({ id: d.id, ...d.data() } as Inspection))
+        .filter(i => i.status === 'finalizada')
+        .sort((a, b) => (b.finalizedAt || 0) - (a.finalizedAt || 0));
+
+      if (finishedInspections.length === 0) {
         // Find location info anyway to show a better error
         const locRef = doc(firestore, 'locations', locId);
         const locSnap = await getDoc(locRef);
@@ -74,11 +77,11 @@ export function PublicInspectionView({ inspectionId: propId, locationId: propLoc
         return;
       }
 
-      const latestInsp = { id: inspSnap.docs[0].id, ...inspSnap.docs[0].data() } as Inspection;
+      const latestInsp = finishedInspections[0];
       await fetchDataByInspection(latestInsp.id);
     } catch (err) {
       console.error("Erro ao buscar por localização:", err);
-      setError("Falha ao buscar dados do local.");
+      setError("Falha ao buscar dados do local. Verifique sua conexão.");
       setLoading(false);
     }
   };
@@ -108,11 +111,13 @@ export function PublicInspectionView({ inspectionId: propId, locationId: propLoc
 
       const assetsQuery = query(
         collection(firestore, 'assets'), 
-        where('inspectionId', '==', inspSnap.id),
-        where('isPublic', '==', true)
+        where('inspectionId', '==', inspSnap.id)
       );
       const assetsSnap = await getDocs(assetsQuery);
-      const loadedAssets = assetsSnap.docs.map(doc => ({ id: doc.id, ...doc.data() } as Asset));
+      const loadedAssets = assetsSnap.docs
+        .map(doc => ({ id: doc.id, ...doc.data() } as Asset))
+        .filter(a => a.isPublic === true);
+      
       setAssets(loadedAssets.sort((a, b) => b.createdAt - a.createdAt));
       
     } catch (err: any) {

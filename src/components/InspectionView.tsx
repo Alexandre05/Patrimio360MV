@@ -1,7 +1,7 @@
 import React, { useState, useRef } from 'react';
 import { Card, Button, Input, Select, Textarea } from './UI';
 import { useOnlineStatus } from '../lib/hooks';
-import { ArrowLeft, Plus, Image as ImageIcon, Trash2, Camera, UserPlus, Save, CheckCircle2, History, Eye, PlayCircle, ArrowRight, X, Edit2, Search, ShieldCheck, AlertCircle, Home, ChevronLeft, ChevronRight, Zap } from 'lucide-react';
+import { ArrowLeft, Plus, Image as ImageIcon, Trash2, Camera, UserPlus, Save, CheckCircle2, History, Eye, PlayCircle, ArrowRight, X, Edit2, Search, ShieldCheck, AlertCircle, Home, ChevronLeft, ChevronRight, Zap, Copy } from 'lucide-react';
 import { db, Asset, generateAssetHash, generateId, AssetCondition, InspectionStatus } from '../lib/db';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { useAuth } from '../lib/AuthContext';
@@ -748,6 +748,20 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
                  </Button>
                  <Button variant="secondary" size="sm" icon={UserPlus} className="rounded-xl px-6 h-14 font-black tracking-widest text-[10px]" onClick={handlePrintQRCode}>
                    IMPRIMIR QR CODE
+                 </Button>
+                 <Button 
+                    variant="outline" 
+                    size="sm" 
+                    icon={Copy} 
+                    className="rounded-xl px-6 h-14 font-black tracking-widest text-[10px] bg-white hover:bg-slate-50" 
+                    onClick={() => {
+                      if (inspection.qrCodeData) {
+                        navigator.clipboard.writeText(inspection.qrCodeData);
+                        alert('Link copiado: ' + inspection.qrCodeData);
+                      }
+                    }}
+                  >
+                   COPIAR LINK
                  </Button>
               </div>
             </div>

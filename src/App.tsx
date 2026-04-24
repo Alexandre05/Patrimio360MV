@@ -197,16 +197,17 @@ function Main() {
   const { user, loading, isFirstUser } = useAuth();
   
   const [routeInfo, setRouteInfo] = useState<{ id: string | null; mode: 'vistoria' | 'local' | null }>(() => {
-    const parts = window.location.pathname.split('/');
+    const path = window.location.pathname;
     
-    const localIndex = parts.indexOf('local');
-    if (localIndex !== -1 && parts[localIndex + 1]) {
-      return { id: parts[localIndex + 1], mode: 'local' };
+    // Improved detection using regex for robustness
+    const vistoriaMatch = path.match(/\/vistoria\/([^\/]+)/);
+    if (vistoriaMatch && vistoriaMatch[1]) {
+      return { id: vistoriaMatch[1], mode: 'vistoria' };
     }
     
-    const vistoriaIndex = parts.indexOf('vistoria');
-    if (vistoriaIndex !== -1 && parts[vistoriaIndex + 1]) {
-      return { id: parts[vistoriaIndex + 1], mode: 'vistoria' };
+    const localMatch = path.match(/\/local\/([^\/]+)/);
+    if (localMatch && localMatch[1]) {
+      return { id: localMatch[1], mode: 'local' };
     }
     
     const params = new URLSearchParams(window.location.search);
