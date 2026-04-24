@@ -61,6 +61,7 @@ export interface Asset {
   hash: string; // name + patrimony + locationId
   needsSync: boolean;
   isPublic?: boolean;
+  quantity?: number;
 }
 
 export interface AppSettings {
@@ -93,8 +94,19 @@ export class PatrimonyDatabase extends Dexie {
 export const db = new PatrimonyDatabase();
 
 // Helper to generate hash for deduplication
+export function sanitizeString(str: string) {
+  return str.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().trim().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+}
+
 export function generateAssetHash(name: string, patrimony: string | undefined, locationId: string): string {
-  return `${name.toLowerCase().trim()}|${(patrimony || '').toLowerCase().trim()}|${locationId}`;
+  const normName = sanitizeString(name);
+  const normLoc = sanitizeString(locationId); // typically a UUID, so characters are safe
+  const normPatrimony = patrimony ? sanitizeString(patrimony) : '';
+
+  if (normPatrimony) {
+    return `${normPatrimony}-${normLoc}`;
+  }
+  return `${normName}-${normLoc}`;
 }
 
 export function generateId(): string {

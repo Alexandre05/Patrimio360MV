@@ -7,7 +7,18 @@ export function setupSync() {
   if (!auth.currentUser) return;
 
   // 1. Sync Locations
-  onSnapshot(collection(firestore, 'locations'), (snapshot) => {
+  let isFirstLoadLocations = true;
+  onSnapshot(collection(firestore, 'locations'), async (snapshot) => {
+    if (isFirstLoadLocations) {
+      isFirstLoadLocations = false;
+      const remoteIds = new Set(snapshot.docs.map(doc => doc.id));
+      const localDocs = await dexie.locations.toArray();
+      for (const localDoc of localDocs) {
+        if (!remoteIds.has(localDoc.id)) {
+          await dexie.locations.delete(localDoc.id);
+        }
+      }
+    }
     snapshot.docChanges().forEach(async (change) => {
       const data = change.doc.data();
       if (change.type === 'removed') {
@@ -19,7 +30,18 @@ export function setupSync() {
   }, (error) => console.error("Sync Locations Error:", error));
 
   // 2. Sync Inspections
-  onSnapshot(collection(firestore, 'inspections'), (snapshot) => {
+  let isFirstLoadInspections = true;
+  onSnapshot(collection(firestore, 'inspections'), async (snapshot) => {
+    if (isFirstLoadInspections) {
+      isFirstLoadInspections = false;
+      const remoteIds = new Set(snapshot.docs.map(doc => doc.id));
+      const localDocs = await dexie.inspections.toArray();
+      for (const localDoc of localDocs) {
+        if (!remoteIds.has(localDoc.id)) {
+          await dexie.inspections.delete(localDoc.id);
+        }
+      }
+    }
     snapshot.docChanges().forEach(async (change) => {
       const data = change.doc.data();
       if (change.type === 'removed') {
@@ -31,7 +53,18 @@ export function setupSync() {
   }, (error) => console.error("Sync Inspections Error:", error));
 
   // 3. Sync Assets
-  onSnapshot(collection(firestore, 'assets'), (snapshot) => {
+  let isFirstLoadAssets = true;
+  onSnapshot(collection(firestore, 'assets'), async (snapshot) => {
+    if (isFirstLoadAssets) {
+      isFirstLoadAssets = false;
+      const remoteIds = new Set(snapshot.docs.map(doc => doc.id));
+      const localDocs = await dexie.assets.toArray();
+      for (const localDoc of localDocs) {
+        if (!remoteIds.has(localDoc.id) && !localDoc.needsSync) {
+          await dexie.assets.delete(localDoc.id);
+        }
+      }
+    }
     snapshot.docChanges().forEach(async (change) => {
       const data = change.doc.data();
       if (change.type === 'removed') {
@@ -43,7 +76,18 @@ export function setupSync() {
   }, (error) => console.error("Sync Assets Error:", error));
 
   // 4. Sync Users
-  onSnapshot(collection(firestore, 'users'), (snapshot) => {
+  let isFirstLoadUsers = true;
+  onSnapshot(collection(firestore, 'users'), async (snapshot) => {
+    if (isFirstLoadUsers) {
+      isFirstLoadUsers = false;
+      const remoteIds = new Set(snapshot.docs.map(doc => doc.id));
+      const localDocs = await dexie.users.toArray();
+      for (const localDoc of localDocs) {
+        if (!remoteIds.has(localDoc.userId)) {
+          await dexie.users.delete(localDoc.userId);
+        }
+      }
+    }
     snapshot.docChanges().forEach(async (change) => {
       const data = change.doc.data();
       if (change.type === 'removed') {

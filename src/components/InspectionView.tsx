@@ -12,7 +12,7 @@ import autoTable from 'jspdf-autotable';
 import { compressImage } from '../lib/image';
 import { pushLocalChanges, syncInspection } from '../lib/syncService';
 import { db as firestore } from '../lib/firebase';
-import { doc, deleteDoc } from 'firebase/firestore';
+import { doc, deleteDoc, collection, query, where, getDocs } from 'firebase/firestore';
 
 export function InspectionView({ id, onBack }: { id: string, onBack: () => void }) {
   const { user } = useAuth();
@@ -79,7 +79,8 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
     patrimonyNumber: '',
     condition: 'bom' as AssetCondition,
     observations: '',
-    photos: [] as string[]
+    photos: [] as string[],
+    quantity: 1
   });
   const [duplicateWarning, setDuplicateWarning] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
@@ -98,32 +99,52 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
     
     // Duplication Check (only for new items)
     if (!editingAssetId) {
-      const existingInSameInspection = await db.assets
-        .where('inspectionId')
-        .equals(id)
-        .and(a => a.hash === hash)
-        .first();
-
-      if (existingInSameInspection) {
-        setDuplicateWarning("Este item já foi cadastrado nesta vistoria.");
-        return;
-      }
-
-      // GLOBAL Patrimony check
       if (newItem.patrimonyNumber) {
-        const globalExisting = await db.assets.where('patrimonyNumber').equals(newItem.patrimonyNumber).first();
+        // GLOBAL Patrimony check
+        let globalExisting = await db.assets.where('patrimonyNumber').equals(newItem.patrimonyNumber).first();
+        
+        if (!globalExisting && isOnline) {
+          try {
+            const q = query(collection(firestore, 'assets'), where('patrimonyNumber', '==', newItem.patrimonyNumber));
+            const snap = await getDocs(q);
+            if (!snap.empty) {
+               globalExisting = snap.docs[0].data() as Asset;
+            }
+          } catch(e) { console.warn('Offline, skipping remote patrimony check'); }
+        }
+
         if (globalExisting) {
+          if (globalExisting.inspectionId === id) {
+              setDuplicateWarning(`O patrimônio ${newItem.patrimonyNumber} já foi cadastrado nesta vistoria.`);
+              return;
+          }
           const otherInsp = await db.inspections.get(globalExisting.inspectionId);
           const otherLoc = otherInsp ? await db.locations.get(otherInsp.locationId) : null;
           
-          // Se for na mesma vistoria, o erro acima já pegou. 
-          // Perguntamos se deseja ignorar e vincular a esta nova vistoria/local.
           if (confirm(`O patrimônio ${newItem.patrimonyNumber} já está vinculado ao local "${otherLoc?.name || 'outro setor'}". Deseja cadastrá-lo aqui assim mesmo?`)) {
              // Continue without returning
           } else {
              setDuplicateWarning(`O patrimônio ${newItem.patrimonyNumber} já pertence a outro local.`);
              return;
           }
+        }
+      } else {
+        // Local Check (same location, no patrimony)
+        let existingHash = await db.assets.where('hash').equals(hash).first();
+
+        if (!existingHash && isOnline) {
+          try {
+             const q = query(collection(firestore, 'assets'), where('hash', '==', hash));
+             const snap = await getDocs(q);
+             if (!snap.empty) {
+                existingHash = snap.docs[0].data() as Asset;
+             }
+          } catch(e) { console.warn('Offline, skipping remote hash check'); }
+        }
+
+        if (existingHash) {
+          setDuplicateWarning("Este item já está cadastrado nesta sala. Edite o registro existente para alterar a quantidade.");
+          return;
         }
       }
     }
@@ -136,7 +157,8 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
         observations: newItem.observations,
         photos: newItem.photos,
         hash: hash,
-        needsSync: true
+        needsSync: true,
+        quantity: newItem.quantity
       });
       setSuccessMessage("Salvado com sucesso!");
     } else {
@@ -152,7 +174,8 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
         createdBy: user.userId,
         createdAt: Date.now(),
         hash: hash,
-        needsSync: true
+        needsSync: true,
+        quantity: newItem.quantity
       });
       setSuccessMessage("Adicionado com sucesso!");
     }
@@ -160,7 +183,7 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
     // Trigger sync
     pushLocalChanges();
 
-    setNewItem({ name: '', patrimonyNumber: '', condition: 'bom', observations: '', photos: [] });
+    setNewItem({ name: '', patrimonyNumber: '', condition: 'bom', observations: '', photos: [], quantity: 1 });
     setIsAdding(false);
     setEditingAssetId(null);
     setDuplicateWarning(null);
@@ -192,7 +215,8 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
       patrimonyNumber: asset.patrimonyNumber || '',
       condition: asset.condition,
       observations: asset.observations,
-      photos: asset.photos || []
+      photos: asset.photos || [],
+      quantity: asset.quantity || 1
     });
     setEditingAssetId(asset.id);
     setIsAdding(true);
@@ -303,19 +327,8 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
       const current = await db.inspections.get(id);
       if (!current) throw new Error("Vistoria não encontrada.");
 
-      // Rely on current origin. When deployed/shared, this will be the correct public URL.
-      // We also ensure it uses the hash routing format.
-      let baseUrl = window.location.origin;
-      
-      // Se estiver no ambiente de desenvolvimento, tenta apontar para o Shared App (pre)
-      // para que o QR Code funcione para outras pessoas.
-      if (baseUrl.includes('ais-dev-')) {
-        baseUrl = baseUrl.replace('ais-dev-', 'ais-pre-');
-      }
-      
-      // Remove trailing slash if exists
-      baseUrl = baseUrl.replace(/\/$/, '');
-      const qrCodeDataPayload = `${baseUrl}/vistoria/${id}`;
+      // Forçar o uso do domínio de produção para o QR Code
+      const qrCodeDataPayload = `https://patrimonio360-75ade.web.app/vistoria/${id}`;
 
       await db.inspections.put({
         ...current,
@@ -891,6 +904,14 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
                    { value: 'inservivel', label: 'Inservível (Baixa Definitiva)' }
                  ]}
                />
+               <Input 
+                 type="number"
+                 label="Quantidade" 
+                 placeholder="Qtd (Ex: 1)" 
+                 value={newItem.quantity?.toString()}
+                 onChange={e => setNewItem({...newItem, quantity: Math.max(1, parseInt(e.target.value) || 1)})}
+                 min={1}
+               />
              </div>
 
              <Textarea 
@@ -1003,6 +1024,7 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
                   <div className="flex items-center gap-2 mt-1">
                      <span className="text-[10px] text-slate-400 font-black uppercase tracking-widest">Patr.</span>
                      <span className="text-xs text-slate-500 font-mono font-bold">{asset.patrimonyNumber || 'N/A'}</span>
+                     <span className="px-2 py-0.5 rounded border border-slate-200 bg-slate-50 text-[10px] text-slate-500 font-bold ml-2">Qtd: {asset.quantity || 1}</span>
                   </div>
                 </div>
                 <div className={cn(

@@ -204,10 +204,10 @@ export function PublicInspectionView({ inspectionId: propId, locationId: propLoc
   }
 
   const stats = {
-    total: assets.length,
-    bons: assets.filter(a => a.condition === 'bom' || a.condition === 'novo').length,
-    ruins: assets.filter(a => a.condition === 'ruim' || a.condition === 'inservivel').length,
-    regular: assets.filter(a => a.condition === 'regular').length
+    total: assets.reduce((acc, curr) => acc + (curr.quantity || 1), 0),
+    bons: assets.filter(a => a.condition === 'bom' || a.condition === 'novo').reduce((acc, curr) => acc + (curr.quantity || 1), 0),
+    ruins: assets.filter(a => a.condition === 'ruim' || a.condition === 'inservivel').reduce((acc, curr) => acc + (curr.quantity || 1), 0),
+    regular: assets.filter(a => a.condition === 'regular').reduce((acc, curr) => acc + (curr.quantity || 1), 0)
   };
 
   const filteredAssets = assets.filter(asset => 
@@ -271,9 +271,17 @@ export function PublicInspectionView({ inspectionId: propId, locationId: propLoc
              <p className="text-emerald-100 font-medium tracking-wide text-sm bg-black/10 px-4 py-1.5 rounded-full inline-block">
                ID: {inspection.id.slice(0, 12).toUpperCase()}
              </p>
-             <div className="flex items-center gap-1.5 text-emerald-50 text-xs font-bold uppercase tracking-widest opacity-80">
-               <Calendar className="w-3.5 h-3.5" />
-               Realizada em {formatDate(inspection.createdAt)}
+             <div className="flex flex-col gap-1 mt-3">
+               <div className="flex items-center gap-1.5 text-emerald-50 text-xs font-bold uppercase tracking-widest opacity-80">
+                 <Calendar className="w-3.5 h-3.5" />
+                 Realizada em {formatDate(inspection.date)}
+               </div>
+               {inspection.finalizedAt && (
+                  <div className="flex items-center gap-1.5 text-emerald-100 text-xs font-bold uppercase tracking-widest opacity-90">
+                    <CheckCircle2 className="w-3.5 h-3.5" />
+                    Homologada em {formatDate(inspection.finalizedAt)}
+                  </div>
+               )}
              </div>
            </div>
         </div>
@@ -303,7 +311,7 @@ export function PublicInspectionView({ inspectionId: propId, locationId: propLoc
               <div className="flex justify-between items-center px-1">
                  <div>
                     <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest block">Data da Vistoria</span>
-                    <span className="font-semibold text-slate-700">{formatDate(inspection.createdAt)}</span>
+                    <span className="font-semibold text-slate-700">{formatDate(inspection.date)}</span>
                  </div>
                  <div className="text-right">
                     <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest block">Status</span>
@@ -316,6 +324,26 @@ export function PublicInspectionView({ inspectionId: propId, locationId: propLoc
                     )}
                  </div>
               </div>
+
+              {(inspection.concludedAt || inspection.finalizedAt) && (
+                <>
+                   <div className="h-px bg-slate-100 w-full" />
+                   <div className="flex justify-between items-center px-1 bg-slate-50 p-2.5 rounded-xl border border-slate-100">
+                      {inspection.concludedAt && (
+                         <div>
+                            <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest block">Concluída (Técnico)</span>
+                            <span className="font-bold text-slate-600 text-xs">{formatDate(inspection.concludedAt)}</span>
+                         </div>
+                      )}
+                      {inspection.finalizedAt && (
+                         <div className="text-right">
+                            <span className="text-[9px] font-black text-emerald-400 uppercase tracking-widest block">Homologada (Gestor)</span>
+                            <span className="font-bold text-emerald-600 text-xs">{formatDate(inspection.finalizedAt)}</span>
+                         </div>
+                      )}
+                   </div>
+                </>
+              )}
            </div>
         </div>
 
@@ -324,7 +352,7 @@ export function PublicInspectionView({ inspectionId: propId, locationId: propLoc
           <div className="flex items-center justify-between mb-4 px-2">
             <h3 className="text-lg font-bold text-slate-800 tracking-tight flex items-center gap-2">
               <Box className="w-5 h-5 text-emerald-500" />
-              Itens Patrimoniais ({assets.length})
+              Itens Patrimoniais ({stats.total})
             </h3>
           </div>
 
@@ -361,8 +389,15 @@ export function PublicInspectionView({ inspectionId: propId, locationId: propLoc
                  <div className="flex justify-between items-start gap-4 mb-4">
                     <div>
                       <h4 className="font-bold text-slate-800 text-lg leading-tight mb-1">{asset.name}</h4>
-                      <div className="inline-flex items-center gap-1.5 px-2.5 py-1 bg-slate-100 text-slate-600 rounded-lg text-xs font-bold border border-slate-200">
-                         Nº {asset.patrimonyNumber}
+                      <div className="flex flex-wrap items-center gap-1.5">
+                         {asset.patrimonyNumber && (
+                           <div className="inline-flex items-center gap-1.5 px-2.5 py-1 bg-slate-100 text-slate-600 rounded-lg text-xs font-bold border border-slate-200">
+                              Nº {asset.patrimonyNumber}
+                           </div>
+                         )}
+                         <div className="inline-flex items-center gap-1.5 px-2.5 py-1 bg-blue-50 text-blue-600 rounded-lg text-xs font-bold border border-blue-100">
+                            {asset.quantity || 1} Unidade{(asset.quantity || 1) !== 1 ? 's' : ''}
+                         </div>
                       </div>
                     </div>
                     
