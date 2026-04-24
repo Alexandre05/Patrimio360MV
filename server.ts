@@ -17,12 +17,30 @@ async function startServer() {
       appType: "spa",
     });
     app.use(vite.middlewares);
+    
+    // Explicit fallback for SPA routes in development
+    app.use(async (req, res, next) => {
+      // Ignore API routes or static files if they somehow got here, though Vite handles assets
+      if (req.originalUrl.startsWith('/api')) return next();
+      
+      try {
+        const url = req.originalUrl;
+        const fs = await import('fs');
+        let template = fs.readFileSync(path.resolve(__dirname, 'index.html'), 'utf-8');
+        template = await vite.transformIndexHtml(url, template);
+        res.status(200).set({ 'Content-Type': 'text/html' }).end(template);
+      } catch (e: any) {
+        vite.ssrFixStacktrace(e);
+        next(e);
+      }
+    });
+
   } else {
     // Serve static files in production
     const distPath = path.join(process.cwd(), 'dist');
     app.use(express.static(distPath));
     // SPA Fallback: handle all routes by serving index.html
-    app.get('*', (req, res) => {
+    app.get('*all', (req, res) => {
       res.sendFile(path.join(distPath, 'index.html'));
     });
   }
