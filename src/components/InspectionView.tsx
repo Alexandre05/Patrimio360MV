@@ -315,7 +315,7 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
       
       // Remove trailing slash if exists
       baseUrl = baseUrl.replace(/\/$/, '');
-      const qrCodeDataPayload = `${baseUrl}/#/vistoria/${id}`;
+      const qrCodeDataPayload = `${baseUrl}/vistoria/${id}`;
 
       await db.inspections.put({
         ...current,

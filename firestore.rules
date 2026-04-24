@@ -56,7 +56,10 @@ service cloud.firestore {
                data.status in ['em_andamento', 'concluida', 'finalizada'];
       }
 
-      allow get, list: if true; 
+      // Public read only if status is 'finalizada'. Signed in users can read all.
+      allow get: if isSignedIn() || resource.data.status == 'finalizada';
+      allow list: if isSignedIn() || (resource.data.status == 'finalizada'); 
+      
       allow create: if isVerified() && isValidInspection(incoming());
       allow update: if isVerified() && isValidInspection(incoming());
       allow delete: if isVerified();
@@ -71,9 +74,8 @@ service cloud.firestore {
                data.condition in ['novo', 'bom', 'regular', 'ruim', 'inservivel'];
       }
 
-      // Public read if it belongs to an inspection that exists. 
-      // We rely on the client to filter by finalized status or specific inspectionId.
-      allow get, list: if true; 
+      // Public read if the asset belongs to a finalized inspection
+      allow get, list: if isSignedIn() || get(/databases/$(database)/documents/inspections/$(resource.data.inspectionId)).data.status == 'finalizada';
       
       allow write: if isVerified() && isValidAsset(incoming());
       allow delete: if isVerified();

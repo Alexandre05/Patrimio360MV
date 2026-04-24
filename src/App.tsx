@@ -219,23 +219,27 @@ function Main() {
   const [routeInfo, setRouteInfo] = useState<{ id: string | null; mode: 'vistoria' | 'local' | 'scanner' | null }>(() => getRouteInfo());
 
   function getRouteInfo() {
-    const path = window.location.pathname;
-    const hash = window.location.hash || '';
+    const fullUrl = window.location.href;
     
-    // Combine path and hash to look for matches in either
-    const combined = path + hash;
-    
-    const vistoriaMatch = combined.match(/vistoria\/([a-zA-Z0-9_-]+)/);
+    // Detect ID in either path, hash or query
+    const vistoriaMatch = fullUrl.match(/vistoria\/([a-zA-Z0-9_-]+)/);
     if (vistoriaMatch && vistoriaMatch[1]) {
       return { id: vistoriaMatch[1], mode: 'vistoria' as const };
     }
     
-    const localMatch = combined.match(/local\/([a-zA-Z0-9_-]+)/);
+    const localMatch = fullUrl.match(/local\/([a-zA-Z0-9_-]+)/);
     if (localMatch && localMatch[1]) {
       return { id: localMatch[1], mode: 'local' as const };
     }
     
+    // Check search params as fallback
     const params = new URLSearchParams(window.location.search);
+    const queryVistoria = params.get('vistoria');
+    if (queryVistoria) return { id: queryVistoria, mode: 'vistoria' as const };
+    
+    const queryLocal = params.get('local');
+    if (queryLocal) return { id: queryLocal, mode: 'local' as const };
+    
     const queryViewId = params.get('view');
     if (queryViewId === 'scanner') return { id: 'public', mode: 'scanner' as const };
     
@@ -292,24 +296,13 @@ function Main() {
     }} />;
   }
 
-  // Se tem public view ID na URL, decide o que mostrar:
+  // Se tem public view ID na URL (/vistoria/ ou /local/), renderiza a visão pública imediatamente.
+  // Isso ignora a checagem de auth para visitantes e também exibe o relatório final mesmo para vistoriadores logados
   if (routeInfo.id) {
-    if (user) {
-       // Se está logado, salva o ID e entra no Dashboard
-       // Apenas se for a primeira vez que detectamos esse ID nesta sessão
-       if (sessionStorage.getItem('processed_id') !== routeInfo.id) {
-         sessionStorage.setItem('scanned_id', routeInfo.id);
-         sessionStorage.setItem('processed_id', routeInfo.id);
-       }
-       return <Dashboard />;
-    } else {
-       // Se NÃO tem usuário ou está carregando, mostra o View público
-       // Isso evita pedir login para quem só quer ver dados
-       return <PublicInspectionView 
-         inspectionId={routeInfo.mode === 'vistoria' ? routeInfo.id : undefined} 
-         locationId={routeInfo.mode === 'local' ? routeInfo.id : undefined} 
-       />;
-    }
+    return <PublicInspectionView 
+      inspectionId={routeInfo.mode === 'vistoria' ? routeInfo.id : undefined} 
+      locationId={routeInfo.mode === 'local' ? routeInfo.id : undefined} 
+    />;
   }
 
   if (loading) {

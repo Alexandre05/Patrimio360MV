@@ -22,9 +22,9 @@ export function PublicScannerView({ onBack }: { onBack: () => void }) {
            onOpenInspection={(id, locId) => {
              // For public scanner, we just update the URL to show the PublicInspectionView
              if (id === 'NEW') {
-                window.location.href = `/#/local/${locId}`;
+                window.location.href = `/local/${locId}`;
              } else {
-                window.location.href = `/#/vistoria/${id}`;
+                window.location.href = `/vistoria/${id}`;
              }
            }} 
          />
