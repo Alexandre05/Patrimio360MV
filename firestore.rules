@@ -52,14 +52,11 @@ service cloud.firestore {
                data.status in ['em_andamento', 'concluida', 'finalizada'];
       }
 
-      allow get: if true; // Public read for QR scan
-      allow list: if true; // Allow list to fetch the latest for a location
+      allow get: if resource.data.status == 'finalizada' || isVerified();
+      allow list: if isVerified(); 
       allow create: if isVerified() && isValidInspection(incoming());
-      allow update: if isVerified() && isValidInspection(incoming()) && (
-        // Prevent update if already finalized unless admin
-        (existing().status != 'finalizada' || isAdmin() || isVerified())
-      );
-      allow delete: if isVerified();
+      allow update: if isVerified() && isValidInspection(incoming());
+      allow delete: if isAdmin();
     }
 
     // 5. Assets Collection
@@ -71,9 +68,12 @@ service cloud.firestore {
                data.condition in ['novo', 'bom', 'regular', 'ruim', 'inservivel'];
       }
 
-      allow get: if true; // Public check via QR
-      allow list: if true; // Simplify for public view filter queries
-      allow read: if true; // Allow all reads for UI public link logic
+      // Helper to check if parent inspection is finalized
+      function isInspectionFinalized(id) {
+        return get(/databases/$(database)/documents/inspections/$(id)).data.status == 'finalizada';
+      }
+
+      allow get, list: if isVerified() || isInspectionFinalized(resource.data.inspectionId);
       
       allow write: if isVerified() && isValidAsset(incoming());
     }

@@ -112,6 +112,23 @@ export function PublicInspectionView({ id: propId }: { id?: string }) {
     );
   }
 
+  if (inspection.status !== 'finalizada') {
+    return (
+      <div className="min-h-screen bg-slate-50 flex flex-col items-center justify-center p-8 text-center font-sans">
+        <div className="w-20 h-20 bg-amber-100 text-amber-600 rounded-3xl flex items-center justify-center mb-6 shadow-xl shadow-amber-200/50">
+          <AlertCircle className="w-10 h-10" />
+        </div>
+        <h1 className="text-2xl font-black text-slate-900 mb-2">Vistoria em Processamento</h1>
+        <p className="text-slate-500 max-w-xs leading-relaxed font-medium">
+          Esta vistoria ainda não foi homologada pela administração e não está disponível para visualização pública no momento.
+        </p>
+        <div className="mt-8 pt-8 border-t border-slate-200">
+           <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Patri-MV • Manoel Viana/RS</p>
+        </div>
+      </div>
+    );
+  }
+
   const stats = {
     total: assets.length,
     bons: assets.filter(a => a.condition === 'bom' || a.condition === 'novo').length,
