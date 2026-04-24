@@ -21,16 +21,17 @@ export function PublicInspectionView({ inspectionId: propId, locationId: propLoc
 
     if (!id && !locId) {
       // Extract from URL if not through props
-      const parts = window.location.pathname.split('/');
+      const path = window.location.pathname;
+      const hash = window.location.hash || '';
       
-      const localIndex = parts.indexOf('local');
-      if (localIndex !== -1 && parts[localIndex + 1]) {
-        locId = parts[localIndex + 1];
-      } else {
-        const vistoriaIndex = parts.indexOf('vistoria');
-        if (vistoriaIndex !== -1 && parts[vistoriaIndex + 1]) {
-          id = parts[vistoriaIndex + 1];
-        }
+      // More robust regex-based path detection
+      const localMatch = path.match(/\/local\/([^\/]+)/) || hash.match(/\/local\/([^\/]+)/);
+      const vistoriaMatch = path.match(/\/vistoria\/([^\/]+)/) || hash.match(/\/vistoria\/([^\/]+)/);
+
+      if (localMatch && localMatch[1]) {
+        locId = localMatch[1];
+      } else if (vistoriaMatch && vistoriaMatch[1]) {
+        id = vistoriaMatch[1];
       }
     }
     
@@ -39,7 +40,7 @@ export function PublicInspectionView({ inspectionId: propId, locationId: propLoc
     } else if (locId) {
       fetchDataByLocation(locId);
     } else {
-      setError("Link inválido.");
+      setError("Link inválido. Certifique-se de que o QR Code está correto.");
       setLoading(false);
     }
   }, [propId, propLocationId]);
@@ -50,17 +51,17 @@ export function PublicInspectionView({ inspectionId: propId, locationId: propLoc
       setError(null);
 
       // Find latest finalized inspection for this location
-      // Using only one where clause to avoid index requirements
+      // We must explicitly filter by status to match security rules for list operations
       const inspQuery = query(
         collection(firestore, 'inspections'),
-        where('locationId', '==', locId)
+        where('locationId', '==', locId),
+        where('status', '==', 'finalizada')
       );
 
       const inspSnap = await getDocs(inspQuery);
       
       const finishedInspections = inspSnap.docs
         .map(d => ({ id: d.id, ...d.data() } as Inspection))
-        .filter(i => i.status === 'finalizada')
         .sort((a, b) => (b.finalizedAt || 0) - (a.finalizedAt || 0));
 
       if (finishedInspections.length === 0) {
@@ -79,9 +80,15 @@ export function PublicInspectionView({ inspectionId: propId, locationId: propLoc
 
       const latestInsp = finishedInspections[0];
       await fetchDataByInspection(latestInsp.id);
-    } catch (err) {
-      console.error("Erro ao buscar por localização:", err);
-      setError("Falha ao buscar dados do local. Verifique sua conexão.");
+    } catch (err: any) {
+      console.error("fetchDataByLocation error:", err);
+      if (err.message && err.message.toLowerCase().includes('permission')) {
+        setError("Acesso negado. Esta vistoria pode não estar publicada.");
+      } else if (err.message && err.message.includes('index')) {
+        setError("Erro de configuração (índice ausente). O administrador precisa criar o índice no Firebase.");
+      } else {
+        setError("Falha ao buscar dados do local. Verifique sua conexão.");
+      }
       setLoading(false);
     }
   };
@@ -111,18 +118,23 @@ export function PublicInspectionView({ inspectionId: propId, locationId: propLoc
 
       const assetsQuery = query(
         collection(firestore, 'assets'), 
-        where('inspectionId', '==', inspSnap.id)
+        where('inspectionId', '==', inspSnap.id),
+        where('isPublic', '==', true)
       );
       const assetsSnap = await getDocs(assetsQuery);
-      const loadedAssets = assetsSnap.docs
-        .map(doc => ({ id: doc.id, ...doc.data() } as Asset))
-        .filter(a => a.isPublic === true);
+      const loadedAssets = assetsSnap.docs.map(doc => ({ id: doc.id, ...doc.data() } as Asset));
       
       setAssets(loadedAssets.sort((a, b) => b.createdAt - a.createdAt));
       
     } catch (err: any) {
-      console.error(err);
-      setError("Erro ao carregar dados da vistoria.");
+      console.error("fetchDataByInspection error:", err);
+      if (err.message && err.message.toLowerCase().includes('permission')) {
+        setError("Acesso negado. Esta vistoria pode ser privada.");
+      } else if (err.message && err.message.includes('index')) {
+        setError("Erro de configuração (índice ausente). O administrador precisa criar o índice no Firebase.");
+      } else {
+        setError("Erro ao carregar dados da vistoria.");
+      }
     } finally {
       setLoading(false);
     }

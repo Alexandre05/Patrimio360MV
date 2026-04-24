@@ -98,9 +98,14 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
     
     // Duplication Check (only for new items)
     if (!editingAssetId) {
-      const existing = await db.assets.where('hash').equals(hash).first();
-      if (existing) {
-        setDuplicateWarning("Este item já foi cadastrado nesta vistoria ou local.");
+      const existingInSameInspection = await db.assets
+        .where('inspectionId')
+        .equals(id)
+        .and(a => a.hash === hash)
+        .first();
+
+      if (existingInSameInspection) {
+        setDuplicateWarning("Este item já foi cadastrado nesta vistoria.");
         return;
       }
 
@@ -110,8 +115,15 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
         if (globalExisting) {
           const otherInsp = await db.inspections.get(globalExisting.inspectionId);
           const otherLoc = otherInsp ? await db.locations.get(otherInsp.locationId) : null;
-          setDuplicateWarning(`O patrimônio ${newItem.patrimonyNumber} já existe no local "${otherLoc?.name || 'outro setor'}".`);
-          return;
+          
+          // Se for na mesma vistoria, o erro acima já pegou. 
+          // Perguntamos se deseja ignorar e vincular a esta nova vistoria/local.
+          if (confirm(`O patrimônio ${newItem.patrimonyNumber} já está vinculado ao local "${otherLoc?.name || 'outro setor'}". Deseja cadastrá-lo aqui assim mesmo?`)) {
+             // Continue without returning
+          } else {
+             setDuplicateWarning(`O patrimônio ${newItem.patrimonyNumber} já pertence a outro local.`);
+             return;
+          }
         }
       }
     }
@@ -291,7 +303,13 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
       const current = await db.inspections.get(id);
       if (!current) throw new Error("Vistoria não encontrada.");
 
-      const qrCodeDataPayload = `${window.location.origin}/vistoria/${id}`;
+      // Rely on current origin. When deployed/shared, this will be the correct public URL.
+      // We also ensure it uses the hash routing format.
+      let baseUrl = window.location.origin;
+      
+      // Remove trailing slash if exists
+      baseUrl = baseUrl.replace(/\/$/, '');
+      const qrCodeDataPayload = `${baseUrl}/#/vistoria/${id}`;
 
       await db.inspections.put({
         ...current,
@@ -550,7 +568,7 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
               <p>PATRIMÔNIO PÚBLICO - MANOEL VIANA</p>
               <div class="qr">${qrSvg}</div>
               <p>ID: ${inspection?.id.slice(0, 12)}</p>
-              <p style="color: #10b981; font-size: 11px;">DATA: ${formatDate(inspection?.createdAt || 0)}</p>
+              <p style="color: #10b981; font-size: 11px;">DATA: ${formatDate(inspection?.date || 0)}</p>
             </div>
             <script>
               setTimeout(() => { window.print(); window.close(); }, 500);
@@ -725,7 +743,7 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
               <QRCodeSVG value={inspection.qrCodeData || ''} size={160} />
               <div className="flex flex-col items-center">
                 <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest leading-none">ID: {inspection.id.slice(0,8)}</span>
-                <span className="text-[9px] font-black text-emerald-600 uppercase tracking-widest mt-1">{formatDate(inspection.createdAt)}</span>
+                <span className="text-[9px] font-black text-emerald-600 uppercase tracking-widest mt-1">{formatDate(inspection.date)}</span>
               </div>
             </div>
             <div className="flex flex-col gap-5">

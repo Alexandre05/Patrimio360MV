@@ -70,6 +70,8 @@ export function Dashboard() {
   const [isResetting, setIsResetting] = useState(false);
   const isOnline = useOnlineStatus();
 
+  const currentSettings = useLiveQuery(() => db.settings.get('current'));
+
   useEffect(() => {
     const processScanned = async () => {
       const scanned = sessionStorage.getItem('scanned_id');
@@ -125,7 +127,10 @@ export function Dashboard() {
   }, [user]);
 
   if (selectedInspectionId) {
-    return <InspectionView id={selectedInspectionId} onBack={() => setSelectedInspectionId(null)} />;
+    return <InspectionView id={selectedInspectionId} onBack={() => {
+      setSelectedInspectionId(null);
+      window.history.replaceState({}, '', '/');
+    }} />;
   }
 
   const handleTabChange = (tab: typeof activeTab) => {
@@ -278,21 +283,56 @@ export function Dashboard() {
                     {isManager && (
                       <button onClick={async () => {
                         const allInspections = await db.inspections.toArray();
-                        let cleared = 0;
+                        const allLocations = await db.locations.toArray();
+                        let clearedInps = 0;
+                        let clearedAssets = 0;
+                        let clearedLocs = 0;
+                        
+                        // 1. Clear Empty Inspections
                         for (const i of allInspections) {
                            const c = await db.assets.where('inspectionId').equals(i.id).count();
                            if (c === 0) {
                               await db.inspections.delete(i.id);
                               try { await deleteDoc(doc(firestore, 'inspections', i.id)); } catch(e){}
-                              cleared++;
+                              clearedInps++;
                            }
                         }
-                        if (cleared > 0) {
-                          alert(`${cleared} vistorias vazias foram removidas.`);
+
+                        // 2. Clear Empty Locations
+                        for (const l of allLocations) {
+                          const c = await db.inspections.where('locationId').equals(l.id).count();
+                          if (c === 0) {
+                            await db.locations.delete(l.id);
+                            try { await deleteDoc(doc(firestore, 'locations', l.id)); } catch(e){}
+                            clearedLocs++;
+                          }
+                        }
+
+                        // 3. Clear Orphan Assets
+                        const allAssets = await db.assets.toArray();
+                        for (const a of allAssets) {
+                          const insp = await db.inspections.get(a.inspectionId);
+                          if (!insp) {
+                            await db.assets.delete(a.id);
+                            try { await deleteDoc(doc(firestore, 'assets', a.id)); } catch(e){}
+                            clearedAssets++;
+                          }
+                        }
+
+                        if (clearedInps > 0 || clearedAssets > 0 || clearedLocs > 0) {
+                          alert(`Limpeza concluída:\n- ${clearedLocs} Locais vazios\n- ${clearedInps} Vistorias vazias\n- ${clearedAssets} Itens órfãos`);
                           window.location.reload();
                         }
-                        else alert('Nenhuma vistoria vazia encontrada.');
+                        else alert('Nenhuma irregularidade encontrada.');
                       }} className="text-[10px] font-black uppercase text-slate-400 hover:text-rose-500 transition-colors underline underline-offset-4">Limpar Fantasmas</button>
+                    )}
+                    {isManager && (
+                      <button onClick={async () => {
+                        if (confirm("ATENÇÃO: Isso irá apagar TODOS os dados locais (vistorias não sincronizadas serão perdidas). Deseja continuar?")) {
+                          await db.delete();
+                          window.location.reload();
+                        }
+                      }} className="text-[10px] font-black uppercase text-rose-500 hover:text-rose-700 transition-colors underline underline-offset-4">Resetar Banco Local</button>
                     )}
                     <div className="hidden sm:flex items-center gap-3 px-6 py-4 bg-white/5 border border-white/10 rounded-2xl backdrop-blur-sm">
                       <Clock className="w-5 h-5 text-slate-500" />

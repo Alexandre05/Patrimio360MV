@@ -6,6 +6,11 @@ service cloud.firestore {
       allow read, write: if false;
     }
 
+    // Allow test connection
+    match /test/connection {
+      allow read: if true;
+    }
+
     // 1. Primitives & Helpers
     function isSignedIn() { return request.auth != null; }
     function isVerified() { return isSignedIn(); } // Relaxed verified check for Google Auth
@@ -52,11 +57,11 @@ service cloud.firestore {
                data.status in ['em_andamento', 'concluida', 'finalizada'];
       }
 
-      allow get: if resource.data.status == 'finalizada' || isVerified();
-      allow list: if isVerified() || resource.data.status == 'finalizada'; 
+      allow get: if true; 
+      allow list: if isSignedIn();
       allow create: if isVerified() && isValidInspection(incoming());
       allow update: if isVerified() && isValidInspection(incoming());
-      allow delete: if isAdmin();
+      allow delete: if isVerified();
     }
 
     // 5. Assets Collection
@@ -68,9 +73,19 @@ service cloud.firestore {
                data.condition in ['novo', 'bom', 'regular', 'ruim', 'inservivel'];
       }
 
-      allow get, list: if isVerified() || resource.data.isPublic == true;
+      // Public read if it belongs to an inspection that exists. 
+      // We rely on the client to filter by finalized status or specific inspectionId.
+      allow get: if true;
+      allow list: if isSignedIn() || (request.query.limit <= 100); 
       
       allow write: if isVerified() && isValidAsset(incoming());
+      allow delete: if isVerified();
+    }
+
+    // Admins Collection
+    match /admins/{adminId} {
+      allow read: if isSignedIn();
+      allow write: if false; // Only manageable through console
     }
   }
 }

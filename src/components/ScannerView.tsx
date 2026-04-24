@@ -1,10 +1,10 @@
 import React, { useEffect, useState, useRef } from 'react';
 import { Html5QrcodeScanner, Html5QrcodeScanType } from 'html5-qrcode';
-import { Camera, X, Box, CheckCircle2, ChevronRight, Share, Search } from 'lucide-react';
+import { Camera, X, Box, CheckCircle2, ChevronRight, Share, Search, Info, ExternalLink } from 'lucide-react';
 import { Button, Card } from './UI';
 import { db, Inspection, Asset } from '../lib/db';
-import { db as firestore } from '../lib/firebase';
-import { doc, getDoc, collection, query, where, getDocs } from 'firebase/firestore';
+import { db as firestore, auth } from '../lib/firebase';
+import { doc, getDoc, collection, query, where, getDocs, limit } from 'firebase/firestore';
 
 export function ScannerView({ onOpenInspection }: { onOpenInspection: (id: string, locationId: string) => void }) {
   const [scanResult, setScanResult] = useState<string | null>(null);
@@ -113,13 +113,32 @@ export function ScannerView({ onOpenInspection }: { onOpenInspection: (id: strin
          const inspSnap = await getDoc(inspRef);
          if (inspSnap.exists()) {
            const data = inspSnap.data() as Inspection;
-           await db.inspections.put({ id: inspSnap.id, ...data } as any);
+           await db.inspections.put({ id: inspSnap.id, ...(data as any) } as any);
            
-           // Fetch assets just in case they aren't synced yet
-           const assetsQuery = query(collection(firestore, 'assets'), where('inspectionId', '==', inspSnap.id));
-           const assetsSnap = await getDocs(assetsQuery);
-           const assetsPromises = assetsSnap.docs.map(doc => db.assets.put({ id: doc.id, ...doc.data() } as any));
-           await Promise.all(assetsPromises);
+           // Fetch assets - restricted query for public security compatibility
+           let assetsQuery;
+           if (auth.currentUser) {
+             assetsQuery = query(
+               collection(firestore, 'assets'), 
+               where('inspectionId', '==', inspSnap.id),
+               limit(100)
+             );
+           } else {
+             assetsQuery = query(
+               collection(firestore, 'assets'), 
+               where('inspectionId', '==', inspSnap.id),
+               where('isPublic', '==', true),
+               limit(100)
+             );
+           }
+           
+           try {
+             const assetsSnap = await getDocs(assetsQuery);
+             const assetsPromises = assetsSnap.docs.map(doc => db.assets.put({ id: doc.id, ...(doc.data() as any) } as any));
+             await Promise.all(assetsPromises);
+           } catch(e) {
+             console.warn("Assets sync failed (likely permission-related), continuing with metadata only.");
+           }
 
            onOpenInspection(inspSnap.id, data.locationId);
            return;
@@ -133,15 +152,19 @@ export function ScannerView({ onOpenInspection }: { onOpenInspection: (id: strin
          }
       }
 
-      setError("Vistoria não encontrada");
+      setError("Vistoria não encontrada ou acesso negado.");
       setScanResult(null);
       if (scannerRef.current) {
         try { scannerRef.current.resume(); } catch(e){}
       }
 
-    } catch (err) {
+    } catch (err: any) {
       console.error(err);
-      setError("Erro ao processar o QR Code.");
+      if (err.message && err.message.toLowerCase().includes('permission')) {
+         setError("Erro 403: Acesso negado aos dados. Verifique login.");
+      } else {
+         setError("Erro ao processar o QR Code.");
+      }
       setScanResult(null);
       if (scannerRef.current) {
         try { scannerRef.current.resume(); } catch(e){}
@@ -150,6 +173,17 @@ export function ScannerView({ onOpenInspection }: { onOpenInspection: (id: strin
       if (loading) {
          setLoading(false);
       }
+    }
+  };
+
+  const openGoogleLens = () => {
+    // There is no direct web API to trigger Google Lens perfectly across platforms,
+    // but on Android we can try an intent. On iOS/others, we just open Google.
+    const isAndroid = /Android/i.test(navigator.userAgent);
+    if (isAndroid) {
+      window.location.href = "intent://#Intent;scheme=googleapp;package=com.google.android.googlequicksearchbox;action=com.google.zxing.client.android.SCAN;end";
+    } else {
+      window.open("https://www.google.com/search?q=google+lens", "_blank");
     }
   };
 
@@ -187,6 +221,27 @@ export function ScannerView({ onOpenInspection }: { onOpenInspection: (id: strin
            {error && (
              <div className="text-rose-500 mt-4 text-center font-bold bg-rose-50 p-3 rounded-xl border border-rose-100">{error}</div>
            )}
+
+           <div className="mt-6 flex flex-col gap-3">
+              <div className="flex items-start gap-3 p-4 bg-blue-50/50 rounded-2xl border border-blue-100 text-blue-700 text-sm">
+                <Info className="w-5 h-5 flex-shrink-0 mt-0.5" />
+                <p>O leitor integrado pode ter dificuldades em ambientes com pouca luz ou códigos muito pequenos.</p>
+              </div>
+
+              <Button 
+                variant="outline" 
+                onClick={openGoogleLens}
+                className="w-full py-4 border-slate-200 hover:border-primary hover:text-primary transition-all group rounded-2xl flex items-center justify-center gap-3"
+              >
+                <div className="w-8 h-8 rounded-lg bg-gradient-to-tr from-yellow-400 via-rose-500 to-blue-500 p-[2px] flex items-center justify-center">
+                   <div className="w-full h-full bg-white rounded-md flex items-center justify-center">
+                      <Search className="w-4 h-4 text-slate-700" />
+                   </div>
+                </div>
+                <span className="font-bold">Abrir com Google Lens</span>
+                <ExternalLink className="w-4 h-4 opacity-0 group-hover:opacity-100 transition-opacity" />
+              </Button>
+           </div>
         </Card>
       </div>
 

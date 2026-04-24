@@ -63,21 +63,29 @@ export interface Asset {
   isPublic?: boolean;
 }
 
+export interface AppSettings {
+  id: 'current';
+  publicBaseUrl?: string;
+  municipalityName?: string;
+}
+
 export class PatrimonyDatabase extends Dexie {
   users!: Table<User>;
   locations!: Table<Location>;
   inspections!: Table<Inspection>;
   assets!: Table<Asset>;
   notifications!: Table<Notification>;
+  settings!: Table<AppSettings>;
 
   constructor() {
     super('PatrimonyDB');
-    this.version(5).stores({
+    this.version(6).stores({
       users: 'userId, email, role',
       locations: 'id, name, internalCode',
       inspections: 'id, locationId, status, date',
       assets: 'id, inspectionId, hash, needsSync, createdAt, patrimonyNumber',
-      notifications: 'id, type, date, read, targetUserId'
+      notifications: 'id, type, date, read, targetUserId',
+      settings: 'id'
     });
   }
 }

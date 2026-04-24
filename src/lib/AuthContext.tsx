@@ -2,7 +2,7 @@ import React, { createContext, useContext, useEffect, useState } from 'react';
 import { User, db as localDb } from './db';
 import { auth, db as firestore, googleProvider } from './firebase';
 import { onAuthStateChanged, signInWithPopup, signOut as firebaseSignOut } from 'firebase/auth';
-import { doc, getDoc, setDoc, collection, query, where, getDocs } from 'firebase/firestore';
+import { doc, getDoc, setDoc, collection, query, where, getDocs, limit } from 'firebase/firestore';
 
 interface AuthContextType {
   user: User | null;
@@ -44,12 +44,31 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const checkFirstUser = async () => {
+    // Only check if explicitly needed or as a one-time safety check
+    // We avoid doing this on every unauthenticated load to prevent console 403 errors
+    if (auth.currentUser) {
+      setIsFirstUser(false);
+      return;
+    }
+    
+    // Improved logic: skip check if browser already has user session or if it's a known non-first-user environment
+    if (localStorage.getItem('not_first_user')) {
+      setIsFirstUser(false);
+      return;
+    }
+
     try {
-      const q = query(collection(firestore, 'users'));
+      // Limit to 1 to minimize read cost and check existence efficiently
+      const q = query(collection(firestore, 'users'), limit(1));
       const snapshot = await getDocs(q);
-      setIsFirstUser(snapshot.empty);
+      const isEmpty = snapshot.empty;
+      setIsFirstUser(isEmpty);
+      if (!isEmpty) {
+        localStorage.setItem('not_first_user', 'true');
+      }
     } catch (e) {
-      console.warn("Could not check users count. Defaulting to login.", e);
+      // 403 is expected for public users if rules are tight. That's fine.
+      console.log("Check users skipped/denied (Public Access).");
       setIsFirstUser(false); 
     }
   };

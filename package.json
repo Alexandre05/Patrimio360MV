@@ -13,14 +13,16 @@
   "dependencies": {
     "@google/genai": "^1.29.0",
     "@tailwindcss/vite": "^4.1.14",
+    "@types/connect-history-api-fallback": "^1.5.4",
     "@types/uuid": "^10.0.0",
     "@vitejs/plugin-react": "^5.0.4",
     "clsx": "^2.1.1",
+    "connect-history-api-fallback": "^2.0.0",
     "date-fns": "^4.1.0",
     "dexie": "^4.4.2",
     "dexie-react-hooks": "^4.4.0",
     "dotenv": "^17.2.3",
-    "express": "^4.21.2",
+    "express": "^5.0.1",
     "firebase": "^12.12.1",
     "html5-qrcode": "^2.3.8",
     "jspdf": "^4.2.1",
@@ -35,7 +37,7 @@
     "vite": "^6.2.0"
   },
   "devDependencies": {
-    "@types/express": "^4.17.21",
+    "@types/express": "^4.17.25",
     "@types/node": "^22.14.0",
     "autoprefixer": "^10.4.21",
     "tailwindcss": "^4.1.14",

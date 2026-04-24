@@ -7,13 +7,11 @@ import React, { useState, useEffect } from 'react';
 import { AuthProvider, useAuth } from './lib/AuthContext';
 import { Dashboard } from './components/Dashboard';
 import { Card, Button, Input } from './components/UI';
-import { Building2, LogIn, ShieldCheck } from 'lucide-react';
+import { Building2, LogIn, ShieldCheck, UserPlus, UserCheck, Search } from 'lucide-react';
 import { seedDatabase } from './lib/seed';
 import { db } from './lib/db';
 import { db as firestore } from './lib/firebase';
 import { doc, deleteDoc } from 'firebase/firestore';
-
-import { UserPlus, UserCheck } from 'lucide-react';
 
 import { PublicInspectionView } from './components/PublicInspectionView';
 
@@ -168,6 +166,26 @@ function LoginScreen() {
           <Button type="submit" loading={loading} icon={LogIn} className="h-14 text-lg">
             ACESSAR SISTEMA
           </Button>
+          
+          <div className="relative py-2">
+            <div className="absolute inset-0 flex items-center"><div className="w-full border-t border-slate-200"></div></div>
+            <div className="relative flex justify-center text-[10px] uppercase font-black text-slate-400 bg-slate-50 px-4">Ou</div>
+          </div>
+
+          <Button 
+            type="button"
+            variant="outline"
+            onClick={() => {
+               // We don't have a scanner on the login screen yet, but we can redirect 
+               // to a path that shows it if we wanted. 
+               // For now, let's just use a special query param or state.
+               window.location.href = '?view=scanner';
+            }}
+            icon={Search}
+            className="h-12 border-slate-200 text-slate-600 hover:text-slate-900"
+          >
+            CONSULTAR QR CODE PÚBLICO
+          </Button>
         </form>
 
         <div className="flex flex-col gap-4 w-full">
@@ -193,29 +211,47 @@ function LoginScreen() {
   );
 }
 
+import { PublicScannerView } from './components/PublicScannerView';
+
 function Main() {
   const { user, loading, isFirstUser } = useAuth();
   
-  const [routeInfo, setRouteInfo] = useState<{ id: string | null; mode: 'vistoria' | 'local' | null }>(() => {
+  const [routeInfo, setRouteInfo] = useState<{ id: string | null; mode: 'vistoria' | 'local' | 'scanner' | null }>(() => getRouteInfo());
+
+  function getRouteInfo() {
     const path = window.location.pathname;
+    const hash = window.location.hash || '';
     
-    // Improved detection using regex for robustness
-    const vistoriaMatch = path.match(/\/vistoria\/([^\/]+)/);
+    // Check both path and hash for compatibility
+    const vistoriaMatch = path.match(/\/vistoria\/([^\/]+)/) || hash.match(/\/vistoria\/([^\/]+)/);
     if (vistoriaMatch && vistoriaMatch[1]) {
       return { id: vistoriaMatch[1], mode: 'vistoria' };
     }
     
-    const localMatch = path.match(/\/local\/([^\/]+)/);
+    const localMatch = path.match(/\/local\/([^\/]+)/) || hash.match(/\/local\/([^\/]+)/);
     if (localMatch && localMatch[1]) {
       return { id: localMatch[1], mode: 'local' };
     }
     
     const params = new URLSearchParams(window.location.search);
     const queryViewId = params.get('view');
-    if (queryViewId) return { id: queryViewId, mode: 'vistoria' };
+    if (queryViewId === 'scanner') return { id: 'public', mode: 'scanner' };
     
     return { id: null, mode: null };
-  });
+  }
+
+  useEffect(() => {
+    const handleHashChange = () => {
+      setRouteInfo(getRouteInfo());
+      window.scrollTo(0, 0); // Reset scroll on route change
+    };
+    window.addEventListener('hashchange', handleHashChange);
+    window.addEventListener('popstate', handleHashChange);
+    return () => {
+      window.removeEventListener('hashchange', handleHashChange);
+      window.removeEventListener('popstate', handleHashChange);
+    };
+  }, []);
 
   useEffect(() => {
     seedDatabase().catch(err => {
@@ -246,20 +282,30 @@ function Main() {
     cleanupEmptyInspections();
   }, [user]);
 
-  // Se tem public view ID na URL, ignora qlq coisa e decide:
-  if (routeInfo.id) {
-    if (user && !loading) {
-       // Se está logado, salva o ID (seja vistoria ou local) e entra no Dashboard
-       // O Dashboard já possui lógica para diferenciar se o ID é de uma vistoria ou de um local
-       sessionStorage.setItem('scanned_id', routeInfo.id);
+  // Handle Public Scanner
+  if (routeInfo.mode === 'scanner') {
+    return <PublicScannerView onBack={() => {
        setRouteInfo({ id: null, mode: null });
        window.history.replaceState({}, '', '/');
+    }} />;
+  }
+
+  // Se tem public view ID na URL, decide o que mostrar:
+  if (routeInfo.id) {
+    if (user) {
+       // Se está logado, salva o ID e entra no Dashboard
+       sessionStorage.setItem('scanned_id', routeInfo.id);
+       // We'll reset routeInfo via state or effect if we wanted, but for now 
+       // let Dashboard handle the scanned_id on start.
        return <Dashboard />;
     } else if (!loading && !user) {
-       // Se tem certeza que não tá logado, mostra o Public View read-only
+       // Se terminou de carregar e não tem usuário, mostra público
+       return <PublicInspectionView inspectionId={routeInfo.mode === 'vistoria' ? routeInfo.id : undefined} locationId={routeInfo.mode === 'local' ? routeInfo.id : undefined} />;
+    } else if (loading) {
+       // Se ainda está carregando auth, mas temos um link de vistoria, 
+       // podemos mostrar o Public Inspection direto para evitar o loading pulse.
        return <PublicInspectionView inspectionId={routeInfo.mode === 'vistoria' ? routeInfo.id : undefined} locationId={routeInfo.mode === 'local' ? routeInfo.id : undefined} />;
     }
-    // se estiver em loading, ignora e espera
   }
 
   if (loading) {

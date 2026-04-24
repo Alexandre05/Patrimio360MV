@@ -114,6 +114,7 @@ interface ButtonProps {
   type?: "button" | "submit" | "reset";
   disabled?: boolean;
   size?: 'sm' | 'md' | 'lg';
+  title?: string;
 }
 
 export function Button({ 
@@ -171,10 +172,11 @@ interface InputProps {
   onChange?: (e: any) => void;
   className?: string;
   id?: string;
+  hint?: string;
 }
 
 export const Input = React.forwardRef<HTMLInputElement, InputProps>(
-  ({ label, error, className, id, ...props }, ref) => {
+  ({ label, error, hint, className, id, ...props }, ref) => {
     return (
       <div className="flex flex-col gap-2 w-full">
         {label && <label className="text-[11px] font-black uppercase tracking-widest text-slate-400 ml-1">{label}</label>}
@@ -189,6 +191,7 @@ export const Input = React.forwardRef<HTMLInputElement, InputProps>(
           {...props}
         />
         {error && <span className="text-[10px] font-bold text-red-500 ml-1 uppercase tracking-tight">{error}</span>}
+        {hint && !error && <span className="text-[10px] font-medium text-slate-400 ml-1 italic">{hint}</span>}
       </div>
     );
   }
