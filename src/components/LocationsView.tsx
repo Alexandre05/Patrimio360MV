@@ -168,6 +168,26 @@ export function LocationsView({ onSelectInspection }: { onSelectInspection: (id:
     }
   };
 
+  const handleDeleteAllEmptyInspections = async (locId: string) => {
+    const locInspections = inspections?.filter(i => i.locationId === locId) || [];
+    let deletedCount = 0;
+    
+    for (const insp of locInspections) {
+      const assetsCount = await db.assets.where('inspectionId').equals(insp.id).count();
+      if (assetsCount === 0) {
+        try { await deleteDoc(doc(firestore, 'inspections', insp.id)); } catch(e) {}
+        await db.inspections.delete(insp.id);
+        deletedCount++;
+      }
+    }
+    
+    if (deletedCount > 0) {
+      alert(`${deletedCount} vistoria(s) vazia(s) removida(s), incluindo homologadas.`);
+    } else {
+      alert("Nenhuma vistoria vazia encontrada para este local.");
+    }
+  };
+
   return (
     <div className="flex flex-col gap-8 animate-in fade-in duration-700 pb-20">
       {showHistoryFor && (
@@ -267,7 +287,15 @@ export function LocationsView({ onSelectInspection }: { onSelectInspection: (id:
                 )}
              </div>
              
-             <div className="p-6 bg-slate-50 border-t border-slate-100 shrink-0 flex justify-end">
+             <div className="p-6 bg-slate-50 border-t border-slate-100 shrink-0 flex items-center justify-between">
+                {isManager && (
+                  <button 
+                    onClick={() => handleDeleteAllEmptyInspections(showHistoryFor)}
+                    className="text-[9px] font-black text-rose-500 hover:text-rose-600 uppercase tracking-widest px-4 py-2 bg-rose-50 hover:bg-rose-100 rounded-xl transition-all"
+                  >
+                    Excluir Vazias
+                  </button>
+                )}
                 <Button onClick={() => handleStartInspection(showHistoryFor)} variant="accent" icon={Plus} className="rounded-2xl px-8 uppercase font-black text-[10px] tracking-widest h-12 shadow-xl shadow-blue-600/20">
                   Nova Vistoria Agora
                 </Button>

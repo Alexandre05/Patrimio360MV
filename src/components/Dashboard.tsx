@@ -280,16 +280,17 @@ export function Dashboard() {
                         const allInspections = await db.inspections.toArray();
                         let cleared = 0;
                         for (const i of allInspections) {
-                           if (i.status === 'concluida' || i.status === 'finalizada') {
-                             const c = await db.assets.where('inspectionId').equals(i.id).count();
-                             if (c === 0) {
-                               await db.inspections.delete(i.id);
-                               try { await deleteDoc(doc(firestore, 'inspections', i.id)); } catch(e){}
-                               cleared++;
-                             }
+                           const c = await db.assets.where('inspectionId').equals(i.id).count();
+                           if (c === 0) {
+                              await db.inspections.delete(i.id);
+                              try { await deleteDoc(doc(firestore, 'inspections', i.id)); } catch(e){}
+                              cleared++;
                            }
                         }
-                        if (cleared > 0) window.location.reload();
+                        if (cleared > 0) {
+                          alert(`${cleared} vistorias vazias foram removidas.`);
+                          window.location.reload();
+                        }
                         else alert('Nenhuma vistoria vazia encontrada.');
                       }} className="text-[10px] font-black uppercase text-slate-400 hover:text-rose-500 transition-colors underline underline-offset-4">Limpar Fantasmas</button>
                     )}

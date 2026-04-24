@@ -304,7 +304,7 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
       // Mark all assets as public for public view without O(N) get() in rules
       const assets = await db.assets.where('inspectionId').equals(id).toArray();
       for (const asset of assets) {
-        await db.assets.update(asset.id, { isPublic: true as any, needsSync: true as any });
+        await db.assets.update(asset.id, { isPublic: true, needsSync: true });
       }
       
       await syncInspection(id);
@@ -550,6 +550,7 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
               <p>PATRIMÔNIO PÚBLICO - MANOEL VIANA</p>
               <div class="qr">${qrSvg}</div>
               <p>ID: ${inspection?.id.slice(0, 12)}</p>
+              <p style="color: #10b981; font-size: 11px;">DATA: ${formatDate(inspection?.createdAt || 0)}</p>
             </div>
             <script>
               setTimeout(() => { window.print(); window.close(); }, 500);
@@ -569,6 +570,21 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
   const isFinalized = inspection.status === 'finalizada';
   const isConcluded = inspection.status === 'concluida';
   const isLocked = isFinalized || isConcluded; // Bloquear se concluída ou finalizada
+
+  const handleBack = async () => {
+    if (inspection?.status === 'em_andamento') {
+      const assetsCount = await db.assets.where('inspectionId').equals(id).count();
+      if (assetsCount === 0) {
+        const discard = window.confirm("🗑️ VISTORIA VAZIA: Deseja descartar esta vistoria antes de sair?\n\n(Se você clicar em OK, a vistoria será apagada. Se clicar em CANCELAR, ela ficará salva como rascunho)");
+        if (discard) {
+          try { await deleteDoc(doc(firestore, 'inspections', id)); } catch(e) {}
+          await db.inspections.delete(id);
+          console.log("Vistoria vazia descartada ao voltar.");
+        }
+      }
+    }
+    onBack();
+  };
 
   return (
     <div className="flex flex-col gap-8 animate-in slide-in-from-right-4 duration-500 pb-20">
@@ -591,13 +607,13 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
 
       <header className="flex items-center justify-between sticky top-0 md:relative z-40 py-4 bg-bg/80 backdrop-blur-md md:bg-transparent">
         <div className="flex items-center gap-4">
-          <button onClick={onBack} className="flex items-center gap-2 text-slate-400 font-bold hover:text-slate-900 transition-all group">
+          <button onClick={handleBack} className="flex items-center gap-2 text-slate-400 font-bold hover:text-slate-900 transition-all group">
             <ArrowLeft className="w-5 h-5 transition-transform group-hover:-translate-x-1" /> VOLTAR
           </button>
           <div className="w-px h-4 bg-slate-200 hidden md:block" />
           <button 
             onClick={() => {
-              onBack();
+              handleBack();
               // This is a bit hacky as we don't have direct access to setActiveTab here, 
               // but since onBack resets selectedInspectionId, it returns to the last active tab.
               // If the user wants HOME specifically, they can click home in the dashboard header after this.
@@ -707,7 +723,10 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
           <Card className="flex flex-col md:flex-row items-center gap-10 p-10 border-emerald-100 bg-white group hover:shadow-2xl transition-all duration-500 rounded-[3rem]">
             <div id="qr-code-container" className="p-6 bg-slate-50 rounded-[2.5rem] border border-slate-100 shadow-inner group-hover:bg-white transition-all duration-500 flex flex-col items-center gap-3">
               <QRCodeSVG value={inspection.qrCodeData || ''} size={160} />
-              <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest">ID: {inspection.id.slice(0,8)}</span>
+              <div className="flex flex-col items-center">
+                <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest leading-none">ID: {inspection.id.slice(0,8)}</span>
+                <span className="text-[9px] font-black text-emerald-600 uppercase tracking-widest mt-1">{formatDate(inspection.createdAt)}</span>
+              </div>
             </div>
             <div className="flex flex-col gap-5">
               <div className="flex items-center gap-3">

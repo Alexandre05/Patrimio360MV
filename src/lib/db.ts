@@ -60,6 +60,7 @@ export interface Asset {
   createdAt: number;
   hash: string; // name + patrimony + locationId
   needsSync: boolean;
+  isPublic?: boolean;
 }
 
 export class PatrimonyDatabase extends Dexie {

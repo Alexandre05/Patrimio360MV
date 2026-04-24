@@ -3,7 +3,8 @@ import { db as firestore } from '../lib/firebase';
 import { doc, getDoc, collection, query, where, getDocs, orderBy, limit } from 'firebase/firestore';
 import { Inspection, Location, Asset } from '../lib/db';
 import { formatDate } from '../lib/utils';
-import { ShieldCheck, MapPin, Search, Box, CheckCircle2, AlertTriangle, AlertCircle, XCircle } from 'lucide-react';
+import { ShieldCheck, MapPin, Search, Box, CheckCircle2, AlertTriangle, AlertCircle, XCircle, Maximize2, X, Calendar } from 'lucide-react';
+import { motion, AnimatePresence } from 'motion/react';
 
 export function PublicInspectionView({ inspectionId: propId, locationId: propLocationId }: { inspectionId?: string; locationId?: string }) {
   const [inspection, setInspection] = useState<Inspection | null>(null);
@@ -12,6 +13,7 @@ export function PublicInspectionView({ inspectionId: propId, locationId: propLoc
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
+  const [selectedImage, setSelectedImage] = useState<string | null>(null);
 
   useEffect(() => {
     let id = propId;
@@ -196,6 +198,36 @@ export function PublicInspectionView({ inspectionId: propId, locationId: propLoc
 
   return (
     <div className="min-h-screen bg-slate-50 font-sans pb-20">
+      <AnimatePresence>
+        {selectedImage && (
+          <motion.div 
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-[100] bg-black/95 flex items-center justify-center p-4 backdrop-blur-sm"
+            onClick={() => setSelectedImage(null)}
+          >
+            <motion.button 
+              initial={{ scale: 0.5, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              className="absolute top-6 right-6 w-12 h-12 bg-white/10 hover:bg-white/20 text-white rounded-full flex items-center justify-center backdrop-blur-md transition-colors"
+              onClick={() => setSelectedImage(null)}
+            >
+              <X className="w-6 h-6" />
+            </motion.button>
+            <motion.img 
+              initial={{ scale: 0.9, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              transition={{ type: 'spring', damping: 25, stiffness: 300 }}
+              src={selectedImage} 
+              alt="Imagem ampliada" 
+              className="max-w-full max-h-[90vh] rounded-2xl shadow-2xl"
+              onClick={(e) => e.stopPropagation()}
+            />
+          </motion.div>
+        )}
+      </AnimatePresence>
+
       {/* Header Banner */}
       <div className="bg-emerald-600 text-white pt-12 pb-24 px-6 rounded-b-[3rem] shadow-lg relative overflow-hidden">
         {/* Abstract pattern background */}
@@ -216,9 +248,15 @@ export function PublicInspectionView({ inspectionId: propId, locationId: propLoc
              <ShieldCheck className="w-8 h-8 text-white" />
            </div>
            <h1 className="text-3xl font-black tracking-tight mb-2 uppercase leading-none">Vistoria Homologada</h1>
-           <p className="text-emerald-100 font-medium tracking-wide text-sm bg-black/10 px-4 py-1.5 rounded-full inline-block">
-             ID: {inspection.id.slice(0, 12).toUpperCase()}
-           </p>
+           <div className="flex flex-col items-center gap-2">
+             <p className="text-emerald-100 font-medium tracking-wide text-sm bg-black/10 px-4 py-1.5 rounded-full inline-block">
+               ID: {inspection.id.slice(0, 12).toUpperCase()}
+             </p>
+             <div className="flex items-center gap-1.5 text-emerald-50 text-xs font-bold uppercase tracking-widest opacity-80">
+               <Calendar className="w-3.5 h-3.5" />
+               Realizada em {formatDate(inspection.createdAt)}
+             </div>
+           </div>
         </div>
       </div>
 
@@ -322,10 +360,19 @@ export function PublicInspectionView({ inspectionId: propId, locationId: propLoc
                  )}
 
                  {(asset.photos && asset.photos.length > 0) && (
-                   <div className="flex gap-2 overflow-x-auto snap-x pb-2 [&::-webkit-scrollbar]:hidden">
+                   <div className="flex gap-3 overflow-x-auto snap-x pb-2 [&::-webkit-scrollbar]:hidden">
                      {asset.photos.map((photo, idx) => (
-                       <div key={idx} className="rounded-2xl shrink-0 w-[85%] overflow-hidden aspect-video relative outline outline-1 outline-slate-100 snap-center">
-                          <img src={photo} alt={`${asset.name} - Foto ${idx + 1}`} className="absolute inset-0 w-full h-full object-cover" loading="lazy" />
+                       <div 
+                         key={idx} 
+                         onClick={() => setSelectedImage(photo)}
+                         className="rounded-2xl shrink-0 w-[85%] overflow-hidden aspect-video relative outline outline-1 outline-slate-100 snap-center cursor-zoom-in group/photo"
+                       >
+                          <img src={photo} alt={`${asset.name} - Foto ${idx + 1}`} className="absolute inset-0 w-full h-full object-cover transition-transform duration-500 group-hover/photo:scale-110" loading="lazy" />
+                          <div className="absolute inset-0 bg-black/20 opacity-0 group-hover/photo:opacity-100 transition-opacity flex items-center justify-center">
+                            <div className="bg-white/20 backdrop-blur-md p-3 rounded-full text-white">
+                              <Maximize2 className="w-6 h-6" />
+                            </div>
+                          </div>
                        </div>
                      ))}
                    </div>
