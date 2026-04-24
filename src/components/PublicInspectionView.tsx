@@ -3,7 +3,7 @@ import { db as firestore } from '../lib/firebase';
 import { doc, getDoc, collection, query, where, getDocs, orderBy, limit } from 'firebase/firestore';
 import { Inspection, Location, Asset } from '../lib/db';
 import { formatDate } from '../lib/utils';
-import { ShieldCheck, MapPin, Search, Box, CheckCircle2, AlertTriangle, AlertCircle, XCircle, Maximize2, X, Calendar } from 'lucide-react';
+import { ShieldCheck, MapPin, Search, Box, CheckCircle2, AlertTriangle, AlertCircle, XCircle, Maximize2, X, Calendar, Landmark } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 
 export function PublicInspectionView({ inspectionId: propId, locationId: propLocationId }: { inspectionId?: string; locationId?: string }) {
@@ -143,11 +143,11 @@ export function PublicInspectionView({ inspectionId: propId, locationId: propLoc
   };
 
   const conditionColors: Record<string, string> = {
-    'novo': 'bg-emerald-100 text-emerald-800 border-emerald-200',
-    'bom': 'bg-blue-100 text-blue-800 border-blue-200',
-    'regular': 'bg-amber-100 text-amber-800 border-amber-200',
-    'ruim': 'bg-orange-100 text-orange-800 border-orange-200',
-    'inservivel': 'bg-rose-100 text-rose-800 border-rose-200'
+    'novo': 'bg-emerald-50 text-emerald-700 border-emerald-200',
+    'bom': 'bg-emerald-50 text-emerald-700 border-emerald-200',
+    'regular': 'bg-amber-50 text-amber-700 border-amber-200',
+    'ruim': 'bg-rose-50 text-rose-700 border-rose-200',
+    'inservivel': 'bg-rose-50 text-rose-700 border-rose-200'
   };
 
   const getConditionIcon = (condition: string) => {
@@ -165,8 +165,8 @@ export function PublicInspectionView({ inspectionId: propId, locationId: propLoc
     return (
       <div className="min-h-screen bg-slate-50 flex items-center justify-center p-6">
         <div className="flex flex-col items-center gap-4 animate-pulse">
-           <Search className="w-12 h-12 text-emerald-500 animate-spin" />
-           <p className="text-emerald-700 font-medium">Buscando informações da vistoria...</p>
+           <Search className="w-12 h-12 text-blue-600 animate-spin" />
+           <p className="text-blue-800 font-medium tracking-tight">Buscando informações oficiais...</p>
         </div>
       </div>
     );
@@ -175,12 +175,12 @@ export function PublicInspectionView({ inspectionId: propId, locationId: propLoc
   if (error || !inspection) {
     return (
       <div className="min-h-screen bg-slate-50 flex items-center justify-center p-6 text-center">
-        <div className="bg-white p-8 rounded-3xl shadow-xl max-w-md w-full border border-rose-100">
-           <div className="w-16 h-16 bg-rose-100 text-rose-500 rounded-full flex items-center justify-center mx-auto mb-4">
+        <div className="bg-white p-8 rounded-2xl shadow-sm max-w-md w-full border border-rose-200">
+           <div className="w-16 h-16 bg-rose-50 text-rose-600 rounded-full flex items-center justify-center mx-auto mb-4">
               <AlertTriangle className="w-8 h-8" />
            </div>
-           <h2 className="text-2xl font-bold text-slate-800 mb-2">Ops!</h2>
-           <p className="text-slate-600 font-medium">{error || "Vistoria não encontrada"}</p>
+           <h2 className="text-2xl font-bold text-slate-800 mb-2">Atenção</h2>
+           <p className="text-slate-600 font-medium">{error || "Registro não localizado no sistema."}</p>
         </div>
       </div>
     );
@@ -189,15 +189,15 @@ export function PublicInspectionView({ inspectionId: propId, locationId: propLoc
   if (inspection.status !== 'finalizada') {
     return (
       <div className="min-h-screen bg-slate-50 flex flex-col items-center justify-center p-8 text-center font-sans">
-        <div className="w-20 h-20 bg-amber-100 text-amber-600 rounded-3xl flex items-center justify-center mb-6 shadow-xl shadow-amber-200/50">
+        <div className="w-20 h-20 bg-amber-50 text-amber-600 rounded-2xl flex items-center justify-center mb-6 shadow-sm border border-amber-200">
           <AlertCircle className="w-10 h-10" />
         </div>
-        <h1 className="text-2xl font-black text-slate-900 mb-2">Vistoria em Processamento</h1>
-        <p className="text-slate-500 max-w-xs leading-relaxed font-medium">
-          Esta vistoria ainda não foi homologada pela administração e não está disponível para visualização pública no momento.
+        <h1 className="text-2xl font-bold text-slate-900 mb-2 tracking-tight">Análise em Andamento</h1>
+        <p className="text-slate-600 max-w-sm leading-relaxed font-medium">
+          Este registro ainda está sob análise da administração pública e aguarda homologação oficial para publicação na transparência.
         </p>
         <div className="mt-8 pt-8 border-t border-slate-200">
-           <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Patri-MV • Manoel Viana/RS</p>
+           <p className="text-xs font-semibold text-slate-400 uppercase tracking-widest">Portal da Transparência</p>
         </div>
       </div>
     );
@@ -229,7 +229,7 @@ export function PublicInspectionView({ inspectionId: propId, locationId: propLoc
             <motion.button 
               initial={{ scale: 0.5, opacity: 0 }}
               animate={{ scale: 1, opacity: 1 }}
-              className="absolute top-6 right-6 w-12 h-12 bg-white/10 hover:bg-white/20 text-white rounded-full flex items-center justify-center backdrop-blur-md transition-colors"
+              className="absolute top-6 right-6 w-12 h-12 bg-white/10 hover:bg-white/20 text-white rounded-full flex items-center justify-center backdrop-blur-md transition-colors duration-200"
               onClick={() => setSelectedImage(null)}
             >
               <X className="w-6 h-6" />
@@ -240,211 +240,169 @@ export function PublicInspectionView({ inspectionId: propId, locationId: propLoc
               transition={{ type: 'spring', damping: 25, stiffness: 300 }}
               src={selectedImage} 
               alt="Imagem ampliada" 
-              className="max-w-full max-h-[90vh] rounded-2xl shadow-2xl"
+              className="max-w-full max-h-[90vh] rounded-xl shadow-2xl"
               onClick={(e) => e.stopPropagation()}
             />
           </motion.div>
         )}
       </AnimatePresence>
 
-      {/* Header Banner */}
-      <div className="bg-emerald-600 text-white pt-12 pb-24 px-6 rounded-b-[3rem] shadow-lg relative overflow-hidden">
-        {/* Abstract pattern background */}
-        <div className="absolute inset-0 opacity-10">
-          <svg className="h-full w-full" xmlns="http://www.w3.org/2000/svg">
-            <defs>
-              <pattern id="grid-pattern" width="40" height="40" patternUnits="userSpaceOnUse">
-                <path d="M0 40V0H40V40z" fill="none" />
-                <path d="M0 40L40 0M20 40L40 20M0 20L20 0" stroke="currentColor" strokeWidth="2" strokeOpacity="0.5" />
-              </pattern>
-            </defs>
-            <rect width="100%" height="100%" fill="url(#grid-pattern)" />
-          </svg>
+      {/* Header Banner - Ultra Modern GovTech Style */}
+      <div className="bg-[#050B14] text-white pt-12 pb-24 px-6 relative overflow-hidden">
+        {/* Deep, majestic top glow */}
+        <div className="absolute top-0 left-1/2 -translate-x-1/2 w-full max-w-3xl h-[400px] opacity-40 pointer-events-none">
+           <div className="absolute inset-0 bg-gradient-to-b from-blue-500/30 to-transparent blur-3xl"></div>
+           <div className="absolute top-0 left-1/4 w-1/2 h-[200px] bg-blue-400/20 blur-[100px]"></div>
         </div>
-
-        <div className="relative z-10 max-w-lg mx-auto flex flex-col items-center text-center">
-           <div className="w-16 h-16 bg-white/20 backdrop-blur-sm rounded-2xl flex items-center justify-center mb-4 shadow-inner">
-             <ShieldCheck className="w-8 h-8 text-white" />
+        
+        {/* Premium Grid Pattern */}
+        <div className="absolute inset-0 opacity-[0.05]" style={{ backgroundImage: 'radial-gradient(circle at 2px 2px, white 1px, transparent 0)', backgroundSize: '24px 24px' }}></div>
+        
+        <div className="relative z-10 max-w-2xl mx-auto flex flex-col items-center text-center">
+           <div className="w-16 h-16 bg-white/5 backdrop-blur-xl border border-white/10 rounded-[1.25rem] flex items-center justify-center mb-6 shadow-2xl relative group">
+             <div className="absolute inset-0 bg-gradient-to-tr from-blue-500/20 to-emerald-500/20 rounded-[1.25rem] opacity-0 group-hover:opacity-100 transition-opacity duration-500"></div>
+             <Landmark className="w-8 h-8 text-blue-100" strokeWidth={1.5} />
            </div>
-           <h1 className="text-3xl font-black tracking-tight mb-2 uppercase leading-none">Vistoria Homologada</h1>
-           <div className="flex flex-col items-center gap-2">
-             <p className="text-emerald-100 font-medium tracking-wide text-sm bg-black/10 px-4 py-1.5 rounded-full inline-block">
-               ID: {inspection.id.slice(0, 12).toUpperCase()}
-             </p>
-             <div className="flex flex-col gap-1 mt-3">
-               <div className="flex items-center gap-1.5 text-emerald-50 text-xs font-bold uppercase tracking-widest opacity-80">
-                 <Calendar className="w-3.5 h-3.5" />
-                 Realizada em {formatDate(inspection.date)}
+           <h1 className="text-3xl md:text-4xl font-display font-semibold tracking-tight mb-3 text-transparent bg-clip-text bg-gradient-to-b from-white to-white/70">Consulta de Patrimônio</h1>
+           <p className="text-blue-200/80 font-medium mb-8 tracking-wide text-sm md:text-base">Portal da Transparência • Edição Oficial</p>
+           
+           <div className="bg-white/5 backdrop-blur-md border border-white/10 rounded-2xl p-1 w-full md:w-auto overflow-hidden relative">
+             <div className="absolute inset-0 bg-gradient-to-r from-blue-500/10 via-transparent to-emerald-500/10 opacity-50"></div>
+             <div className="bg-slate-900/40 rounded-xl px-6 py-4 relative z-10">
+               <div className="flex flex-col md:flex-row items-center gap-4 md:gap-6 text-sm">
+                 <div className="flex items-center gap-2 text-blue-100/90">
+                   <Calendar className="w-4 h-4 opacity-70" />
+                   <span className="font-medium">Data-Base: {formatDate(inspection.date)}</span>
+                 </div>
+                 <div className="hidden md:block w-px h-5 bg-white/10"></div>
+                 <div className="flex items-center gap-2 text-emerald-400 font-semibold drop-shadow-[0_0_15px_rgba(52,211,153,0.3)]">
+                   <CheckCircle2 className="w-4 h-4" />
+                   <span>Homologado Oficialmente</span>
+                 </div>
                </div>
-               {inspection.finalizedAt && (
-                  <div className="flex items-center gap-1.5 text-emerald-100 text-xs font-bold uppercase tracking-widest opacity-90">
-                    <CheckCircle2 className="w-3.5 h-3.5" />
-                    Homologada em {formatDate(inspection.finalizedAt)}
-                  </div>
-               )}
+               <div className="mt-3 pt-3 border-t border-white/5">
+                  <p className="text-[11px] text-white/40 font-mono tracking-widest uppercase">Protocolo: {inspection.id}</p>
+               </div>
              </div>
            </div>
         </div>
       </div>
 
       {/* Content wrapper */}
-      <div className="max-w-lg mx-auto px-4 -mt-16 relative z-20 flex flex-col gap-6">
+      <div className="max-w-2xl mx-auto px-4 -mt-10 relative z-20 flex flex-col gap-6">
         
         {/* Info Card */}
-        <div className="bg-white rounded-3xl p-6 shadow-xl shadow-slate-200/50 border border-slate-100">
-           <div className="flex flex-col gap-4">
-              <div>
-                <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest pl-1">Localização Inspecionada</span>
-                <div className="flex items-center gap-3 mt-1">
-                  <div className="w-10 h-10 bg-blue-50 text-blue-600 rounded-xl flex items-center justify-center shrink-0">
-                    <MapPin className="w-5 h-5" />
-                  </div>
-                  <div>
-                    <h2 className="text-xl font-bold text-slate-800 leading-tight">{location?.name || 'Local Desconhecido'}</h2>
-                    {location?.description && <p className="text-sm text-slate-500 line-clamp-1">{location.description}</p>}
-                  </div>
-                </div>
+        <div className="bg-white rounded-2xl p-6 shadow-sm border border-slate-200">
+           <div className="flex flex-col md:flex-row items-start md:items-center gap-4">
+              <div className="w-12 h-12 bg-slate-100 text-slate-600 rounded-xl flex items-center justify-center shrink-0 border border-slate-200">
+                <MapPin className="w-6 h-6" />
               </div>
-
-              <div className="h-px bg-slate-100 w-full" />
-
-              <div className="flex justify-between items-center px-1">
-                 <div>
-                    <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest block">Data da Vistoria</span>
-                    <span className="font-semibold text-slate-700">{formatDate(inspection.date)}</span>
-                 </div>
-                 <div className="text-right">
-                    <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest block">Status</span>
-                    {inspection.status === 'finalizada' ? (
-                      <span className="inline-flex items-center gap-1 font-bold text-emerald-600 text-sm">
-                        <CheckCircle2 className="w-4 h-4" /> Finalizada
-                      </span>
-                    ) : (
-                      <span className="font-bold text-amber-500 text-sm">{inspection.status.replace('_', ' ')}</span>
-                    )}
-                 </div>
+              <div className="flex-1">
+                <p className="text-xs font-semibold text-slate-500 uppercase tracking-widest mb-1">Local Inspecionado</p>
+                <h2 className="text-xl font-bold text-slate-800 leading-tight">{location?.name || 'Local Desconhecido'}</h2>
+                {location?.description && <p className="text-sm text-slate-500 mt-1">{location.description}</p>}
               </div>
-
-              {(inspection.concludedAt || inspection.finalizedAt) && (
-                <>
-                   <div className="h-px bg-slate-100 w-full" />
-                   <div className="flex justify-between items-center px-1 bg-slate-50 p-2.5 rounded-xl border border-slate-100">
-                      {inspection.concludedAt && (
-                         <div>
-                            <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest block">Concluída (Técnico)</span>
-                            <span className="font-bold text-slate-600 text-xs">{formatDate(inspection.concludedAt)}</span>
-                         </div>
-                      )}
-                      {inspection.finalizedAt && (
-                         <div className="text-right">
-                            <span className="text-[9px] font-black text-emerald-400 uppercase tracking-widest block">Homologada (Gestor)</span>
-                            <span className="font-bold text-emerald-600 text-xs">{formatDate(inspection.finalizedAt)}</span>
-                         </div>
-                      )}
-                   </div>
-                </>
-              )}
+              <div className="bg-blue-50 text-blue-700 px-4 py-2 rounded-xl border border-blue-100 flex flex-col items-center">
+                 <span className="text-xs font-semibold uppercase">Itens</span>
+                 <span className="text-2xl font-bold leading-none">{stats.total}</span>
+              </div>
            </div>
         </div>
 
+        {/* Status Highlights */}
+        <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+          <div className="bg-white p-4 rounded-2xl border border-emerald-200 shadow-sm flex flex-col">
+            <span className="text-3xl font-bold text-emerald-600 mb-1">{stats.bons}</span>
+            <span className="text-xs font-bold text-emerald-800 uppercase">Conservado/Novo</span>
+          </div>
+          <div className="bg-white p-4 rounded-2xl border border-amber-200 shadow-sm flex flex-col">
+            <span className="text-3xl font-bold text-amber-600 mb-1">{stats.regular}</span>
+            <span className="text-xs font-bold text-amber-800 uppercase">Estado Regular</span>
+          </div>
+          <div className="bg-white p-4 rounded-2xl border border-rose-200 shadow-sm flex flex-col md:col-span-1 col-span-2">
+            <span className="text-3xl font-bold text-rose-600 mb-1">{stats.ruins}</span>
+            <span className="text-xs font-bold text-rose-800 uppercase">Requer Atenção</span>
+          </div>
+        </div>
+
         {/* Assets List */}
-        <div>
-          <div className="flex items-center justify-between mb-4 px-2">
-            <h3 className="text-lg font-bold text-slate-800 tracking-tight flex items-center gap-2">
-              <Box className="w-5 h-5 text-emerald-500" />
-              Itens Patrimoniais ({stats.total})
-            </h3>
-          </div>
-
-          <div className="grid grid-cols-3 gap-2 mb-6">
-            <div className="bg-emerald-50 p-3 rounded-2xl border border-emerald-100 text-center shadow-sm">
-              <span className="text-2xl font-black text-emerald-600">{stats.bons}</span>
-              <p className="text-[10px] font-bold text-emerald-800 uppercase tracking-wider">Bons/Novos</p>
-            </div>
-            <div className="bg-amber-50 p-3 rounded-2xl border border-amber-100 text-center shadow-sm">
-              <span className="text-2xl font-black text-amber-600">{stats.regular}</span>
-              <p className="text-[10px] font-bold text-amber-800 uppercase tracking-wider">Regulares</p>
-            </div>
-            <div className="bg-rose-50 p-3 rounded-2xl border border-rose-100 text-center shadow-sm">
-              <span className="text-2xl font-black text-rose-600">{stats.ruins}</span>
-              <p className="text-[10px] font-bold text-rose-800 uppercase tracking-wider">Críticos</p>
-            </div>
-          </div>
-
+        <div className="mt-2">
           <div className="relative mb-6">
-            <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+            <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-400" />
             <input 
               type="text" 
-              placeholder="Buscar por nome ou nº de patrimônio..." 
+              placeholder="Pesquisar itens por nome ou código..." 
               value={searchTerm}
               onChange={e => setSearchTerm(e.target.value)}
-              className="w-full pl-11 pr-4 py-3.5 bg-white border border-slate-200 rounded-2xl text-sm shadow-sm focus:ring-2 focus:ring-emerald-500 focus:outline-none placeholder:text-slate-400"
+              className="w-full pl-12 pr-4 py-4 bg-white border border-slate-200 rounded-2xl text-sm shadow-sm focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 focus:outline-none placeholder:text-slate-400 transition-all duration-200"
             />
           </div>
 
           <div className="flex flex-col gap-4">
             {filteredAssets.map((asset) => (
-              <div key={asset.id} className="bg-white rounded-[2rem] p-5 shadow-lg shadow-slate-200/50 border border-slate-100 overflow-hidden relative group">
-                 {/* Top row */}
-                 <div className="flex justify-between items-start gap-4 mb-4">
-                    <div>
-                      <h4 className="font-bold text-slate-800 text-lg leading-tight mb-1">{asset.name}</h4>
-                      <div className="flex flex-wrap items-center gap-1.5">
-                         {asset.patrimonyNumber && (
-                           <div className="inline-flex items-center gap-1.5 px-2.5 py-1 bg-slate-100 text-slate-600 rounded-lg text-xs font-bold border border-slate-200">
-                              Nº {asset.patrimonyNumber}
-                           </div>
-                         )}
-                         <div className="inline-flex items-center gap-1.5 px-2.5 py-1 bg-blue-50 text-blue-600 rounded-lg text-xs font-bold border border-blue-100">
-                            {asset.quantity || 1} Unidade{(asset.quantity || 1) !== 1 ? 's' : ''}
-                         </div>
-                      </div>
-                    </div>
-                    
-                    <div className={`px-3 py-1.5 rounded-xl border flex items-center gap-1.5 text-xs font-bold uppercase tracking-wider shrink-0 ${conditionColors[asset.condition] || 'bg-slate-100 text-slate-700 border-slate-200'}`}>
-                      {getConditionIcon(asset.condition)}
-                      {asset.condition}
-                    </div>
-                 </div>
-
-                 {asset.observations && (
-                   <div className="mb-4 text-sm text-slate-600 bg-slate-50 p-3 rounded-2xl border border-slate-100 font-medium">
-                     "{asset.observations}"
-                   </div>
-                 )}
-
-                 {(asset.photos && asset.photos.length > 0) && (
-                   <div className="flex gap-3 overflow-x-auto snap-x pb-2 [&::-webkit-scrollbar]:hidden">
-                     {asset.photos.map((photo, idx) => (
-                       <div 
-                         key={idx} 
-                         onClick={() => setSelectedImage(photo)}
-                         className="rounded-2xl shrink-0 w-[85%] overflow-hidden aspect-video relative outline outline-1 outline-slate-100 snap-center cursor-zoom-in group/photo"
-                       >
-                          <img src={photo} alt={`${asset.name} - Foto ${idx + 1}`} className="absolute inset-0 w-full h-full object-cover transition-transform duration-500 group-hover/photo:scale-110" loading="lazy" />
-                          <div className="absolute inset-0 bg-black/20 opacity-0 group-hover/photo:opacity-100 transition-opacity flex items-center justify-center">
-                            <div className="bg-white/20 backdrop-blur-md p-3 rounded-full text-white">
-                              <Maximize2 className="w-6 h-6" />
-                            </div>
-                          </div>
+              <div key={asset.id} className="bg-white/80 backdrop-blur-xl rounded-2xl shadow-[0_8px_30px_rgb(0,0,0,0.04)] border border-slate-200/60 overflow-hidden flex flex-col sm:flex-row hover:shadow-[0_20px_40px_rgb(0,0,0,0.08)] hover:-translate-y-1 transition-all duration-300 group">
+                 
+                 {/* Optional Photo Side */}
+                 {asset.photos && asset.photos.length > 0 && (
+                   <div 
+                     className="w-full sm:w-48 h-48 sm:h-auto shrink-0 relative bg-slate-100 cursor-zoom-in group/photo"
+                     onClick={() => setSelectedImage(asset.photos[0])}
+                   >
+                     <img src={asset.photos[0]} alt={asset.name} className="w-full h-full object-cover transition-transform duration-300 group-hover/photo:scale-105" loading="lazy" />
+                     <div className="absolute inset-0 bg-black/10 transition-opacity flex items-center justify-center opacity-0 group-hover/photo:opacity-100">
+                        <div className="bg-white/90 p-2 rounded-full shadow-sm text-slate-700">
+                           <Maximize2 className="w-5 h-5" />
+                        </div>
+                     </div>
+                     {asset.photos.length > 1 && (
+                       <div className="absolute bottom-2 right-2 bg-black/60 backdrop-blur-sm text-white text-[10px] font-bold px-2 py-1 rounded-lg">
+                         +{asset.photos.length - 1} foto{asset.photos.length > 2 ? 's' : ''}
                        </div>
-                     ))}
+                     )}
                    </div>
                  )}
+
+                 {/* Content Side */}
+                 <div className="p-5 flex-1 flex flex-col justify-center">
+                    <div className="flex flex-wrap items-start justify-between gap-3 mb-2">
+                       <h4 className="font-bold text-slate-800 text-lg leading-tight flex-1">{asset.name}</h4>
+                       <div className={`px-2.5 py-1 rounded-lg border flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wide shrink-0 ${conditionColors[asset.condition] || 'bg-slate-50 text-slate-700 border-slate-200'}`}>
+                         {getConditionIcon(asset.condition)}
+                         {asset.condition}
+                       </div>
+                    </div>
+
+                    <div className="flex flex-wrap items-center gap-2 mb-3">
+                       {asset.patrimonyNumber && (
+                         <div className="inline-flex items-center px-2.5 py-1 bg-slate-50 text-slate-600 rounded-lg text-[11px] font-mono font-semibold border border-slate-200">
+                            Nº {asset.patrimonyNumber}
+                         </div>
+                       )}
+                       <div className="inline-flex items-center px-2.5 py-1 bg-blue-50 text-blue-700 rounded-lg text-[11px] font-semibold border border-blue-100">
+                          {asset.quantity || 1} unid.
+                       </div>
+                    </div>
+
+                    {asset.observations && (
+                      <div className="mt-2 text-sm text-slate-600 bg-slate-50 p-3 rounded-xl border border-slate-100">
+                        {asset.observations}
+                      </div>
+                    )}
+                 </div>
               </div>
             ))}
 
             {filteredAssets.length === 0 && assets.length > 0 && (
-              <div className="text-center py-10 px-6 bg-white rounded-3xl border border-slate-100 text-slate-500">
-                <Search className="w-10 h-10 mx-auto mb-3 text-slate-300" />
-                <p className="font-medium">Nenhum item encontrado na busca.</p>
+              <div className="text-center py-12 px-6 bg-white rounded-2xl border border-slate-200 text-slate-500 shadow-sm">
+                <Search className="w-12 h-12 mx-auto mb-4 text-slate-300" />
+                <p className="font-medium">Nenhum item localizado com esta busca.</p>
               </div>
             )}
 
             {assets.length === 0 && (
-              <div className="text-center py-10 px-6 bg-white rounded-3xl border border-slate-100 text-slate-500">
-                <Box className="w-12 h-12 mx-auto mb-3 text-slate-300" />
-                <p className="font-medium">Nenhum item registrado nesta vistoria.</p>
+              <div className="text-center py-12 px-6 bg-white rounded-2xl border border-slate-200 text-slate-500 shadow-sm">
+                <Box className="w-12 h-12 mx-auto mb-4 text-slate-300" />
+                <p className="font-medium">Nenhum item registrado neste local.</p>
               </div>
             )}
           </div>

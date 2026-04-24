@@ -93,8 +93,8 @@ export function Card({ children, className, onClick, id, ...props }: CardProps) 
       id={id}
       onClick={onClick}
       className={cn(
-        "bg-white border border-slate-100 rounded-[2rem] p-6 shadow-sm transition-all duration-300",
-        onClick && "cursor-pointer hover:shadow-xl hover:shadow-slate-200/50 hover:-translate-y-1 active:scale-[0.98]",
+        "bg-white/80 backdrop-blur-xl border border-slate-200/60 rounded-2xl p-6 shadow-[0_8px_30px_rgb(0,0,0,0.04)] transition-all duration-300",
+        onClick && "cursor-pointer hover:shadow-[0_20px_40px_rgb(0,0,0,0.08)] hover:-translate-y-1 active:scale-[0.98]",
         className
       )}
       {...props}
@@ -127,24 +127,24 @@ export function Button({
   ...props 
 }: ButtonProps) {
   const variants = {
-    primary: "bg-slate-900 text-white hover:bg-slate-800 shadow-lg shadow-slate-900/10",
-    secondary: "bg-white text-slate-900 border border-slate-200 hover:bg-slate-50",
-    accent: "bg-blue-600 text-white hover:bg-blue-700 shadow-lg shadow-blue-600/20",
-    danger: "bg-red-500 text-white hover:bg-red-600 shadow-lg shadow-red-500/10",
-    ghost: "bg-transparent text-slate-500 hover:bg-slate-100 hover:text-slate-900",
-    outline: "bg-transparent border-2 border-slate-200 text-slate-600 hover:border-slate-900 hover:text-slate-900"
+    primary: "bg-slate-900 text-white hover:bg-slate-800 shadow-[0_4px_14px_0_rgb(0,0,0,0.1)] hover:shadow-[0_6px_20px_rgba(0,0,0,0.15)]",
+    secondary: "bg-white text-slate-700 border border-slate-200 hover:bg-slate-50 hover:border-slate-300 shadow-sm",
+    accent: "bg-gradient-to-r from-blue-600 to-blue-500 text-white hover:from-blue-700 hover:to-blue-600 shadow-[0_4px_14px_0_rgba(37,99,235,0.2)] hover:shadow-[0_6px_20px_rgba(37,99,235,0.3)] border border-blue-500/50",
+    danger: "bg-gradient-to-r from-rose-500 to-rose-600 text-white hover:from-rose-600 hover:to-rose-700 shadow-[0_4px_14px_0_rgba(225,29,72,0.2)] border border-rose-500/50",
+    ghost: "bg-transparent text-slate-600 hover:bg-slate-100/80 hover:text-slate-900",
+    outline: "bg-white/50 backdrop-blur-sm border border-slate-300 text-slate-700 hover:bg-white hover:border-slate-400 hover:shadow-sm"
   };
 
   const sizes = {
-    sm: "px-3 py-1.5 text-xs",
-    md: "px-6 py-3 text-sm",
-    lg: "px-8 py-4 text-base"
+    sm: "px-3 py-1.5 text-xs font-semibold rounded-lg",
+    md: "px-5 py-2.5 text-sm font-semibold rounded-xl",
+    lg: "px-6 py-3 text-base font-semibold rounded-2xl"
   };
 
   return (
     <button
       className={cn(
-        "flex items-center justify-center gap-2 rounded-2xl font-bold tracking-tight transition-all active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed",
+        "flex items-center justify-center gap-2 font-medium tracking-tight transition-all duration-300 active:scale-95 disabled:opacity-50 disabled:pointer-events-none",
         variants[variant],
         sizes[size as keyof typeof sizes],
         className
@@ -178,20 +178,20 @@ interface InputProps {
 export const Input = React.forwardRef<HTMLInputElement, InputProps>(
   ({ label, error, hint, className, id, ...props }, ref) => {
     return (
-      <div className="flex flex-col gap-2 w-full">
-        {label && <label className="text-[11px] font-black uppercase tracking-widest text-slate-400 ml-1">{label}</label>}
+      <div className="flex flex-col gap-1.5 w-full">
+        {label && <label className="text-[12px] font-semibold text-slate-700 ml-1">{label}</label>}
         <input
           id={id}
           ref={ref}
           className={cn(
-            "px-5 py-4 rounded-2xl border-2 border-slate-100 focus:border-slate-900 outline-none transition-all bg-slate-50/50 font-medium placeholder:text-slate-300",
-            error && "border-red-100 bg-red-50/30 focus:border-red-500",
+            "px-4 py-2.5 rounded-xl border border-slate-200 outline-none transition-all duration-300 bg-white shadow-sm font-medium placeholder:text-slate-400 focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10 hover:border-slate-300",
+            error && "border-rose-300 bg-rose-50/30 focus:border-rose-500 focus:ring-rose-500/20",
             className
           )}
           {...props}
         />
-        {error && <span className="text-[10px] font-bold text-red-500 ml-1 uppercase tracking-tight">{error}</span>}
-        {hint && !error && <span className="text-[10px] font-medium text-slate-400 ml-1 italic">{hint}</span>}
+        {error && <span className="text-[11px] font-medium text-rose-600 ml-1">{error}</span>}
+        {hint && !error && <span className="text-[11px] font-medium text-slate-500 ml-1">{hint}</span>}
       </div>
     );
   }
@@ -200,20 +200,20 @@ export const Input = React.forwardRef<HTMLInputElement, InputProps>(
 export const Textarea = React.forwardRef<HTMLTextAreaElement, InputProps>(
   ({ label, error, className, id, ...props }, ref) => {
     return (
-      <div className="flex flex-col gap-2 w-full">
-        {label && <label className="text-[11px] font-black uppercase tracking-widest text-slate-400 ml-1">{label}</label>}
+      <div className="flex flex-col gap-1.5 w-full">
+        {label && <label className="text-[12px] font-semibold text-slate-700 ml-1">{label}</label>}
         <textarea
           id={id}
           ref={ref}
           rows={3}
           className={cn(
-            "px-5 py-4 rounded-[2rem] border-2 border-slate-100 focus:border-slate-900 outline-none transition-all bg-slate-50/50 font-medium placeholder:text-slate-300 resize-none",
-            error && "border-red-100 bg-red-50/30 focus:border-red-500",
+            "px-4 py-3 rounded-xl border border-slate-200 outline-none transition-all duration-300 bg-white shadow-sm font-medium placeholder:text-slate-400 resize-none focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10 hover:border-slate-300",
+            error && "border-rose-300 bg-rose-50/30 focus:border-rose-500 focus:ring-rose-500/20",
             className
           )}
           {...props}
         />
-        {error && <span className="text-[10px] font-bold text-red-500 ml-1 uppercase tracking-tight">{error}</span>}
+        {error && <span className="text-[11px] font-medium text-rose-600 ml-1">{error}</span>}
       </div>
     );
   }
@@ -227,14 +227,14 @@ interface SelectProps extends React.SelectHTMLAttributes<HTMLSelectElement> {
 export const Select = React.forwardRef<HTMLSelectElement, SelectProps>(
   ({ label, options, className, id, ...props }, ref) => {
     return (
-      <div className="flex flex-col gap-2 w-full">
-        {label && <label className="text-[11px] font-black uppercase tracking-widest text-slate-400 ml-1">{label}</label>}
+      <div className="flex flex-col gap-1.5 w-full">
+        {label && <label className="text-[12px] font-semibold text-slate-700 ml-1">{label}</label>}
         <div className="relative">
           <select
             id={id}
             ref={ref}
             className={cn(
-              "w-full px-5 py-4 rounded-2xl border-2 border-slate-100 focus:border-slate-900 outline-none transition-all bg-slate-50/50 font-medium appearance-none",
+              "w-full px-4 py-2.5 rounded-xl border border-slate-200 outline-none transition-all duration-300 bg-white shadow-sm font-medium appearance-none focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10 hover:border-slate-300",
               className
             )}
             {...props}
@@ -243,8 +243,8 @@ export const Select = React.forwardRef<HTMLSelectElement, SelectProps>(
               <option key={opt.value} value={opt.value}>{opt.label}</option>
             ))}
           </select>
-          <div className="absolute right-4 top-1/2 -translate-y-1/2 pointer-events-none text-slate-400">
-            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 9l-7 7-7-7" /></svg>
+          <div className="absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none text-slate-400 bg-white pl-2">
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2.5}><path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" /></svg>
           </div>
         </div>
       </div>
