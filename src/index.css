@@ -7,13 +7,15 @@
   --font-display: "Outfit", ui-sans-serif, system-ui, sans-serif;
   --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
   
-  --color-primary: #09090B;
-  --color-primary-light: #27272A;
-  --color-accent: #18181B;
-  --color-bg: #FCFCFD;
-  --color-card: #FFFFFF;
-  --color-border: #E4E4E7;
-  --color-text-muted: #71717A;
+  /* Nova Paleta: GovTech Alta Visibilidade */
+  --color-primary: #1E3A8A; /* Azul profundo e institucional (Blue 900) */
+  --color-primary-light: #2563EB; /* Azul vibrante para hover e botões (Blue 600) */
+  --color-accent: #F59E0B; /* Âmbar de alta visibilidade para ações (Amber 500) */
+  
+  --color-bg: #F8FAFC; /* Fundo levemente azulado, ótimo para leitura no sol */
+  --color-card: #FFFFFF; /* Cartões brancos para contraste */
+  --color-border: #E2E8F0;
+  --color-text-muted: #64748B;
 }
 
 @layer base {
