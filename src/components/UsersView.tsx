@@ -12,12 +12,13 @@ export function UsersView() {
   const [isAdding, setIsAdding] = useState(false);
   const [editingUserId, setEditingUserId] = useState<string | null>(null);
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
-  const [formData, setFormData] = useState<Partial<User>>({
+  const [formData, setFormData] = useState<Partial<User & { password?: string }>>({
     name: '',
     email: '',
     role: 'vistoriador',
     cargo: '',
-    status: 'ativo'
+    status: 'ativo',
+    password: ''
   });
 
   const handleSave = async (e: React.FormEvent) => {
@@ -26,11 +27,34 @@ export function UsersView() {
 
     try {
       const { doc, setDoc, deleteDoc } = await import('firebase/firestore');
-      const { db: firestoreDB } = await import('../lib/firebase');
+      const { db: firestoreDB, firebaseConfigInfo } = await import('../lib/firebase');
+      
+      let saveId = editingUserId || generateId();
 
-      const saveId = editingUserId || generateId();
+      // If creating a new user and a password was provided, create them in Auth
+      if (!editingUserId && formData.password) {
+        const { getAuth, createUserWithEmailAndPassword, signOut } = await import('firebase/auth');
+        const { initializeApp, deleteApp } = await import('firebase/app');
+        
+        try {
+          const secondaryApp = initializeApp(firebaseConfigInfo, "SecondaryApp_" + Date.now());
+          const secondaryAuth = getAuth(secondaryApp);
+          const result = await createUserWithEmailAndPassword(secondaryAuth, formData.email, formData.password);
+          saveId = result.user.uid;
+          await signOut(secondaryAuth);
+          await deleteApp(secondaryApp);
+        } catch(e: any) {
+          console.error("Erro ao registrar no Auth:", e);
+          alert("Não foi possível criar o acesso: " + (e.message || "Erro desconhecido."));
+          return;
+        }
+      }
+
       const userData = {
-        ...(formData as User),
+        name: formData.name,
+        email: formData.email,
+        role: formData.role,
+        cargo: formData.cargo,
         userId: saveId,
         status: 'ativo'
       };
@@ -40,13 +64,14 @@ export function UsersView() {
       
       // Update local dexie
       if (editingUserId) {
-        await db.users.update(editingUserId, formData);
+        await db.users.update(editingUserId, userData as any);
       } else {
         await db.users.add(userData as User);
       }
       resetForm();
     } catch (err) {
       console.error("Erro ao salvar usuário:", err);
+      alert("Houve um erro ao processar o cadastro.");
     }
   };
 
@@ -86,7 +111,8 @@ export function UsersView() {
       email: '',
       role: 'vistoriador',
       cargo: '',
-      status: 'ativo'
+      status: 'ativo',
+      password: ''
     });
   };
 
@@ -151,6 +177,23 @@ export function UsersView() {
                   { value: 'administrador', label: 'Administrador Geral' },
                 ]}
               />
+              {!editingUserId && (
+                <div className="relative pt-2">
+                  <div className="absolute inset-x-0 -top-1 flex justify-center">
+                    <span className="bg-white px-2 text-[9px] font-black text-rose-600 uppercase tracking-widest leading-none">Acesso do Usuário</span>
+                  </div>
+                  <Input 
+                    label="Senha Provisória (Opcional)" 
+                    placeholder="Se preenchido, o usuário poderá logar com email e senha"
+                    type="text"
+                    value={formData.password}
+                    onChange={e => setFormData({ ...formData, password: e.target.value })}
+                  />
+                  <p className="text-[10px] text-slate-400 font-bold mt-1 leading-tight">
+                    Caso não preencha, o usuário terá que utilizar a Conta Google para acessar vinculada ao e-mail cadastrado.
+                  </p>
+                </div>
+              )}
             </div>
 
             <div className="md:col-span-2 flex justify-end gap-3 pt-4 border-t border-slate-100 mt-4">
