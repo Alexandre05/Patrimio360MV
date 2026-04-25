@@ -1,6 +1,6 @@
 import React, { useState, MouseEvent } from 'react';
 import { Card, Button, Input } from './UI';
-import { Building2, Plus, ArrowRight, Trash2, AlertCircle, X, Search, History, Calendar, CheckSquare } from 'lucide-react';
+import { Building2, Plus, ArrowRight, Trash2, AlertCircle, X, Search, History, Calendar, CheckSquare, Map } from 'lucide-react';
 import { db, generateId, Inspection } from '../lib/db';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { cn, formatDate } from '../lib/utils';
@@ -8,6 +8,16 @@ import { useAuth } from '../lib/AuthContext';
 import { syncLocation, syncInspection, pushLocalChanges } from '../lib/syncService';
 import { db as firestore } from '../lib/firebase';
 import { doc, deleteDoc } from 'firebase/firestore';
+import { MapContainer, TileLayer, Marker, Popup } from 'react-leaflet';
+import L from 'leaflet';
+
+// Fix Leaflet marker icons in React (vite)
+delete (L.Icon.Default.prototype as any)._getIconUrl;
+L.Icon.Default.mergeOptions({
+  iconRetinaUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-icon-2x.png',
+  iconUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-icon.png',
+  shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-shadow.png',
+});
 
 export function LocationsView({ onSelectInspection }: { onSelectInspection: (id: string) => void }) {
   const { user } = useAuth();
@@ -17,13 +27,14 @@ export function LocationsView({ onSelectInspection }: { onSelectInspection: (id:
   const locations = useLiveQuery(() => db.locations.toArray());
   const inspections = useLiveQuery(() => db.inspections.toArray());
   const assets = useLiveQuery(() => db.assets.toArray());
+  const [viewMode, setViewMode] = useState<'list' | 'map'>('list');
   const [searchTerm, setSearchTerm] = useState('');
   const [isAdding, setIsAdding] = useState(false);
   const [showHistoryFor, setShowHistoryFor] = useState<string | null>(null);
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
   const [deleteInspectionConfirmId, setDeleteInspectionConfirmId] = useState<string | null>(null);
   const [blockingError, setBlockingError] = useState<{id: string, message: string} | null>(null);
-  const [newLoc, setNewLoc] = useState({ name: '', description: '' });
+  const [newLoc, setNewLoc] = useState({ name: '', description: '', latitude: '', longitude: '' });
 
   const getLatestStatus = (locId: string) => {
     const locInspections = inspections?.filter(i => i.locationId === locId);
@@ -105,13 +116,17 @@ export function LocationsView({ onSelectInspection }: { onSelectInspection: (id:
   const handleAddLocation = async () => {
     if (!newLoc.name.trim()) return;
     const locId = generateId();
+    const lat = newLoc.latitude ? parseFloat(newLoc.latitude) : undefined;
+    const lng = newLoc.longitude ? parseFloat(newLoc.longitude) : undefined;
+    
     await db.locations.add({
       id: locId,
       name: newLoc.name,
-      description: newLoc.description
+      description: newLoc.description,
+      ...(lat && lng ? { latitude: lat, longitude: lng } : {})
     });
     try { await syncLocation(locId); } catch(e) { console.error("Sync error", e) }
-    setNewLoc({ name: '', description: '' });
+    setNewLoc({ name: '', description: '', latitude: '', longitude: '' });
     setIsAdding(false);
   };
 
@@ -311,6 +326,14 @@ export function LocationsView({ onSelectInspection }: { onSelectInspection: (id:
         </div>
         
         <div className="flex items-center gap-3">
+           <Button 
+             variant={viewMode === 'map' ? 'primary' : 'secondary'} 
+             icon={Map} 
+             onClick={() => setViewMode(viewMode === 'map' ? 'list' : 'map')} 
+             className="rounded-2xl h-12 shadow-xl"
+           >
+             {viewMode === 'map' ? 'VER LISTA' : 'VER MAPA'}
+           </Button>
            <div className="relative group">
               <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400 group-focus-within:text-slate-900 transition-colors" />
               <input 
@@ -329,6 +352,34 @@ export function LocationsView({ onSelectInspection }: { onSelectInspection: (id:
         </div>
       </div>
 
+      {viewMode === 'map' ? (
+        <Card className="w-full h-[600px] p-0 overflow-hidden relative z-0 border-2 shadow-2xl rounded-[2.5rem]">
+          <MapContainer center={[-29.5878, -55.4828]} zoom={12} style={{ height: '100%', width: '100%', zIndex: 0 }}>
+            <TileLayer
+              attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+              url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+            />
+            {filteredLocations?.filter(loc => loc.latitude && loc.longitude).map(loc => (
+                <Marker key={loc.id} position={[loc.latitude!, loc.longitude!]}>
+                  <Popup>
+                    <div className="flex flex-col gap-2 p-1 min-w-[200px]">
+                       <h3 className="font-bold text-slate-900 text-base">{loc.name}</h3>
+                       <p className="text-xs text-slate-500">{loc.description}</p>
+                       <Button 
+                         size="sm"
+                         variant="primary"
+                         onClick={() => handleStartInspection(loc.id)}
+                         className="mt-2 w-full text-[10px]"
+                       >
+                         {getLatestStatus(loc.id) === 'em_andamento' ? 'CONTINUAR' : 'CRIAR / REVISAR'}
+                       </Button>
+                    </div>
+                  </Popup>
+                </Marker>
+            ))}
+          </MapContainer>
+        </Card>
+      ) : (
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
         {isAdding && (
           <Card className="p-8 border-2 border-slate-900 ring-8 ring-slate-900/5 animate-in zoom-in-95 duration-300 rounded-[2.5rem] flex flex-col gap-6 relative z-10">
@@ -340,6 +391,10 @@ export function LocationsView({ onSelectInspection }: { onSelectInspection: (id:
             </div>
             <Input label="Nome da Unidade" placeholder="Ex: Secretaria de Saúde" value={newLoc.name} onChange={e => setNewLoc({...newLoc, name: e.target.value})} />
             <Input label="Endereço / Descrição" placeholder="Rua Central, nº 123" value={newLoc.description} onChange={e => setNewLoc({...newLoc, description: e.target.value})} />
+            <div className="flex gap-4">
+              <Input label="Latitude (Opcional)" placeholder="-29.5878" type="number" step="any" value={newLoc.latitude} onChange={e => setNewLoc({...newLoc, latitude: e.target.value})} />
+              <Input label="Longitude (Opcional)" placeholder="-55.4828" type="number" step="any" value={newLoc.longitude} onChange={e => setNewLoc({...newLoc, longitude: e.target.value})} />
+            </div>
             <Button onClick={handleAddLocation} icon={CheckCircle2} className="h-14 font-black tracking-widest text-lg rounded-[1.2rem]" variant="accent">
                CONFIRMAR
             </Button>
@@ -436,6 +491,7 @@ export function LocationsView({ onSelectInspection }: { onSelectInspection: (id:
           </div>
         )}
       </div>
+      )}
     </div>
   );
 }

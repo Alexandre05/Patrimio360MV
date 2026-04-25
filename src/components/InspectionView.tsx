@@ -37,6 +37,10 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [editingAssetId, setEditingAssetId] = useState<string | null>(null);
+  const [historyAsset, setHistoryAsset] = useState<Asset | null>(null);
+  const [assetHistory, setAssetHistory] = useState<{ asset: Asset, inspection: Inspection, location: Location }[] | null>(null);
+  const [isLoadingHistory, setIsLoadingHistory] = useState(false);
+
   const allLocations = useLiveQuery(() => db.locations.toArray());
   const fileInputRef = useRef<HTMLInputElement>(null);
   const nameRef = useRef<HTMLInputElement>(null);
@@ -220,6 +224,42 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
     });
     setEditingAssetId(asset.id);
     setIsAdding(true);
+  };
+
+  const loadHistory = async (asset: Asset) => {
+    setHistoryAsset(asset);
+    setIsLoadingHistory(true);
+    setAssetHistory(null);
+    try {
+      let assetsQuery: Asset[] = [];
+      if (asset.patrimonyNumber) {
+        assetsQuery = await db.assets.where('patrimonyNumber').equals(asset.patrimonyNumber).toArray();
+      } else {
+        assetsQuery = await db.assets.where('name').equals(asset.name).toArray();
+      }
+
+      const otherAssets = assetsQuery.filter(a => a.id !== asset.id && a.inspectionId !== asset.inspectionId);
+
+      const historyData = await Promise.all(otherAssets.map(async (a) => {
+        const insp = await db.inspections.get(a.inspectionId);
+        if (!insp) return null;
+        const loc = await db.locations.get(insp.locationId);
+        if (!loc) return null;
+        return {
+          asset: a,
+          inspection: insp,
+          location: loc
+        }
+      }));
+
+      const validHistory = historyData.filter(h => h !== null).sort((a, b) => b!.inspection.date - a!.inspection.date);
+      setAssetHistory(validHistory as any);
+    } catch(e) {
+      console.error(e);
+      setAssetHistory([]);
+    } finally {
+      setIsLoadingHistory(false);
+    }
   };
 
   const handlePhotoCapture = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -834,134 +874,160 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
         </div>
 
         {isAdding && (
-          <Card className="p-8 flex flex-col gap-6 ring-4 ring-slate-900/5 animate-in zoom-in-95 duration-300 rounded-[2.5rem] border-slate-200 shadow-2xl relative z-10">
-             <div className="flex items-center justify-between">
-                <div className="flex flex-col">
-                   <h3 className="font-black text-slate-900 text-lg uppercase tracking-tight">
-                    {editingAssetId ? 'Editar Registro' : 'Novo Registro'}
-                   </h3>
-                   <span className="text-[10px] font-bold text-slate-400">
-                    {editingAssetId ? 'Atualize os dados do bem patrimonial' : 'Preencha os dados do bem patrimonial'}
-                   </span>
-                </div>
-                <div className="flex items-center gap-2">
-                   <div className="flex items-center bg-slate-100 rounded-xl p-1 mr-2">
-                      <button 
-                        type="button"
-                        onClick={() => navigateFields('prev')}
-                        className="p-2 hover:bg-white rounded-lg text-slate-400 hover:text-slate-900 transition-all shadow-sm"
-                        title="Anterior (Seta Esquerda)"
-                      >
-                        <ChevronLeft className="w-4 h-4" />
-                      </button>
-                      <div className="w-px h-4 bg-slate-300 mx-1" />
-                      <button 
-                        type="button"
-                        onClick={() => navigateFields('next')}
-                        className="p-2 hover:bg-white rounded-lg text-slate-400 hover:text-slate-900 transition-all shadow-sm"
-                        title="Próximo (Seta Direita / Enter)"
-                      >
-                        <ChevronRight className="w-4 h-4" />
-                      </button>
-                   </div>
-                   <button type="button" onClick={() => { setIsAdding(false); setEditingAssetId(null); setDuplicateWarning(null); }} className="w-10 h-10 rounded-full bg-slate-50 flex items-center justify-center text-slate-400 hover:text-rose-500 hover:bg-rose-50 transition-all">
-                     <X className="w-5 h-5" />
-                   </button>
-                </div>
-             </div>
-             
-             <Input 
-               ref={nameRef}
-               label="Nome do Item" 
-               placeholder="Ex: Mesa de Escritório em L" 
-               value={newItem.name}
-               onChange={e => setNewItem({...newItem, name: e.target.value})}
-               onKeyDown={e => handleKeyDown(e, 0)}
-               error={duplicateWarning || undefined}
-               autoFocus
-             />
-             
-             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-               <Input 
-                 ref={patrimonyRef}
-                 label="Número Patrimonial" 
-                 placeholder="Cód. Identificador" 
-                 value={newItem.patrimonyNumber}
-                 onChange={e => setNewItem({...newItem, patrimonyNumber: e.target.value})}
-                 onKeyDown={e => handleKeyDown(e, 1)}
-               />
-               <Select 
-                 ref={conditionRef}
-                 label="Estado de Conservação" 
-                 value={newItem.condition}
-                 onChange={e => setNewItem({...newItem, condition: e.target.value as any})}
-                 onKeyDown={e => handleKeyDown(e, 2)}
-                 options={[
-                   { value: 'novo', label: 'Novo (Sem uso)' },
-                   { value: 'bom', label: 'Bom (Funcional)' },
-                   { value: 'regular', label: 'Regular (Gasto)' },
-                   { value: 'ruim', label: 'Ruim (Requer Manutenção)' },
-                   { value: 'inservivel', label: 'Inservível (Baixa Definitiva)' }
-                 ]}
-               />
-               <Input 
-                 type="number"
-                 label="Quantidade" 
-                 placeholder="Qtd (Ex: 1)" 
-                 value={newItem.quantity?.toString()}
-                 onChange={e => setNewItem({...newItem, quantity: Math.max(1, parseInt(e.target.value) || 1)})}
-                 min={1}
-               />
-             </div>
-
-             <Textarea 
-               ref={obsRef}
-               label="Observações Adicionais" 
-               placeholder="Avarias, marcas, detalhes de localização..." 
-               value={newItem.observations}
-               onChange={e => setNewItem({...newItem, observations: e.target.value})}
-               onKeyDown={e => handleKeyDown(e, 3)}
-             />
-
-             {newItem.photos.length > 0 && (
-               <div className="flex flex-wrap gap-3">
-                 {newItem.photos.map((photo, index) => (
-                   <div key={index} className="relative w-20 h-20 rounded-xl overflow-hidden border border-slate-200 group">
-                      <img src={photo} alt="" className="w-full h-full object-cover" />
-                      <button 
-                        onClick={() => removePhoto(index)}
-                        className="absolute inset-0 bg-rose-500/80 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity text-white"
-                      >
-                        <Trash2 className="w-4 h-4" />
-                      </button>
-                   </div>
-                 ))}
+          <div className="fixed inset-0 z-[200] flex flex-col bg-slate-50 md:bg-slate-900/60 md:p-6 md:justify-center md:items-center animate-in fade-in duration-300">
+            <Card className="w-full h-full md:h-auto md:max-h-[95vh] md:max-w-3xl flex flex-col overflow-hidden rounded-none md:rounded-[3rem] border-none md:border-solid md:border-slate-200 shadow-2xl relative z-10 p-0 bg-white">
+               
+               {/* 1. Header Fixo com Contraste */}
+               <div className="flex items-center justify-between p-6 bg-slate-900 text-white shadow-md z-20 shrink-0">
+                  <div className="flex flex-col">
+                     <h3 className="font-display font-bold text-xl uppercase tracking-tight text-white drop-shadow-sm">
+                      {editingAssetId ? 'Editar Item' : 'Novo Item'}
+                     </h3>
+                     <span className="text-xs font-semibold text-slate-400 mt-1">
+                      {editingAssetId ? 'Atualize os dados gravados' : 'Cadastre um novo bem de forma fácil'}
+                     </span>
+                  </div>
+                  <div className="flex items-center gap-4">
+                     <div className="hidden sm:flex items-center bg-slate-800 rounded-xl p-1 border border-slate-700">
+                        <button type="button" onClick={() => navigateFields('prev')} className="p-3 hover:bg-slate-700 rounded-lg text-slate-400 hover:text-white transition-all">
+                          <ChevronLeft className="w-5 h-5" />
+                        </button>
+                        <div className="w-px h-5 bg-slate-600 mx-1" />
+                        <button type="button" onClick={() => navigateFields('next')} className="p-3 hover:bg-slate-700 rounded-lg text-slate-400 hover:text-white transition-all">
+                          <ChevronRight className="w-5 h-5" />
+                        </button>
+                     </div>
+                     <button type="button" onClick={() => { setIsAdding(false); setEditingAssetId(null); setDuplicateWarning(null); }} className="p-3 rounded-full bg-slate-800 text-slate-300 hover:text-rose-400 hover:bg-slate-700 transition-all border border-slate-700">
+                       <X className="w-6 h-6" />
+                     </button>
+                  </div>
                </div>
-             )}
+               
+               {/* 2. Área de Rolagem do Formulário (Respiro) */}
+               <div className="flex-1 overflow-y-auto custom-scrollbar p-6 md:p-8 flex flex-col gap-8 bg-slate-50/50 pb-32">
+                 
+                 <div className="flex flex-col gap-2">
+                   <Input 
+                     ref={nameRef}
+                     label="Qual o nome do Item?" 
+                     placeholder="Ex: Cadeira de Rodas, Mesa em L" 
+                     value={newItem.name}
+                     onChange={e => setNewItem({...newItem, name: e.target.value})}
+                     onKeyDown={e => handleKeyDown(e, 0)}
+                     error={duplicateWarning || undefined}
+                     autoFocus
+                     className="text-lg py-4 px-5 shadow-sm"
+                   />
+                   {duplicateWarning && <div className="ml-2 text-rose-500 font-bold text-sm flex items-center gap-1 mt-1"><AlertCircle className="w-4 h-4"/> {duplicateWarning}</div>}
+                 </div>
+                 
+                 <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+                   <Input 
+                     ref={patrimonyRef}
+                     label="Nº do Patrimônio (Identificador)" 
+                     placeholder="Aponte a câmera ou digite" 
+                     value={newItem.patrimonyNumber}
+                     onChange={e => setNewItem({...newItem, patrimonyNumber: e.target.value})}
+                     onKeyDown={e => handleKeyDown(e, 1)}
+                     className="text-lg py-4 px-5 shadow-sm font-mono tracking-wider"
+                   />
 
-             <div className="flex items-center gap-4 mt-2">
-                <input 
-                  type="file" 
-                  ref={fileInputRef}
-                  className="hidden" 
-                  accept="image/*" 
-                  multiple 
-                  onChange={handlePhotoCapture}
-                />
-                <Button 
-                  variant="secondary" 
-                  icon={Camera} 
-                  className="w-20 md:w-40 h-16 rounded-[1.5rem] group overflow-hidden relative"
-                  onClick={() => fileInputRef.current?.click()}
-                >
-                   <span className="relative z-10">FOTO</span>
-                   <div className="absolute inset-0 bg-slate-50 transition-transform group-hover:scale-110" />
-                </Button>
-                <Button onClick={handleAddItem} className="flex-1 h-16 rounded-[1.5rem] uppercase font-black tracking-widest text-lg shadow-2xl shadow-blue-600/20" icon={CheckCircle2} variant="accent">
-                   {editingAssetId ? 'SALVAR ALTERAÇÕES' : 'REGISTRAR BEM'}
-                </Button>
-             </div>
-          </Card>
+                   <div className="flex gap-4">
+                     <div className="flex-1">
+                       <Select 
+                         ref={conditionRef}
+                         label="Qual o Estado Geral?" 
+                         value={newItem.condition}
+                         onChange={e => setNewItem({...newItem, condition: e.target.value as any})}
+                         onKeyDown={e => handleKeyDown(e, 2)}
+                         className="text-base py-4 px-5 shadow-sm"
+                         options={[
+                           { value: 'novo', label: 'Novo (Lacrado/Sem uso)' },
+                           { value: 'bom', label: 'Bom (Funcional)' },
+                           { value: 'regular', label: 'Regular (Algum desgaste)' },
+                           { value: 'ruim', label: 'Ruim (Requer Manutenção)' },
+                           { value: 'inservivel', label: 'Inservível (Descarte)' }
+                         ]}
+                       />
+                     </div>
+                     <div className="w-28 shrink-0">
+                       <Input 
+                         type="number"
+                         label="Qtd" 
+                         placeholder="1" 
+                         value={newItem.quantity?.toString()}
+                         onChange={e => setNewItem({...newItem, quantity: Math.max(1, parseInt(e.target.value) || 1)})}
+                         min={1}
+                         className="text-center font-bold text-lg py-4 px-3 shadow-sm"
+                       />
+                     </div>
+                   </div>
+                 </div>
+
+                 <Textarea 
+                   ref={obsRef}
+                   label="Observações Adicionais (Opcional)" 
+                   placeholder="Existe alguma avaria? Qual a cor? Algum detalhe que chama atenção?" 
+                   value={newItem.observations}
+                   onChange={e => setNewItem({...newItem, observations: e.target.value})}
+                   onKeyDown={e => handleKeyDown(e, 3)}
+                   className="text-base p-5 min-h-[140px] shadow-sm resize-none"
+                 />
+
+                 {newItem.photos.length > 0 && (
+                   <div className="flex flex-col gap-3">
+                     <span className="text-sm font-bold text-slate-700">Fotos Capturadas ({newItem.photos.length})</span>
+                     <div className="flex flex-wrap gap-4 overflow-x-auto pb-2">
+                       {newItem.photos.map((photo, index) => (
+                         <div key={index} className="relative shrink-0 w-28 h-28 md:w-32 md:h-32 rounded-2xl overflow-hidden border-2 border-slate-200 shadow-sm group">
+                            <img src={photo} alt="" className="w-full h-full object-cover" />
+                            <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/80 p-2 flex justify-end">
+                              <button 
+                                onClick={() => removePhoto(index)}
+                                className="bg-rose-500 text-white p-2 rounded-full shadow hover:bg-rose-600 transition-colors"
+                              >
+                                <Trash2 className="w-4 h-4" />
+                              </button>
+                            </div>
+                         </div>
+                       ))}
+                     </div>
+                   </div>
+                 )}
+               </div>
+
+               {/* 3. Rodapé Fixo com Botões Gigantes */}
+               <div className="p-4 md:p-6 bg-white border-t border-slate-200 shadow-[0_-4px_20px_rgba(0,0,0,0.05)] shrink-0 z-20">
+                 <div className="flex flex-col sm:flex-row items-stretch gap-4 max-w-2xl mx-auto w-full">
+                    <input 
+                      type="file" 
+                      ref={fileInputRef}
+                      className="hidden" 
+                      accept="image/*" 
+                      multiple 
+                      capture="environment"
+                      onChange={handlePhotoCapture}
+                    />
+                    <Button 
+                      variant="secondary" 
+                      className="h-[4.5rem] rounded-[1.5rem] flex-1 sm:flex-none sm:w-[160px] border-2 border-slate-200 uppercase font-black tracking-widest text-sm relative group overflow-hidden bg-slate-50 hover:bg-slate-100 flex items-center justify-center gap-3 text-slate-700"
+                      onClick={() => fileInputRef.current?.click()}
+                    >
+                       <Camera className="w-6 h-6" />
+                       <span className="relative z-10">FOTO</span>
+                    </Button>
+                    <Button 
+                      onClick={handleAddItem} 
+                      className="h-[4.5rem] flex-[2] rounded-[1.5rem] uppercase font-black tracking-widest text-lg shadow-[0_8px_30px_rgba(37,99,235,0.4)] flex items-center justify-center gap-3" 
+                      variant="accent"
+                    >
+                       <CheckCircle2 className="w-7 h-7" />
+                       {editingAssetId ? 'SALVAR ITEM' : 'CADASTRAR ITEM'}
+                    </Button>
+                 </div>
+               </div>
+            </Card>
+          </div>
         )}
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
@@ -970,54 +1036,63 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
             (asset.patrimonyNumber || '').toLowerCase().includes(searchTermAssets.toLowerCase())
           ).map(asset => (
             <Card key={asset.id} className="flex flex-col gap-4 group hover:border-slate-300 transition-all duration-300 rounded-[2rem] p-7 relative">
-              {!isLocked && (
-                <div className={cn(
-                  "absolute top-4 right-4 flex items-center gap-2 transition-all duration-300 z-20",
-                  confirmDeleteId === asset.id ? "opacity-100" : "opacity-0 group-hover:opacity-100"
-                )}>
-                  {confirmDeleteId === asset.id ? (
-                    <div className="flex items-center gap-2 bg-rose-50 border border-rose-100 p-1.5 rounded-2xl animate-in fade-in slide-in-from-right-4 duration-300">
-                      <span className="text-[10px] font-black text-rose-600 uppercase tracking-widest px-2">Excluir item?</span>
-                      <button 
-                        onClick={() => handleDeleteAsset(asset.id)}
-                        className="p-2 bg-rose-600 text-white rounded-xl shadow-lg shadow-rose-600/20 hover:bg-rose-700 transition-all font-bold text-[10px]"
-                      >
-                        SIM
-                      </button>
-                      <button 
-                        onClick={() => setConfirmDeleteId(null)}
-                        className="p-2 bg-white text-slate-400 hover:text-slate-900 rounded-xl border border-slate-100 transition-all font-bold text-[10px]"
-                      >
-                        NÃO
-                      </button>
-                    </div>
-                  ) : (
-                    <>
-                      <button 
-                        onClick={() => handleEditAsset(asset)}
-                        className="p-2 bg-white text-slate-400 hover:text-blue-600 rounded-xl border border-slate-100 hover:border-blue-100 shadow-sm transition-all"
-                      >
-                        <Edit2 className="w-4 h-4" />
-                      </button>
-                      <button 
-                        onClick={() => handleDeleteAsset(asset.id)}
-                        className="p-2 bg-white text-slate-400 hover:text-rose-600 rounded-xl border border-slate-100 hover:border-rose-100 shadow-sm transition-all"
-                      >
-                        <Trash2 className="w-4 h-4" />
-                      </button>
-                      {isManager && (
+              <div className={cn(
+                "absolute top-4 right-4 flex items-center gap-2 transition-all duration-300 z-20",
+                confirmDeleteId === asset.id ? "opacity-100" : "opacity-0 group-hover:opacity-100"
+              )}>
+                {confirmDeleteId === asset.id && !isLocked ? (
+                  <div className="flex items-center gap-2 bg-rose-50 border border-rose-100 p-1.5 rounded-2xl animate-in fade-in slide-in-from-right-4 duration-300">
+                    <span className="text-[10px] font-black text-rose-600 uppercase tracking-widest px-2">Excluir item?</span>
+                    <button 
+                      onClick={() => handleDeleteAsset(asset.id)}
+                      className="p-2 bg-rose-600 text-white rounded-xl shadow-lg shadow-rose-600/20 hover:bg-rose-700 transition-all font-bold text-[10px]"
+                    >
+                      SIM
+                    </button>
+                    <button 
+                      onClick={() => setConfirmDeleteId(null)}
+                      className="p-2 bg-white text-slate-400 hover:text-slate-900 rounded-xl border border-slate-100 transition-all font-bold text-[10px]"
+                    >
+                      NÃO
+                    </button>
+                  </div>
+                ) : (
+                  <>
+                    <button 
+                      onClick={() => loadHistory(asset)}
+                      className="p-2 bg-white text-slate-400 hover:text-emerald-600 rounded-xl border border-slate-100 hover:border-emerald-100 shadow-sm transition-all"
+                      title="Histórico de Vistorias"
+                    >
+                      <History className="w-4 h-4" />
+                    </button>
+                    {!isLocked && (
+                      <>
                         <button 
-                          onClick={() => setTransferAssetId(asset.id)}
-                          className="p-2 bg-white text-slate-400 hover:text-amber-600 rounded-xl border border-slate-100 hover:border-amber-100 shadow-sm transition-all"
-                          title="Transferir Item"
+                          onClick={() => handleEditAsset(asset)}
+                          className="p-2 bg-white text-slate-400 hover:text-blue-600 rounded-xl border border-slate-100 hover:border-blue-100 shadow-sm transition-all"
                         >
-                          <Zap className="w-4 h-4" />
+                          <Edit2 className="w-4 h-4" />
                         </button>
-                      )}
-                    </>
-                  )}
-                </div>
-              )}
+                        <button 
+                          onClick={() => handleDeleteAsset(asset.id)}
+                          className="p-2 bg-white text-slate-400 hover:text-rose-600 rounded-xl border border-slate-100 hover:border-rose-100 shadow-sm transition-all"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                        {isManager && (
+                          <button 
+                            onClick={() => setTransferAssetId(asset.id)}
+                            className="p-2 bg-white text-slate-400 hover:text-amber-600 rounded-xl border border-slate-100 hover:border-amber-100 shadow-sm transition-all"
+                            title="Transferir Item"
+                          >
+                            <Zap className="w-4 h-4" />
+                          </button>
+                        )}
+                      </>
+                    )}
+                  </>
+                )}
+              </div>
               <div className="flex items-start justify-between">
                 <div className="flex flex-col pr-12">
                   <span className="font-black text-slate-900 group-hover:text-blue-600 transition-colors text-lg tracking-tight leading-tight">{asset.name}</span>
@@ -1223,6 +1298,64 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
                   </div>
                </div>
              )}
+          </Card>
+        </div>
+      )}
+
+      {/* Modal de Histórico */}
+      {historyAsset && (
+        <div className="fixed inset-0 z-[110] flex items-center justify-center p-4 md:p-10">
+          <div className="absolute inset-0 bg-slate-900/60 backdrop-blur-md" onClick={() => setHistoryAsset(null)} />
+          <Card className="w-full max-w-2xl flex flex-col p-8 md:p-10 overflow-hidden shadow-2xl animate-in zoom-in-95 duration-300 rounded-[3rem] border-none bg-white relative z-10 text-slate-900 max-h-[90vh]">
+            <div className="flex items-center justify-between mb-8 pb-6 border-b border-slate-100">
+               <div className="flex items-center gap-4">
+                  <div className="w-14 h-14 bg-emerald-100 rounded-[1.5rem] flex items-center justify-center border border-emerald-200">
+                     <History className="w-7 h-7 text-emerald-600" />
+                  </div>
+                  <div className="flex flex-col">
+                     <h3 className="font-black text-2xl uppercase tracking-tight text-slate-900 leading-none">Histórico</h3>
+                     <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest leading-none mt-2">{historyAsset.name} {historyAsset.patrimonyNumber ? `(Nº ${historyAsset.patrimonyNumber})` : ''}</span>
+                  </div>
+               </div>
+               <button onClick={() => setHistoryAsset(null)} className="p-3 hover:bg-slate-100 rounded-2xl transition-colors border border-transparent hover:border-slate-200">
+                  <X className="w-6 h-6 text-slate-400" />
+               </button>
+            </div>
+
+            <div className="flex flex-col gap-4 overflow-y-auto custom-scrollbar flex-1 pr-2">
+               {isLoadingHistory ? (
+                 <div className="py-20 flex flex-col items-center justify-center">
+                    <div className="w-8 h-8 border-4 border-slate-200 border-t-emerald-500 rounded-full animate-spin"></div>
+                    <span className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] mt-4">Carregando histórico...</span>
+                 </div>
+               ) : !assetHistory || assetHistory.length === 0 ? (
+                 <div className="py-20 flex flex-col items-center justify-center text-slate-300">
+                    <History className="w-12 h-12 opacity-20 mb-4" />
+                    <p className="font-bold tracking-widest text-xs uppercase text-slate-400">Nenhum registro anterior encontrado</p>
+                 </div>
+               ) : (
+                 <div className="relative border-l-2 border-slate-100 ml-4 py-2 space-y-8">
+                   {assetHistory.map((entry, idx) => (
+                     <div key={idx} className="relative pl-6">
+                       <div className="absolute -left-[9px] top-1 w-4 h-4 bg-white border-2 border-slate-300 rounded-full z-10"></div>
+                       <div className="flex flex-col gap-1">
+                         <span className="text-[10px] font-black uppercase tracking-widest text-emerald-600 bg-emerald-50 self-start px-2 py-0.5 rounded-lg mb-1">{formatDate(entry.inspection.date)}</span>
+                         <h4 className="font-black text-base text-slate-900 tracking-tight leading-tight">{entry.location.name}</h4>
+                         <span className="text-sm font-semibold text-slate-500">Condição: <span className="uppercase text-slate-700">{entry.asset.condition}</span></span>
+                         {(entry.asset.quantity && entry.asset.quantity > 1) ? (
+                            <span className="text-xs font-semibold text-slate-400">Qtd: {entry.asset.quantity}</span>
+                         ) : null}
+                         {entry.asset.observations && (
+                           <p className="text-xs text-slate-500 bg-slate-50 p-3 rounded-xl mt-2 border border-slate-100 italic">
+                             "{entry.asset.observations}"
+                           </p>
+                         )}
+                       </div>
+                     </div>
+                   ))}
+                 </div>
+               )}
+            </div>
           </Card>
         </div>
       )}

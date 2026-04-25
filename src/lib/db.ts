@@ -32,6 +32,8 @@ export interface Location {
   name: string;
   description: string;
   internalCode?: string;
+  latitude?: number;
+  longitude?: number;
 }
 
 export interface Inspection {
