@@ -123,88 +123,74 @@ function SetupScreen() {
 
 function LoginScreen() {
   const { signIn, isFirstUser } = useAuth();
-  const [email, setEmail] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
 
-  const handleLogin = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const handleLogin = async () => {
     setLoading(true);
     setError('');
     
-    const success = await signIn(email);
+    const success = await signIn();
     if (!success) {
-      setError('Acesso negado. Utilize um e-mail de membro cadastrado.');
+      setError('Acesso negado. A conta do Google selecionada não possui acesso. Solicite o cadastro a um administrador.');
     }
     setLoading(false);
   };
 
   return (
-    <div className="min-h-screen bg-slate-50 flex items-center justify-center p-6 bg-[radial-gradient(#e5e7eb_1px,transparent_1px)] [background-size:16px_16px]">
-      <Card className="w-full max-w-md p-10 flex flex-col items-center gap-8 shadow-2xl border-none ring-1 ring-slate-200">
+    <div className="min-h-screen bg-bg flex items-center justify-center p-6 bg-[radial-gradient(#e2e8f0_1px,transparent_1px)] [background-size:16px_16px]">
+      <Card className="w-full max-w-md p-10 flex flex-col items-center gap-8 shadow-2xl border-none ring-1 ring-border bg-card">
         <div className="flex flex-col items-center gap-4">
-          <div className="w-16 h-16 bg-slate-900 rounded-[2rem] flex items-center justify-center shadow-lg shadow-slate-200 rotate-3">
+          <div className="w-16 h-16 bg-primary rounded-[2rem] flex items-center justify-center shadow-lg shadow-primary/20 rotate-3">
             <ShieldCheck className="text-white w-8 h-8 -rotate-3" />
           </div>
           <div className="text-center">
-            <h1 className="text-2xl font-black tracking-tighter text-slate-900 leading-none">PATRI-MV</h1>
-            <span className="text-[9px] font-black text-slate-400 uppercase tracking-[0.2em]">Manoel Viana</span>
-            <p className="text-slate-500 text-xs font-medium mt-3">Sistema de Gestão de Patrimônio Público</p>
+            <h1 className="text-2xl font-black tracking-tighter text-primary leading-none">PATRI-MV</h1>
+            <span className="text-[9px] font-black text-text-muted uppercase tracking-[0.2em]">Manoel Viana</span>
+            <p className="text-text-muted text-xs font-medium mt-3">Sistema de Gestão de Patrimônio Público</p>
           </div>
         </div>
 
-        <form onSubmit={handleLogin} className="w-full flex flex-col gap-5">
-          <Input 
-            label="E-mail de Acesso" 
-            placeholder="ex: prefeito@exemplo.com"
-            type="email"
-            required
-            value={email}
-            onChange={e => setEmail(e.target.value)}
-            error={error}
-          />
-          <Button type="submit" loading={loading} icon={LogIn} className="h-14 text-lg">
-            ACESSAR SISTEMA
-          </Button>
-          
-          <div className="relative py-2">
-            <div className="absolute inset-0 flex items-center"><div className="w-full border-t border-slate-200"></div></div>
-            <div className="relative flex justify-center text-[10px] uppercase font-black text-slate-400 bg-slate-50 px-4">Ou</div>
-          </div>
+        <div className="w-full flex flex-col gap-5">
+           {error && (
+             <div className="bg-rose-50 text-rose-600 p-4 rounded-xl text-sm font-bold border border-rose-200 text-center">
+               {error}
+             </div>
+           )}
+           <Button onClick={handleLogin} loading={loading} icon={LogIn} variant="primary" className="h-14 text-lg shadow-xl shadow-primary/20 border-2 border-transparent">
+             ACESSAR COM GOOGLE
+           </Button>
+           
+           <div className="relative py-2">
+             <div className="absolute inset-0 flex items-center"><div className="w-full border-t border-border"></div></div>
+             <div className="relative flex justify-center text-[10px] uppercase font-black text-text-muted bg-card px-4">Ou</div>
+           </div>
 
-          <Button 
-            type="button"
-            variant="outline"
-            onClick={() => {
-               // We don't have a scanner on the login screen yet, but we can redirect 
-               // to a path that shows it if we wanted. 
-               // For now, let's just use a special query param or state.
-               window.location.href = '?view=scanner';
-            }}
-            icon={Search}
-            className="h-12 border-slate-200 text-slate-600 hover:text-slate-900"
-          >
-            CONSULTAR QR CODE PÚBLICO
-          </Button>
-        </form>
+           <Button 
+             type="button"
+             variant="outline"
+             onClick={() => {
+                window.location.href = '?view=scanner';
+             }}
+             icon={Search}
+             className="h-12 border-border text-primary hover:text-primary-light"
+           >
+             CONSULTAR QR CODE PÚBLICO
+           </Button>
+        </div>
 
         <div className="flex flex-col gap-4 w-full">
            <div className="relative">
-              <div className="absolute inset-0 flex items-center"><div className="w-full border-t border-slate-100"></div></div>
-              <div className="relative flex justify-center text-[10px] uppercase font-black text-slate-300 tracking-widest"><span className="bg-white px-4">Demo Accounts</span></div>
+              <div className="absolute inset-0 flex items-center"><div className="w-full border-t border-border"></div></div>
+              <div className="relative flex justify-center text-[10px] uppercase font-black text-text-muted tracking-widest"><span className="bg-card px-4">Dica</span></div>
            </div>
-           <div className="grid grid-cols-1 gap-2">
-              <button 
-                onClick={() => setEmail('prefeito@exemplo.com')}
-                className="text-xs text-slate-400 hover:text-slate-900 font-bold p-2 text-left bg-slate-50 rounded-lg border border-transparent hover:border-slate-200 transition-all text-center"
-              >
-                Pelo menos um Administrador deve ser cadastrado primeiro.
-              </button>
+           <div className="text-xs text-text-muted text-center leading-relaxed">
+             Para testes, cadastre seu e-mail do Google no banco de dados primeiro na tela de primeiro acesso.
            </div>
         </div>
 
-        <div className="flex items-center gap-2 text-[10px] font-bold text-slate-400 uppercase tracking-widest">
-           <ShieldCheck className="w-4 h-4" /> Acesso Seguro • Offline-First
+        <div className="flex items-center gap-2 text-[10px] font-bold text-text-muted uppercase tracking-widest">
+           <ShieldCheck className="w-4 h-4" /> Acesso Seguro com Google
         </div>
       </Card>
     </div>
