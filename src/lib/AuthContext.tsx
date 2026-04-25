@@ -2,7 +2,7 @@ import React, { createContext, useContext, useEffect, useState } from 'react';
 import { User, db as localDb } from './db';
 import { auth, db as firestore, googleProvider } from './firebase';
 import { onAuthStateChanged, signInWithPopup, signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut as firebaseSignOut } from 'firebase/auth';
-import { doc, getDoc, setDoc, collection, query, limit, getDocs } from 'firebase/firestore';
+import { doc, getDoc, setDoc, collection, query, limit, getDocs, where } from 'firebase/firestore';
 
 interface AuthContextType {
   user: User | null;

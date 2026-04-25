@@ -505,13 +505,13 @@ export function Dashboard() {
              </div>
            )}
         </div>
-        <div className="flex items-center gap-2">
-          <div className="flex items-center gap-1.5 px-2 py-1 bg-slate-50 rounded-full">
-            <div className={cn("w-2 h-2 rounded-full animate-pulse", isOnline ? "bg-emerald-500" : "bg-rose-500")} />
-            <span className="text-[10px] font-black text-slate-400">{isOnline ? "ON" : "OFF"}</span>
+        <div className="flex items-center gap-3">
+          <div className="flex items-center gap-1.5 px-2 py-1 bg-slate-50 rounded-full shadow-inner border border-slate-100">
+            <div className={cn("w-2 h-2 rounded-full", isOnline ? "bg-emerald-500" : "bg-rose-500")} />
           </div>
-          <button onClick={signOut} className="p-2 text-rose-500">
-            <LogOut className="w-5 h-5" />
+          <button onClick={signOut} className="flex items-center gap-1.5 px-3 py-1.5 bg-rose-50 text-rose-600 rounded-lg hover:bg-rose-100 transition-colors">
+             <span className="text-[10px] font-bold uppercase tracking-widest leading-none">Sair</span>
+             <LogOut className="w-3.5 h-3.5" />
           </button>
         </div>
       </div>
@@ -616,8 +616,8 @@ export function Dashboard() {
                    <span className="text-[10px] font-black text-primary uppercase tracking-tighter shrink-0">{user?.name}</span>
                    <span className="text-[8px] font-bold text-text-muted uppercase tracking-widest mt-1">{user?.role}</span>
                 </div>
-                <div className="w-10 h-10 bg-primary rounded-xl flex items-center justify-center text-white">
-                   <UserIcon className="w-5 h-5" />
+                <div className="w-10 h-10 bg-primary rounded-xl flex items-center justify-center text-white font-bold">
+                   {user?.name.charAt(0)}
                 </div>
              </div>
 
@@ -633,6 +633,13 @@ export function Dashboard() {
                    {unreadNotifications}
                  </span>
                )}
+             </button>
+
+             <button 
+               onClick={signOut}
+               className="flex items-center gap-2 px-5 h-12 bg-rose-50 border border-rose-100 rounded-2xl text-rose-600 hover:bg-rose-500 hover:text-white transition-all font-bold text-[10px] uppercase tracking-widest"
+             >
+               <LogOut className="w-4 h-4" /> Sair
              </button>
           </div>
         </header>
