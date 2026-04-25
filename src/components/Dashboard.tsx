@@ -259,25 +259,25 @@ export function Dashboard() {
         return (
           <div className="flex flex-col gap-10 animate-in fade-in slide-in-from-bottom-4 duration-700">
             {/* 🏰 Hero Moderno */}
-            <div className="relative overflow-hidden rounded-[3rem] bg-slate-900 px-8 py-12 text-white shadow-2xl shadow-slate-900/40 group">
+            <div className="relative overflow-hidden rounded-[3rem] bg-card border border-border px-8 py-12 text-primary shadow-xl group">
               <div className="relative z-10 flex flex-col md:flex-row items-center justify-between gap-10">
                 <div className="flex flex-col gap-4 text-center md:text-left max-w-xl">
-                  <div className="inline-flex items-center gap-2 px-4 py-2 bg-white/10 backdrop-blur-md rounded-full w-fit mx-auto md:mx-0">
-                    <Zap className="w-4 h-4 text-amber-400 fill-amber-400" />
-                    <span className="text-[10px] font-black uppercase tracking-widest text-slate-300">Resumo Operacional • Manoel Viana</span>
+                  <div className="inline-flex items-center gap-2 px-4 py-2 bg-bg backdrop-blur-md rounded-full w-fit mx-auto md:mx-0">
+                    <Zap className="w-4 h-4 text-accent fill-accent" />
+                    <span className="text-[10px] font-black uppercase tracking-widest text-text-muted">Resumo Operacional • Manoel Viana</span>
                   </div>
-                  <h2 className="text-4xl md:text-5xl font-black tracking-tighter leading-[0.9] text-white">
+                  <h2 className="text-4xl md:text-5xl font-black tracking-tighter leading-[0.9] text-primary">
                     Gestão <br /> 
-                    <span className="text-slate-500">Patrimonial</span>
+                    <span className="text-primary-light">Patrimonial</span>
                   </h2>
-                  <p className="text-slate-400 text-sm font-medium leading-relaxed">
+                  <p className="text-text-muted text-sm font-medium leading-relaxed">
                     Painel inteligente para monitoramento, vistoria e homologação dos bens públicos municipais. Segurança e transparência em tempo real.
                   </p>
                   <div className="flex flex-wrap items-center justify-center md:justify-start gap-4 mt-2">
-                    <Button variant="accent" icon={Plus} onClick={() => setActiveTab('locations')} className="rounded-2xl px-10 h-14 uppercase tracking-widest font-black text-[10px] shadow-2xl shadow-blue-600/30">
+                    <Button variant="accent" icon={Plus} onClick={() => setActiveTab('locations')} className="rounded-2xl px-10 h-14 uppercase tracking-widest font-black text-[10px] shadow-2xl shadow-accent/30">
                       Iniciar Vistoria
                     </Button>
-                    <Button variant="secondary" onClick={() => setActiveTab('scanner')} className="rounded-2xl px-10 h-14 uppercase tracking-widest font-black text-[10px] border-white/20 text-white hover:bg-white/10 hover:text-white">
+                    <Button variant="secondary" onClick={() => setActiveTab('scanner')} className="rounded-2xl px-10 h-14 uppercase tracking-widest font-black text-[10px] border-border text-primary hover:bg-bg hover:text-primary">
                       Escanear QR Code
                     </Button>
                     {isManager && (
@@ -345,24 +345,24 @@ export function Dashboard() {
                 </div>
                 
                 <div className="hidden lg:flex flex-col gap-4 relative">
-                   <div className="p-8 bg-white/5 backdrop-blur-xl border border-white/10 rounded-[2.5rem] shadow-2xl flex flex-col items-center gap-2 transform rotate-2 hover:rotate-0 transition-transform duration-500 cursor-pointer group/card" onClick={() => setActiveTab('notifications')}>
-                      <div className="w-16 h-16 bg-white rounded-3xl flex items-center justify-center shadow-2xl shadow-white/10 mb-2 group-hover/card:scale-110 transition-transform">
-                        <Bell className="w-8 h-8 text-slate-900" />
+                   <div className="p-8 bg-card border border-border rounded-[2.5rem] shadow-xl flex flex-col items-center gap-2 transform rotate-2 hover:rotate-0 transition-transform duration-500 cursor-pointer group/card" onClick={() => setActiveTab('notifications')}>
+                      <div className="w-16 h-16 bg-bg rounded-3xl flex items-center justify-center shadow-lg mb-2 group-hover/card:scale-110 transition-transform border border-border">
+                        <Bell className="w-8 h-8 text-primary" />
                       </div>
-                      <span className="text-3xl font-black text-white">{unreadNotifications || 0}</span>
-                      <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Avisos Pendentes</span>
+                      <span className="text-3xl font-black text-primary">{unreadNotifications || 0}</span>
+                      <span className="text-[10px] font-black text-text-muted uppercase tracking-widest">Avisos Pendentes</span>
                    </div>
-                   <div className="absolute -top-12 -left-20 p-6 bg-blue-600/20 backdrop-blur-md border border-blue-500/20 rounded-[2rem] shadow-2xl flex flex-col items-center gap-1 transform -rotate-6 scale-90">
-                      <ShieldCheck className="w-6 h-6 text-blue-400" />
-                      <span className="text-[10px] font-black text-blue-300 uppercase tracking-widest mt-1">Concluídas</span>
-                      <span className="text-xl font-bold text-white">{concludedInspectionsCount || 0}</span>
+                   <div className="absolute -top-12 -left-20 p-6 bg-primary-light/10 backdrop-blur-md border border-primary-light/20 rounded-[2rem] shadow-lg flex flex-col items-center gap-1 transform -rotate-6 scale-90">
+                      <ShieldCheck className="w-6 h-6 text-primary-light" />
+                      <span className="text-[10px] font-black text-primary-light uppercase tracking-widest mt-1">Concluídas</span>
+                      <span className="text-xl font-bold text-primary">{concludedInspectionsCount || 0}</span>
                    </div>
                 </div>
               </div>
               
               {/* Background Accents */}
-              <Building2 className="absolute -bottom-20 -right-20 w-96 h-96 text-white/5 transform -rotate-12 pointer-events-none transition-transform duration-1000 group-hover:scale-110" />
-              <div className="absolute top-0 right-0 w-64 h-64 bg-blue-600/20 blur-[100px] rounded-full -translate-y-1/2 translate-x-1/2"></div>
+              <Building2 className="absolute -bottom-20 -right-20 w-96 h-96 text-primary/5 transform -rotate-12 pointer-events-none transition-transform duration-1000 group-hover:scale-110" />
+              <div className="absolute top-0 right-0 w-64 h-64 bg-accent/10 blur-[100px] rounded-full -translate-y-1/2 translate-x-1/2"></div>
             </div>
 
             {/* 📊 2. Cards de Resumo */}
@@ -398,18 +398,18 @@ export function Dashboard() {
             <div className="flex flex-col gap-6">
               <div className="flex items-center justify-between ml-1 leading-none">
                 <div className="flex flex-col">
-                  <h3 className="text-xs font-black text-slate-400 uppercase tracking-[0.2em]">Fluxo de Atividades</h3>
-                  <span className="text-[10px] font-bold text-slate-300 uppercase tracking-widest mt-1">Vistorias recentes no sistema</span>
+                  <h3 className="text-xs font-black text-text-muted uppercase tracking-[0.2em]">Fluxo de Atividades</h3>
+                  <span className="text-[10px] font-bold text-text-muted uppercase tracking-widest mt-1">Vistorias recentes no sistema</span>
                 </div>
-                <button onClick={() => setActiveTab('inspections')} className="flex items-center gap-2 text-[10px] font-black text-slate-900 border-2 border-slate-900 px-4 py-2 rounded-xl hover:bg-slate-900 hover:text-white transition-all">VER TODAS <ArrowRight className="w-3 h-3" /></button>
+                <button onClick={() => setActiveTab('inspections')} className="flex items-center gap-2 text-[10px] font-black text-primary border-2 border-primary px-4 py-2 rounded-xl hover:bg-primary hover:text-white transition-all">VER TODAS <ArrowRight className="w-3 h-3" /></button>
               </div>
               <div className="grid grid-cols-1 gap-3">
                 {inspections?.length === 0 ? (
-                  <Card className="flex items-center justify-center py-20 text-slate-400 border-dashed border-2 border-slate-100 bg-slate-50/50 rounded-[3rem]">
+                  <Card className="flex items-center justify-center py-20 text-text-muted border-dashed border-2 border-border bg-bg/50 rounded-[3rem]">
                     <div className="text-center">
-                      <ClipboardList className="w-16 h-16 mx-auto opacity-10 mb-4" />
-                      <p className="text-sm font-black uppercase tracking-widest text-slate-300">Nenhuma vistoria registrada</p>
-                      <p className="text-xs text-slate-400 mt-1">Selecione um local para iniciar o inventário.</p>
+                      <ClipboardList className="w-16 h-16 mx-auto opacity-20 mb-4" />
+                      <p className="text-sm font-black uppercase tracking-widest text-text-muted">Nenhuma vistoria registrada</p>
+                      <p className="text-xs text-text-muted mt-1">Selecione um local para iniciar o inventário.</p>
                     </div>
                   </Card>
                 ) : (
@@ -437,10 +437,10 @@ export function Dashboard() {
                 </div>
               </div>
             ) : (
-              <div className="flex flex-col items-center gap-3 py-6 bg-slate-50/50 rounded-[2.5rem] border border-slate-100 mt-4 group">
+              <div className="flex flex-col items-center gap-3 py-6 bg-card rounded-[2.5rem] border border-border mt-4 group shadow-sm">
                 <div className="flex items-center gap-2">
                   <div className="w-2 h-2 rounded-full bg-emerald-500 shadow-[0_0_12px_#10b981] animate-pulse"></div>
-                  <span className="text-[10px] font-black text-slate-500 uppercase tracking-[0.2em] leading-none">
+                  <span className="text-[10px] font-black text-text-muted uppercase tracking-[0.2em] leading-none">
                     {unsyncedCount > 0 ? `Sincronizando ${unsyncedCount} registros com a prefeitura...` : 'Nuvem e Dispositivo Sincronizados (100%)'}
                   </span>
                 </div>
@@ -489,7 +489,7 @@ export function Dashboard() {
   return (
     <div className="flex flex-col lg:flex-row min-h-screen bg-bg">
       {/* 📱 Mobile Header */}
-      <div className="lg:hidden flex items-center justify-between p-4 bg-white border-b border-slate-100 sticky top-0 z-50">
+      <div className="lg:hidden flex items-center justify-between p-4 bg-card border-b border-border sticky top-0 z-50">
         <div className="flex items-center gap-2">
            {selectedInspectionId ? (
              <button onClick={() => setSelectedInspectionId(null)} className="flex items-center gap-2 text-slate-900 font-black">
@@ -498,10 +498,10 @@ export function Dashboard() {
              </button>
            ) : (
              <div className="flex items-center gap-2" onClick={() => handleTabChange('home')}>
-                <div className="w-8 h-8 bg-slate-900 rounded-lg flex items-center justify-center">
+                <div className="w-8 h-8 bg-primary rounded-lg flex items-center justify-center">
                    <ShieldCheck className="w-5 h-5 text-white" />
                 </div>
-                <span className="font-black tracking-tighter text-slate-900 uppercase">PATRI-MV</span>
+                <span className="font-black tracking-tighter text-primary uppercase">PATRI-MV</span>
              </div>
            )}
         </div>
@@ -517,14 +517,14 @@ export function Dashboard() {
       </div>
 
       {/* 🖥️ Desktop Sidebar */}
-      <aside className="hidden lg:flex flex-col w-72 bg-white border-r border-slate-100 p-8 sticky top-0 h-screen">
+      <aside className="hidden lg:flex flex-col w-72 bg-card border-r border-border p-8 sticky top-0 h-screen">
         <div className="flex items-center gap-3 mb-10 pl-2">
-           <div className="w-10 h-10 bg-slate-900 rounded-xl flex items-center justify-center shadow-xl shadow-slate-900/20">
+           <div className="w-10 h-10 bg-primary rounded-xl flex items-center justify-center shadow-xl shadow-primary/20">
               <ShieldCheck className="w-6 h-6 text-white" />
            </div>
            <div className="flex flex-col leading-none">
-              <span className="font-black text-xl tracking-tighter text-slate-900">PATRI-MV</span>
-              <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest leading-none mt-1">Manoel Viana</span>
+              <span className="font-black text-xl tracking-tighter text-primary">PATRI-MV</span>
+              <span className="text-[9px] font-black text-text-muted uppercase tracking-widest leading-none mt-1">Manoel Viana</span>
            </div>
         </div>
 
@@ -541,13 +541,13 @@ export function Dashboard() {
         </nav>
 
         <div className="mt-auto flex flex-col gap-4">
-          <div className="p-4 bg-slate-50 rounded-3xl flex items-center gap-3 ring-1 ring-slate-100">
-             <div className="w-10 h-10 bg-white rounded-2xl flex items-center justify-center shadow-sm text-slate-400 font-black text-xs uppercase">
+          <div className="p-4 bg-bg rounded-3xl flex items-center gap-3 ring-1 ring-border">
+             <div className="w-10 h-10 bg-card rounded-2xl flex items-center justify-center shadow-sm text-text-muted font-black text-xs uppercase border border-border">
                 {user?.name.charAt(0)}
              </div>
              <div className="flex flex-col overflow-hidden">
-                <span className="text-sm font-bold text-slate-900 truncate">{user?.name}</span>
-                <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">{user?.role}</span>
+                <span className="text-sm font-bold text-primary truncate">{user?.name}</span>
+                <span className="text-[10px] font-black text-text-muted uppercase tracking-widest">{user?.role}</span>
              </div>
           </div>
           <button 
@@ -570,7 +570,7 @@ export function Dashboard() {
             {(activeTab !== 'home' || selectedInspectionId) && (
               <button 
                 onClick={() => handleTabChange('home')}
-                className="w-10 h-10 lg:w-12 lg:h-12 shrink-0 bg-white border border-slate-100 rounded-[1rem] lg:rounded-2xl flex items-center justify-center text-slate-400 hover:text-slate-900 hover:shadow-lg hover:border-slate-300 transition-all active:scale-95"
+                className="w-10 h-10 lg:w-12 lg:h-12 shrink-0 bg-card border border-border rounded-[1rem] lg:rounded-2xl flex items-center justify-center text-text-muted hover:text-primary hover:shadow-lg hover:border-text-muted transition-all active:scale-95"
                 title="Voltar ao Início"
               >
                 <Home className="w-5 h-5 lg:w-6 lg:h-6" />
@@ -604,29 +604,29 @@ export function Dashboard() {
                   </>
                 )}
               </div>
-              <h2 className="text-xl lg:text-3xl font-black text-slate-900 tracking-tighter leading-none truncate">
+              <h2 className="text-xl lg:text-3xl font-black text-primary tracking-tighter leading-none truncate">
                 {selectedInspectionId ? "Auditoria de Ambiente" : activeTab === 'home' ? `Olá, ${user?.name.split(' ')[0]}` : activeTab === 'locations' ? 'Registro de Ambientes' : activeTab === 'inspections' ? 'Dossiê de Vistorias' : activeTab === 'reports' ? 'Painel de Transparência' : activeTab === 'users' ? 'Gestão de Agentes' : activeTab === 'settings' ? 'Configurações de Instância' : activeTab === 'notifications' ? 'Centro de Controle' : activeTab}
               </h2>
             </div>
           </div>
           
           <div className="hidden lg:flex items-center gap-6 shrink-0">
-             <div className="flex items-center gap-3 pr-6 border-r border-slate-200">
+             <div className="flex items-center gap-3 pr-6 border-r border-border">
                 <div className="flex flex-col items-end leading-none">
-                   <span className="text-[10px] font-black text-slate-900 uppercase tracking-tighter shrink-0">{user?.name}</span>
-                   <span className="text-[8px] font-bold text-slate-400 uppercase tracking-widest mt-1">{user?.role}</span>
+                   <span className="text-[10px] font-black text-primary uppercase tracking-tighter shrink-0">{user?.name}</span>
+                   <span className="text-[8px] font-bold text-text-muted uppercase tracking-widest mt-1">{user?.role}</span>
                 </div>
-                <div className="w-10 h-10 bg-slate-900 rounded-xl flex items-center justify-center text-white">
+                <div className="w-10 h-10 bg-primary rounded-xl flex items-center justify-center text-white">
                    <UserIcon className="w-5 h-5" />
                 </div>
              </div>
 
-             <div className="flex items-center gap-2 px-4 py-2 bg-white border border-slate-100 rounded-full shadow-sm">
+             <div className="flex items-center gap-2 px-4 py-2 bg-card border border-border rounded-full shadow-sm">
                 <div className={cn("w-2 h-2 rounded-full", isOnline ? "bg-emerald-500 shadow-[0_0_8px_#10b981]" : "bg-rose-500")} />
-                <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest leading-none">{isOnline ? "Conectado" : "Offline"}</span>
+                <span className="text-[10px] font-black text-text-muted uppercase tracking-widest leading-none">{isOnline ? "Conectado" : "Offline"}</span>
              </div>
 
-             <button onClick={() => setActiveTab('notifications')} className="relative w-12 h-12 flex items-center justify-center bg-white border border-slate-100 rounded-2xl text-slate-400 hover:text-slate-900 transition-all hover:bg-slate-50">
+             <button onClick={() => setActiveTab('notifications')} className="relative w-12 h-12 flex items-center justify-center bg-card border border-border rounded-2xl text-text-muted hover:text-primary transition-all hover:bg-bg">
                <Bell className="w-6 h-6" />
                {unreadNotifications > 0 && (
                  <span className="absolute top-2 right-2 w-4 h-4 bg-rose-500 text-[10px] text-white flex items-center justify-center rounded-full border-2 border-white font-bold">
@@ -643,13 +643,13 @@ export function Dashboard() {
       </main>
 
       {/* 🤳 Mobile Bottom Tab Bar */}
-      <nav className="fixed bottom-0 left-0 right-0 lg:hidden bg-white/80 backdrop-blur-xl border-t border-slate-100 flex items-center justify-around p-4 z-50">
+      <nav className="fixed bottom-0 left-0 right-0 lg:hidden bg-card/80 backdrop-blur-xl border-t border-border flex items-center justify-around p-4 z-50">
         <MobileNavItem active={activeTab === 'home' && !selectedInspectionId} icon={LayoutGrid} onClick={() => handleTabChange('home')} />
         <MobileNavItem active={activeTab === 'inspections'} icon={ClipboardList} onClick={() => handleTabChange('inspections')} />
         <div className="relative -top-6">
            <button 
              onClick={() => handleTabChange('locations')}
-             className="w-14 h-14 bg-slate-900 rounded-2xl flex items-center justify-center shadow-xl shadow-slate-900/30 text-white"
+             className="w-14 h-14 bg-accent rounded-2xl flex items-center justify-center shadow-xl shadow-accent/30 text-white"
            >
              <Plus className="w-6 h-6" />
            </button>
@@ -672,27 +672,27 @@ function SummaryCard({ label, value, icon: Icon, onClick, variant = 'default' }:
     <Card 
       onClick={onClick}
       className={cn(
-        "group h-40 flex flex-col justify-between border-slate-50 px-6 py-6",
-        variant === 'accent' ? "bg-slate-900 text-white border-transparent" : "bg-white shadow-sm hover:shadow-xl hover:shadow-slate-200/50"
+        "group h-40 flex flex-col justify-between border-bg px-6 py-6",
+        variant === 'accent' ? "bg-primary text-white border-transparent" : "bg-card shadow-sm hover:shadow-xl"
       )}
     >
       <div className="flex items-start justify-between">
         <div className={cn(
           "w-12 h-12 rounded-2xl flex items-center justify-center transition-all duration-500",
-          variant === 'accent' ? "bg-white/10" : "bg-slate-50 group-hover:bg-slate-900 group-hover:text-white"
+          variant === 'accent' ? "bg-white/10" : "bg-bg group-hover:bg-primary text-primary group-hover:text-white"
         )}>
           <Icon className="w-6 h-6 transform group-hover:rotate-12 transition-transform" />
         </div>
         <span className={cn(
           "text-[10px] font-black uppercase tracking-[0.2em] transform rotate-90 origin-right translate-y-4 opacity-30",
-          variant === 'accent' ? "text-white" : "text-slate-900"
+          variant === 'accent' ? "text-white" : "text-primary"
         )}>DADOS</span>
       </div>
       <div className="flex flex-col">
         <span className="text-4xl font-black stat-value tracking-tighter leading-none">{value}</span>
         <span className={cn(
           "text-[10px] uppercase font-black tracking-[0.15em] mt-2",
-          variant === 'accent' ? "text-slate-400" : "text-slate-400 group-hover:text-slate-600"
+          variant === 'accent' ? "text-primary-light" : "text-text-muted"
         )}>{label}</span>
       </div>
     </Card>
@@ -706,13 +706,13 @@ function QuickActionButton({ icon: Icon, label, onClick, primary = false }: { ic
       className={cn(
         "flex flex-col items-center justify-center gap-4 h-40 rounded-[2.5rem] border-2 transition-all group active:scale-95 shadow-sm",
         primary 
-          ? "bg-slate-900 border-slate-900 text-white hover:bg-slate-800" 
-          : "bg-white border-slate-50 hover:border-slate-200 text-slate-600 hover:text-slate-900"
+          ? "bg-primary border-primary text-white hover:bg-primary-light" 
+          : "bg-card border-bg hover:border-border text-text-muted hover:text-primary"
       )}
     >
       <div className={cn(
         "w-14 h-14 rounded-2xl flex items-center justify-center transition-all shadow-sm",
-        primary ? "bg-white/10 text-white" : "bg-slate-50 text-slate-400 group-hover:bg-slate-900 group-hover:text-white"
+        primary ? "bg-white/10 text-white" : "bg-bg text-text-muted group-hover:bg-primary group-hover:text-white"
       )}>
         <Icon className="w-7 h-7" />
       </div>
@@ -733,7 +733,7 @@ function RecentInspectionRow({ inspection, locationName, onClick }: { inspection
   return (
     <Card 
       onClick={onClick}
-      className="flex items-center justify-between py-5 px-6 group border-slate-50/50 hover:border-slate-200"
+      className="flex items-center justify-between py-5 px-6 group border-border hover:border-primary-light"
     >
       <div className="flex items-center gap-5">
         <div className={cn(
@@ -790,7 +790,7 @@ function NavItem({ active, label, icon: Icon, onClick, badge }: { active: boolea
       onClick={onClick}
       className={cn(
         "flex items-center gap-4 px-6 py-4 rounded-2xl font-bold text-sm transition-all group relative",
-        active ? "bg-slate-900 text-white shadow-2xl shadow-slate-900/20" : "text-slate-400 hover:bg-slate-50 hover:text-slate-900"
+        active ? "bg-primary text-white shadow-2xl shadow-primary/20" : "text-text-muted hover:bg-bg hover:text-primary"
       )}
     >
       <Icon className={cn("w-5 h-5 transition-transform duration-300", active ? "scale-110" : "group-hover:scale-110")} />
@@ -813,7 +813,7 @@ function MobileNavItem({ active, icon: Icon, onClick }: any) {
       onClick={onClick}
       className={cn(
         "p-2.5 rounded-2xl transition-all",
-        active ? "bg-slate-900 text-white shadow-lg" : "text-slate-300"
+        active ? "bg-primary text-white shadow-lg" : "text-text-muted"
       )}
     >
       <Icon className="w-6 h-6" />
