@@ -131,9 +131,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   };
 
   const signOut = async () => {
-    await firebaseSignOut(auth);
-    setUser(null);
-    localStorage.removeItem('current_user');
+    try {
+      await firebaseSignOut(auth);
+    } catch (e) {
+      console.warn('Erro remoto no logout:', e);
+    } finally {
+      setUser(null);
+      localStorage.removeItem('current_user');
+      window.location.reload();
+    }
   };
 
   return (
