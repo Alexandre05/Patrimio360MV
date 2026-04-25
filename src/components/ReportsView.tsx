@@ -1,5 +1,6 @@
-import { Card } from './UI';
-import { BarChart3, TrendingUp, AlertCircle, FileText, Download, Users, Award } from 'lucide-react';
+import { useState } from 'react';
+import { Card, Button } from './UI';
+import { BarChart3, TrendingUp, AlertCircle, FileText, Download, Users, Award, Lightbulb, Copy, X } from 'lucide-react';
 import { db, Asset, Location, Inspection } from '../lib/db';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { cn, formatDate } from '../lib/utils';
@@ -7,6 +8,9 @@ import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 
 export function ReportsView() {
+  const [showBiddingDraft, setShowBiddingDraft] = useState(false);
+  const [copied, setCopied] = useState(false);
+
   const assets = useLiveQuery(() => db.assets.toArray());
   const inspections = useLiveQuery(() => db.inspections.toArray());
   const allUsers = useLiveQuery(() => db.users.toArray());
@@ -43,6 +47,42 @@ export function ReportsView() {
       itemCount: locAssets.length
     };
   }).sort((a, b) => b.itemCount - a.itemCount) || [];
+
+  const getBiddingDraftText = () => {
+    if (!assets) return '';
+    const toReplace = assets.filter(a => a.condition === 'ruim' || a.condition === 'inservivel');
+    
+    const groups = toReplace.reduce((acc, asset) => {
+      acc[asset.name] = (acc[asset.name] || 0) + (asset.quantity || 1);
+      return acc;
+    }, {} as Record<string, number>);
+
+    const listText = Object.entries(groups)
+      .map(([name, qty]) => `- ${qty} unidade(s) de ${name}`)
+      .join('\n');
+
+    return `ESTUDO TÉCNICO PRELIMINAR (ETP) - RASCUNHO AUTOMÁTICO
+Base Legal: Art. 18, Lei 14.133/2021
+
+1. DESCRIÇÃO DA NECESSIDADE
+A presente contratação visa a substituição de bens móveis classificados como críticos/inservíveis durante a última vistoria patrimonial, essenciais para a continuidade dos serviços públicos.
+
+2. QUANTITATIVOS LEVANTADOS PELO SISTEMA
+${listText || 'Nenhum item crítico registrado.'}
+
+3. JUSTIFICATIVA
+A manutenção dos bens atuais tornou-se antieconômica. A substituição imediata resguarda a administração pública de perdas de eficiência operacional.`;
+  };
+
+  const copyToClipboard = async () => {
+    try {
+      await navigator.clipboard.writeText(getBiddingDraftText());
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch (err) {
+      console.error('Failed to copy text: ', err);
+    }
+  };
 
   const generateSingleLocationReport = (locId: string) => {
     const loc = locations?.find(l => l.id === locId);
@@ -227,6 +267,13 @@ export function ReportsView() {
           </div>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
             <ReportAction 
+              title="Gerar ETP de Substituição (Lei 14.133)" 
+              description="Inteligência Estratégica" 
+              icon={Lightbulb} 
+              color="amber" 
+              onClick={() => setShowBiddingDraft(true)}
+            />
+            <ReportAction 
               title="Lista de Inservíveis" 
               description="Bens para leilão ou descarte" 
               icon={FileText} 
@@ -318,6 +365,52 @@ export function ReportsView() {
            ))}
         </div>
       </div>
+
+      {showBiddingDraft && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-900/40 backdrop-blur-sm animate-in fade-in duration-200">
+          <div className="bg-white w-full max-w-4xl max-h-[90vh] flex flex-col rounded-[2.5rem] shadow-2xl relative overflow-hidden">
+            <div className="flex items-center justify-between p-8 border-b border-slate-100 bg-slate-50/50">
+              <div className="flex items-center gap-4">
+                <div className="w-14 h-14 bg-amber-100 text-amber-600 rounded-[1.5rem] flex items-center justify-center border border-amber-200 shadow-sm">
+                   <Lightbulb className="w-7 h-7" />
+                </div>
+                <div>
+                  <h2 className="text-2xl font-black text-slate-800 tracking-tight">Estudo Técnico Preliminar (ETP)</h2>
+                  <p className="text-sm font-bold tracking-widest text-slate-500 uppercase">Rascunho Automático - Lei 14.133/2021</p>
+                </div>
+              </div>
+              <button 
+                onClick={() => setShowBiddingDraft(false)}
+                className="w-12 h-12 flex items-center justify-center bg-white rounded-2xl text-slate-400 hover:text-rose-500 hover:bg-rose-50 transition-all border border-slate-200"
+              >
+                <X className="w-6 h-6" />
+              </button>
+            </div>
+            
+            <div className="flex-1 overflow-y-auto p-8 bg-slate-50 relative">
+               <textarea 
+                 readOnly
+                 value={getBiddingDraftText()}
+                 className="w-full h-full min-h-[400px] p-6 rounded-2xl border border-slate-200 bg-white text-slate-700 font-mono text-sm leading-relaxed focus:outline-none focus:ring-4 focus:ring-amber-500/10 resize-none shadow-sm"
+               />
+            </div>
+
+            <div className="p-8 border-t border-slate-100 bg-white flex flex-col sm:flex-row justify-between items-center gap-6">
+              <p className="text-xs font-semibold text-slate-400 max-w-md leading-relaxed">
+                Este é um rascunho base gerado automaticamente a partir dos itens classificados como <strong>ruins/inservíveis</strong> no inventário. Revise as informações antes de utilizar no processo licitatório oficial.
+              </p>
+              <Button 
+                variant="primary" 
+                className={cn("whitespace-nowrap transition-all duration-300", copied ? "bg-emerald-600 hover:bg-emerald-700 shadow-emerald-600/20" : "")}
+                onClick={copyToClipboard}
+              >
+                {copied ? "COPIADO PARA ÁREA DE TRANSFERÊNCIA!" : "COPIAR RASCUNHO"} {copied ? <Download className="w-4 h-4 ml-2" /> : <Copy className="w-4 h-4 ml-2" />}
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
+
     </div>
   );
 }
