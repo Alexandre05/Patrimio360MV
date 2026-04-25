@@ -188,17 +188,17 @@ export function ScannerView({ onOpenInspection }: { onOpenInspection: (id: strin
   };
 
   return (
-    <div className="flex flex-col min-h-[80vh] md:min-h-0 bg-slate-50 md:bg-transparent -m-4 md:m-0 p-4 md:p-0 animate-in fade-in duration-500">
+    <div className="flex flex-col min-h-[80vh] md:min-h-0 bg-bg md:bg-transparent -m-4 md:m-0 p-4 md:p-0 animate-in fade-in duration-500">
       <div className="flex flex-col items-center mb-8 mt-4 text-center">
-        <div className="w-16 h-16 bg-blue-100 rounded-full flex items-center justify-center mb-4 shadow-sm border border-blue-200">
-           <Camera className="w-8 h-8 text-blue-600" />
+        <div className="w-16 h-16 bg-accent/20 rounded-full flex items-center justify-center mb-4 shadow-sm border border-accent/30">
+           <Camera className="w-8 h-8 text-accent" />
         </div>
-        <h2 className="text-3xl md:text-4xl font-display tracking-tight font-black text-slate-900 mb-3">Escanear QR Code</h2>
-        <p className="text-slate-500 font-medium text-sm md:text-base max-w-sm">Aponte a câmera para um código de patrimônio ou para iniciar/continuar uma vistoria.</p>
+        <h2 className="text-3xl md:text-4xl font-display tracking-tight font-black text-primary mb-3">Escanear QR Code</h2>
+        <p className="text-text-muted font-medium text-sm md:text-base max-w-sm">Aponte a câmera para um código de patrimônio ou para iniciar/continuar uma vistoria.</p>
       </div>
 
       <div style={{ display: scanResult ? 'none' : 'block' }} className="flex-1 flex flex-col">
-        <Card className="p-4 md:p-6 overflow-hidden shadow-2xl relative max-w-md mx-auto w-full border-2 border-slate-200 rounded-[2.5rem] bg-white">
+        <Card className="p-4 md:p-6 overflow-hidden shadow-2xl relative max-w-md mx-auto w-full border-2 border-border rounded-[2.5rem] bg-card">
            <div className="relative rounded-2xl overflow-hidden bg-slate-900 isolate shadow-[inset_0_4px_20px_rgba(0,0,0,0.5)]">
              <div id="qr-reader" className="w-full text-center qr-reader-container [&_#qr-reader-results]:hidden !border-none min-h-[300px] flex items-center justify-center" />
              
@@ -215,7 +215,7 @@ export function ScannerView({ onOpenInspection }: { onOpenInspection: (id: strin
                     <div className="absolute top-0 left-2 tracking-line w-[calc(100%-1rem)] h-[3px] rounded-full bg-emerald-500 shadow-[0_0_12px_4px_rgba(16,185,129,0.7)] animate-scan"></div>
                  </div>
                  
-                 <div className="bg-slate-900/80 backdrop-blur-md text-white text-xs md:text-sm font-semibold px-6 py-3 rounded-2xl absolute bottom-6 max-w-[90%] text-center border border-white/10 shadow-lg">
+                 <div className="bg-primary/80 backdrop-blur-md text-white text-xs md:text-sm font-semibold px-6 py-3 rounded-2xl absolute bottom-6 max-w-[90%] text-center border border-white/10 shadow-lg">
                    Centralize o Código na marcação
                  </div>
              </div>
@@ -229,21 +229,21 @@ export function ScannerView({ onOpenInspection }: { onOpenInspection: (id: strin
            )}
 
            <div className="mt-6 flex flex-col gap-4">
-              <div className="flex items-start gap-4 p-5 bg-blue-50/70 rounded-2xl border border-blue-100 text-blue-800 text-sm shadow-sm transition-all hover:bg-blue-50">
-                <Info className="w-6 h-6 flex-shrink-0 text-blue-500" />
+              <div className="flex items-start gap-4 p-5 bg-primary-light/10 rounded-2xl border border-primary-light/20 text-primary-light text-sm shadow-sm transition-all hover:bg-primary-light/20">
+                <Info className="w-6 h-6 flex-shrink-0 text-primary-light" />
                 <p className="font-medium leading-relaxed">Se o leitor não focar, afaste um pouco o celular ou use lente bem iluminada.</p>
               </div>
 
               <Button 
                 variant="outline" 
                 onClick={openGoogleLens}
-                className="w-full h-16 border-2 border-slate-200 hover:border-blue-500 hover:bg-blue-50/50 transition-all rounded-2xl flex items-center justify-center gap-4 shadow-sm group"
+                className="w-full h-16 border-2 border-border hover:border-primary-light hover:bg-bg transition-all rounded-2xl flex items-center justify-center gap-4 shadow-sm group"
               >
-                <div className="w-10 h-10 rounded-xl bg-slate-100 group-hover:bg-white flex items-center justify-center shadow-sm border border-slate-200 transition-colors">
-                   <Search className="w-5 h-5 text-slate-700" />
+                <div className="w-10 h-10 rounded-xl bg-bg group-hover:bg-card flex items-center justify-center shadow-sm border border-border transition-colors">
+                   <Search className="w-5 h-5 text-text-muted" />
                 </div>
-                <span className="font-bold text-slate-700 group-hover:text-blue-700 text-base">Utilizar Scanner Externo</span>
-                <ExternalLink className="w-5 h-5 text-slate-400 group-hover:text-blue-600 transition-colors ml-auto" />
+                <span className="font-bold text-primary group-hover:text-primary-light text-base">Utilizar Scanner Externo</span>
+                <ExternalLink className="w-5 h-5 text-text-muted group-hover:text-primary-light transition-colors ml-auto" />
               </Button>
            </div>
         </Card>
@@ -252,14 +252,14 @@ export function ScannerView({ onOpenInspection }: { onOpenInspection: (id: strin
       {loading && scanResult && (
         <div className="flex-1 flex flex-col items-center justify-center py-20 gap-8 animate-in fade-in zoom-in-95 duration-500">
            <div className="relative">
-             <div className="w-24 h-24 bg-emerald-100 rounded-[2rem] flex items-center justify-center animate-pulse shadow-2xl shadow-emerald-500/30 border-4 border-white">
+             <div className="w-24 h-24 bg-emerald-100 rounded-[2rem] flex items-center justify-center animate-pulse shadow-2xl shadow-emerald-500/30 border-4 border-card">
                 <CheckCircle2 className="w-12 h-12 text-emerald-500 drop-shadow-md" />
              </div>
              <div className="absolute inset-0 bg-emerald-400 rounded-[2rem] animate-ping opacity-20"></div>
            </div>
            <div className="flex flex-col items-center gap-3">
              <h3 className="font-display font-black text-3xl text-emerald-700 tracking-tight">Leitura Concluída</h3>
-             <p className="text-slate-500 font-bold tracking-widest uppercase text-xs animate-pulse bg-slate-100 px-4 py-2 rounded-full">Carregando dados...</p>
+             <p className="text-text-muted font-bold tracking-widest uppercase text-xs animate-pulse bg-bg px-4 py-2 rounded-full">Carregando dados...</p>
            </div>
         </div>
       )}

@@ -93,7 +93,7 @@ export function Card({ children, className, onClick, id, ...props }: CardProps) 
       id={id}
       onClick={onClick}
       className={cn(
-        "bg-white/80 backdrop-blur-xl border border-slate-200/60 rounded-2xl p-6 shadow-[0_8px_30px_rgb(0,0,0,0.04)] transition-all duration-300",
+        "bg-card backdrop-blur-xl border border-border/60 rounded-2xl p-6 shadow-[0_8px_30px_rgb(0,0,0,0.04)] transition-all duration-300",
         onClick && "cursor-pointer hover:shadow-[0_20px_40px_rgb(0,0,0,0.08)] hover:-translate-y-1 active:scale-[0.98]",
         className
       )}
@@ -127,12 +127,12 @@ export function Button({
   ...props 
 }: ButtonProps) {
   const variants = {
-    primary: "bg-slate-900 text-white hover:bg-slate-800 shadow-[0_4px_14px_0_rgb(0,0,0,0.1)] hover:shadow-[0_6px_20px_rgba(0,0,0,0.15)]",
-    secondary: "bg-white text-slate-700 border border-slate-200 hover:bg-slate-50 hover:border-slate-300 shadow-sm",
-    accent: "bg-gradient-to-r from-blue-600 to-blue-500 text-white hover:from-blue-700 hover:to-blue-600 shadow-[0_4px_14px_0_rgba(37,99,235,0.2)] hover:shadow-[0_6px_20px_rgba(37,99,235,0.3)] border border-blue-500/50",
+    primary: "bg-primary text-white hover:bg-primary-light shadow-[0_4px_14px_0_rgb(0,0,0,0.1)] hover:shadow-[0_6px_20px_rgba(0,0,0,0.15)]",
+    secondary: "bg-card text-primary border border-border hover:bg-bg shadow-sm",
+    accent: "bg-accent text-white shadow-md hover:shadow-lg border border-transparent opacity-100 hover:opacity-90",
     danger: "bg-gradient-to-r from-rose-500 to-rose-600 text-white hover:from-rose-600 hover:to-rose-700 shadow-[0_4px_14px_0_rgba(225,29,72,0.2)] border border-rose-500/50",
-    ghost: "bg-transparent text-slate-600 hover:bg-slate-100/80 hover:text-slate-900",
-    outline: "bg-white/50 backdrop-blur-sm border border-slate-300 text-slate-700 hover:bg-white hover:border-slate-400 hover:shadow-sm"
+    ghost: "bg-transparent text-text-muted hover:bg-bg hover:text-primary",
+    outline: "bg-card/50 backdrop-blur-sm border border-border text-primary hover:bg-card hover:border-slate-400 hover:shadow-sm"
   };
 
   const sizes = {
@@ -179,19 +179,19 @@ export const Input = React.forwardRef<HTMLInputElement, InputProps>(
   ({ label, error, hint, className, id, ...props }, ref) => {
     return (
       <div className="flex flex-col gap-1.5 w-full">
-        {label && <label className="text-[12px] font-semibold text-slate-700 ml-1">{label}</label>}
+        {label && <label className="text-[12px] font-semibold text-text-muted ml-1">{label}</label>}
         <input
           id={id}
           ref={ref}
           className={cn(
-            "px-4 py-2.5 rounded-xl border border-slate-200 outline-none transition-all duration-300 bg-white shadow-sm font-medium placeholder:text-slate-400 focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10 hover:border-slate-300",
+            "px-4 py-2.5 rounded-xl border border-border outline-none transition-all duration-300 bg-card shadow-sm font-medium placeholder:text-slate-400 focus:border-accent focus:ring-4 focus:ring-accent/10 hover:border-slate-300 text-primary",
             error && "border-rose-300 bg-rose-50/30 focus:border-rose-500 focus:ring-rose-500/20",
             className
           )}
           {...props}
         />
         {error && <span className="text-[11px] font-medium text-rose-600 ml-1">{error}</span>}
-        {hint && !error && <span className="text-[11px] font-medium text-slate-500 ml-1">{hint}</span>}
+        {hint && !error && <span className="text-[11px] font-medium text-text-muted ml-1">{hint}</span>}
       </div>
     );
   }
@@ -201,13 +201,13 @@ export const Textarea = React.forwardRef<HTMLTextAreaElement, InputProps>(
   ({ label, error, className, id, ...props }, ref) => {
     return (
       <div className="flex flex-col gap-1.5 w-full">
-        {label && <label className="text-[12px] font-semibold text-slate-700 ml-1">{label}</label>}
+        {label && <label className="text-[12px] font-semibold text-text-muted ml-1">{label}</label>}
         <textarea
           id={id}
           ref={ref}
           rows={3}
           className={cn(
-            "px-4 py-3 rounded-xl border border-slate-200 outline-none transition-all duration-300 bg-white shadow-sm font-medium placeholder:text-slate-400 resize-none focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10 hover:border-slate-300",
+            "px-4 py-3 rounded-xl border border-border outline-none transition-all duration-300 bg-card shadow-sm font-medium placeholder:text-slate-400 resize-none focus:border-accent focus:ring-4 focus:ring-accent/10 hover:border-slate-300 text-primary",
             error && "border-rose-300 bg-rose-50/30 focus:border-rose-500 focus:ring-rose-500/20",
             className
           )}
@@ -228,13 +228,13 @@ export const Select = React.forwardRef<HTMLSelectElement, SelectProps>(
   ({ label, options, className, id, ...props }, ref) => {
     return (
       <div className="flex flex-col gap-1.5 w-full">
-        {label && <label className="text-[12px] font-semibold text-slate-700 ml-1">{label}</label>}
+        {label && <label className="text-[12px] font-semibold text-text-muted ml-1">{label}</label>}
         <div className="relative">
           <select
             id={id}
             ref={ref}
             className={cn(
-              "w-full px-4 py-2.5 rounded-xl border border-slate-200 outline-none transition-all duration-300 bg-white shadow-sm font-medium appearance-none focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10 hover:border-slate-300",
+              "w-full px-4 py-2.5 rounded-xl border border-border outline-none transition-all duration-300 bg-card shadow-sm font-medium appearance-none focus:border-accent focus:ring-4 focus:ring-accent/10 hover:border-slate-300 text-primary",
               className
             )}
             {...props}
@@ -243,7 +243,7 @@ export const Select = React.forwardRef<HTMLSelectElement, SelectProps>(
               <option key={opt.value} value={opt.value}>{opt.label}</option>
             ))}
           </select>
-          <div className="absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none text-slate-400 bg-white pl-2">
+          <div className="absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none text-text-muted bg-card pl-2">
             <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2.5}><path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" /></svg>
           </div>
         </div>

@@ -7,21 +7,21 @@
   --font-display: "Outfit", ui-sans-serif, system-ui, sans-serif;
   --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
   
-  --color-primary: #09090B;
-  --color-primary-light: #27272A;
-  --color-accent: #18181B;
-  --color-bg: #FCFCFD;
-  --color-card: #FFFFFF;
-  --color-border: #E4E4E7;
-  --color-text-muted: #71717A;
+  --color-primary: #004587;
+  --color-primary-light: #0061bd;
+  --color-accent: #f59e0b;
+  --color-bg: #f8fafc;
+  --color-card: #ffffff;
+  --color-border: #e2e8f0;
+  --color-text-muted: #64748b;
 }
 
 @layer base {
   body {
-    @apply bg-slate-50 text-slate-800 font-sans antialiased selection:bg-blue-600 selection:text-white;
+    @apply bg-bg text-primary font-sans antialiased selection:bg-accent selection:text-white;
   }
   h1, h2, h3, h4, h5, h6 {
-    @apply font-display tracking-tight text-slate-900;
+    @apply font-display tracking-tight text-primary;
   }
 }
 
