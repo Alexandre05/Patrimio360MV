@@ -25,14 +25,24 @@ export function UsersView() {
     if (!formData.name || !formData.email) return;
 
     try {
+      const { doc, setDoc, deleteDoc } = await import('firebase/firestore');
+      const { db: firestoreDB } = await import('../lib/firebase');
+
+      const saveId = editingUserId || generateId();
+      const userData = {
+        ...(formData as User),
+        userId: saveId,
+        status: 'ativo'
+      };
+
+      // Update firestore directly
+      await setDoc(doc(firestoreDB, 'users', saveId), userData);
+      
+      // Update local dexie
       if (editingUserId) {
         await db.users.update(editingUserId, formData);
       } else {
-        await db.users.add({
-          ...(formData as User),
-          userId: generateId(),
-          status: 'ativo'
-        });
+        await db.users.add(userData as User);
       }
       resetForm();
     } catch (err) {
@@ -53,8 +63,19 @@ export function UsersView() {
       return;
     }
     
-    await db.users.delete(userId);
-    setDeleteConfirmId(null);
+    try {
+      const { doc, deleteDoc } = await import('firebase/firestore');
+      const { db: firestoreDB } = await import('../lib/firebase');
+      
+      // Delete from firestore
+      await deleteDoc(doc(firestoreDB, 'users', userId));
+      
+      // Delete from local dexie
+      await db.users.delete(userId);
+      setDeleteConfirmId(null);
+    } catch (err) {
+      console.error("Erro ao deletar usuário:", err);
+    }
   };
 
   const resetForm = () => {
