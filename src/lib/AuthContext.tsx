@@ -33,9 +33,23 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           const q = query(collection(firestore, 'users'), where('email', '==', firebaseUser.email), limit(1));
           const querySnapshot = await getDocs(q);
           if (!querySnapshot.empty) {
-             const userData = querySnapshot.docs[0].data() as User;
-             setUser(userData);
-             localStorage.setItem('current_user', JSON.stringify(userData));
+             const oldDoc = querySnapshot.docs[0];
+             const userData = oldDoc.data() as User;
+             
+             // Migrate the document to the new UID
+             const newUserData = { ...userData, userId: firebaseUser.uid };
+             await setDoc(doc(firestore, 'users', firebaseUser.uid), newUserData);
+             
+             try {
+                // Clean up old document
+                const { deleteDoc } = await import('firebase/firestore');
+                if (oldDoc.id !== firebaseUser.uid) {
+                  await deleteDoc(doc(firestore, 'users', oldDoc.id));
+                }
+             } catch(e) { }
+
+             setUser(newUserData);
+             localStorage.setItem('current_user', JSON.stringify(newUserData));
           } else {
              setUser(null);
           }
@@ -105,16 +119,30 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         const q = query(collection(firestore, 'users'), where('email', '==', firebaseUser.email), limit(1));
         const querySnapshot = await getDocs(q);
         if (!querySnapshot.empty) {
-          const userData = querySnapshot.docs[0].data() as User;
+          const oldDoc = querySnapshot.docs[0];
+          const userData = oldDoc.data() as User;
           
-          // It's a good practice to update the user document to reference the real auth UID, 
-          // but for now we'll just log them in using the existing generated ID profile.
-          setUser(userData);
+          // Migrate the document to the new UID
+          const newUserData = { ...userData, userId: firebaseUser.uid };
+          await setDoc(doc(firestore, 'users', firebaseUser.uid), newUserData);
+          
+          try {
+             // Clean up old document
+             const { deleteDoc } = await import('firebase/firestore');
+             if (oldDoc.id !== firebaseUser.uid) {
+               await deleteDoc(doc(firestore, 'users', oldDoc.id));
+             }
+          } catch(e) { }
+
+          setUser(newUserData);
           return true;
         }
       }
       
       // Logged in but not registered in Patri-MV
+      if (auth.currentUser) {
+        await firebaseSignOut(auth);
+      }
       return false;
     } catch (e: any) {
       console.error("Erro no login:", e);
