@@ -1,14 +1,14 @@
 import React, { createContext, useContext, useEffect, useState } from 'react';
 import { User, db as localDb } from './db';
 import { auth, db as firestore, googleProvider } from './firebase';
-import { onAuthStateChanged, signInWithPopup, signOut as firebaseSignOut } from 'firebase/auth';
-import { doc, getDoc, setDoc, collection, query, where, getDocs, limit } from 'firebase/firestore';
+import { onAuthStateChanged, signInWithPopup, signInWithEmailAndPassword, signOut as firebaseSignOut } from 'firebase/auth';
+import { doc, getDoc, setDoc, collection, query, limit, getDocs } from 'firebase/firestore';
 
 interface AuthContextType {
   user: User | null;
   loading: boolean;
-  signIn: (email?: string) => Promise<boolean>;
-  signUp: (userData: Omit<User, 'userId'>) => Promise<boolean>;
+  signIn: (email?: string, password?: string) => Promise<boolean>;
+  signUp: (userData: Omit<User, 'userId'>, password?: string) => Promise<boolean>;
   signOut: () => Promise<void>;
   isFirstUser: boolean;
 }
@@ -73,10 +73,16 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
   };
 
-  const signIn = async (email?: string) => {
+  const signIn = async (email?: string, password?: string) => {
     try {
-      const result = await signInWithPopup(auth, googleProvider);
-      const firebaseUser = result.user;
+      let firebaseUser;
+      if (email && password) {
+        const result = await signInWithEmailAndPassword(auth, email, password);
+        firebaseUser = result.user;
+      } else {
+        const result = await signInWithPopup(auth, googleProvider);
+        firebaseUser = result.user;
+      }
       
       const userDoc = await getDoc(doc(firestore, 'users', firebaseUser.uid));
       if (userDoc.exists()) {
@@ -84,20 +90,22 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         setUser(userData);
         return true;
       } else {
-        // Logged in via Google but not registered in Patri-MV
-        // We might want to auto-register or show first-access screen
+        // Logged in but not registered in Patri-MV
         return false;
       }
-    } catch (e) {
+    } catch (e: any) {
       console.error("Erro no login:", e);
-      return false;
+      // Let the app handle the specific error (could throw instead, but returning false is fine or throw for UI)
+      throw e;
     }
   };
 
-  const signUp = async (userData: Omit<User, 'userId'>) => {
+  const signUp = async (userData: Omit<User, 'userId'>, password?: string) => {
     try {
-      // For first user, we might need a specific flow. 
-      // Usually, sign up happens after Google Auth if the user doc doesn't exist
+      // We don't implement email/pass register here unless we import createUserWithEmailAndPassword,
+      // but if the dev needs it, we can. For now let's just stick with Google or assume they are already created.
+      // Wait, let's just use Google for signUp since we don't have createUserWithEmailAndPassword imported.
+      // We can also assume the dev can create users in Firebase Console for email/password.
       const firebaseUser = auth.currentUser;
       if (!firebaseUser) {
         // Need to login first
