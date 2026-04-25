@@ -125,15 +125,31 @@ function LoginScreen() {
   const { signIn, isFirstUser } = useAuth();
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
+  const [useEmail, setUseEmail] = useState(false);
+  const [emailInput, setEmailInput] = useState('');
+  const [passwordInput, setPasswordInput] = useState('');
 
-  const handleLogin = async () => {
+  const handleLogin = async (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
     setLoading(true);
     setError('');
     
-    const success = await signIn();
-    if (!success) {
-      setError('Acesso negado. A conta do Google selecionada não possui acesso. Solicite o cadastro a um administrador.');
+    try {
+      const success = useEmail ? await signIn(emailInput, passwordInput) : await signIn();
+      if (!success) {
+        setError(useEmail 
+          ? 'Não encontramos nenhum cadastro ativo com este e-mail.' 
+          : 'Acesso negado. A conta do Google selecionada não possui acesso. Solicite o cadastro a um administrador.'
+        );
+      }
+    } catch (err: any) {
+      if (err.code === 'auth/invalid-login-credentials' || err.code === 'auth/user-not-found' || err.code === 'auth/wrong-password') {
+        setError('E-mail ou senha incorretos.');
+      } else {
+        setError('Falha ao tentar realizar o login. Verifique sua conexão.');
+      }
     }
+    
     setLoading(false);
   };
 
@@ -157,9 +173,48 @@ function LoginScreen() {
                {error}
              </div>
            )}
-           <Button onClick={handleLogin} loading={loading} icon={LogIn} variant="primary" className="h-14 text-lg shadow-xl shadow-primary/20 border-2 border-transparent">
-             ACESSAR COM GOOGLE
-           </Button>
+
+           {useEmail ? (
+             <form onSubmit={handleLogin} className="flex flex-col gap-4">
+                <Input 
+                  label="E-mail" 
+                  type="email" 
+                  value={emailInput} 
+                  onChange={(e) => setEmailInput(e.target.value)} 
+                  required 
+                />
+                <Input 
+                  label="Senha" 
+                  type="password" 
+                  value={passwordInput} 
+                  onChange={(e) => setPasswordInput(e.target.value)} 
+                  required 
+                />
+                <Button type="submit" loading={loading} icon={LogIn} variant="primary" className="h-14 text-lg shadow-xl shadow-primary/20 border-2 border-transparent mt-2">
+                  ENTRAR
+                </Button>
+                <button 
+                  type="button" 
+                  onClick={() => setUseEmail(false)} 
+                  className="text-xs text-text-muted hover:text-primary font-bold mt-2"
+                >
+                  ← Voltar para login com Google
+                </button>
+             </form>
+           ) : (
+             <>
+               <Button onClick={() => handleLogin()} loading={loading} icon={LogIn} variant="primary" className="h-14 text-lg shadow-xl shadow-primary/20 border-2 border-transparent">
+                 ACESSAR COM GOOGLE
+               </Button>
+               <button 
+                  type="button" 
+                  onClick={() => setUseEmail(true)} 
+                  className="text-xs text-text-muted hover:text-primary font-bold text-center mt-2"
+                >
+                  Acesso de Administrador / Dev
+               </button>
+             </>
+           )}
            
            <div className="relative py-2">
              <div className="absolute inset-0 flex items-center"><div className="w-full border-t border-border"></div></div>
@@ -185,12 +240,12 @@ function LoginScreen() {
               <div className="relative flex justify-center text-[10px] uppercase font-black text-text-muted tracking-widest"><span className="bg-card px-4">Dica</span></div>
            </div>
            <div className="text-xs text-text-muted text-center leading-relaxed">
-             Para testes, cadastre seu e-mail do Google no banco de dados primeiro na tela de primeiro acesso.
+             Para acesso de desenvolvedor, habilite o provedor de E-mail/Senha no Firebase Console.
            </div>
         </div>
 
         <div className="flex items-center gap-2 text-[10px] font-bold text-text-muted uppercase tracking-widest">
-           <ShieldCheck className="w-4 h-4" /> Acesso Seguro com Google
+           <ShieldCheck className="w-4 h-4" /> Acesso Seguro
         </div>
       </Card>
     </div>
