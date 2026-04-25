@@ -1,7 +1,7 @@
 import React, { createContext, useContext, useEffect, useState } from 'react';
 import { User, db as localDb } from './db';
 import { auth, db as firestore, googleProvider } from './firebase';
-import { onAuthStateChanged, signInWithPopup, signInWithEmailAndPassword, signOut as firebaseSignOut } from 'firebase/auth';
+import { onAuthStateChanged, signInWithPopup, signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut as firebaseSignOut } from 'firebase/auth';
 import { doc, getDoc, setDoc, collection, query, limit, getDocs } from 'firebase/firestore';
 
 interface AuthContextType {
@@ -23,13 +23,23 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
       if (firebaseUser) {
-        const userDoc = await getDoc(doc(firestore, 'users', firebaseUser.uid));
+        let userDoc = await getDoc(doc(firestore, 'users', firebaseUser.uid));
+        
         if (userDoc.exists()) {
           const userData = userDoc.data() as User;
           setUser(userData);
           localStorage.setItem('current_user', JSON.stringify(userData));
+        } else if (firebaseUser.email) {
+          const q = query(collection(firestore, 'users'), where('email', '==', firebaseUser.email), limit(1));
+          const querySnapshot = await getDocs(q);
+          if (!querySnapshot.empty) {
+             const userData = querySnapshot.docs[0].data() as User;
+             setUser(userData);
+             localStorage.setItem('current_user', JSON.stringify(userData));
+          } else {
+             setUser(null);
+          }
         } else {
-          // If auth exists but no doc, check if it's the first user or needs registration
           setUser(null);
         }
       } else {
@@ -84,15 +94,28 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         firebaseUser = result.user;
       }
       
-      const userDoc = await getDoc(doc(firestore, 'users', firebaseUser.uid));
+      let userDoc = await getDoc(doc(firestore, 'users', firebaseUser.uid));
+      
       if (userDoc.exists()) {
         const userData = userDoc.data() as User;
         setUser(userData);
         return true;
-      } else {
-        // Logged in but not registered in Patri-MV
-        return false;
+      } else if (firebaseUser.email) {
+        // Fallback: Check if there's a user record with this email created by the admin
+        const q = query(collection(firestore, 'users'), where('email', '==', firebaseUser.email), limit(1));
+        const querySnapshot = await getDocs(q);
+        if (!querySnapshot.empty) {
+          const userData = querySnapshot.docs[0].data() as User;
+          
+          // It's a good practice to update the user document to reference the real auth UID, 
+          // but for now we'll just log them in using the existing generated ID profile.
+          setUser(userData);
+          return true;
+        }
       }
+      
+      // Logged in but not registered in Patri-MV
+      return false;
     } catch (e: any) {
       console.error("Erro no login:", e);
       // Let the app handle the specific error (could throw instead, but returning false is fine or throw for UI)
@@ -102,36 +125,30 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const signUp = async (userData: Omit<User, 'userId'>, password?: string) => {
     try {
-      // We don't implement email/pass register here unless we import createUserWithEmailAndPassword,
-      // but if the dev needs it, we can. For now let's just stick with Google or assume they are already created.
-      // Wait, let's just use Google for signUp since we don't have createUserWithEmailAndPassword imported.
-      // We can also assume the dev can create users in Firebase Console for email/password.
-      const firebaseUser = auth.currentUser;
+      let firebaseUser = auth.currentUser;
+      
       if (!firebaseUser) {
-        // Need to login first
-        const result = await signInWithPopup(auth, googleProvider);
-        if (!result.user) return false;
-        
-        const newUser: User = {
-          ...userData,
-          userId: result.user.uid,
-          email: result.user.email || userData.email
-        };
-        await setDoc(doc(firestore, 'users', result.user.uid), newUser);
-        setUser(newUser);
-        setIsFirstUser(false);
-        return true;
-      } else {
-        const newUser: User = {
-          ...userData,
-          userId: firebaseUser.uid,
-          email: firebaseUser.email || userData.email
-        };
-        await setDoc(doc(firestore, 'users', firebaseUser.uid), newUser);
-        setUser(newUser);
-        setIsFirstUser(false);
-        return true;
+        if (password) {
+           const result = await createUserWithEmailAndPassword(auth, userData.email, password);
+           firebaseUser = result.user;
+        } else {
+           const result = await signInWithPopup(auth, googleProvider);
+           firebaseUser = result.user;
+        }
       }
+      
+      if (!firebaseUser) return false;
+
+      const newUser: User = {
+        ...userData,
+        userId: firebaseUser.uid,
+        email: firebaseUser.email || userData.email
+      };
+      
+      await setDoc(doc(firestore, 'users', firebaseUser.uid), newUser);
+      setUser(newUser);
+      setIsFirstUser(false);
+      return true;
     } catch (e) {
       console.error("Erro ao cadastrar usuário:", e);
       return false;

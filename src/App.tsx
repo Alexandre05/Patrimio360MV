@@ -21,7 +21,8 @@ function SetupScreen() {
     name: '', 
     email: '', 
     cargo: 'Administrador Senior',
-    setupCode: ''
+    setupCode: '',
+    password: ''
   });
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
@@ -43,13 +44,21 @@ function SetupScreen() {
       return;
     }
 
-    await signUp({
-      name: formData.name,
-      email: formData.email,
-      role: 'administrador',
-      status: 'ativo',
-      cargo: formData.cargo
-    });
+    try {
+      const success = await signUp({
+        name: formData.name,
+        email: formData.email,
+        role: 'administrador',
+        status: 'ativo',
+        cargo: formData.cargo
+      }, formData.password || undefined);
+
+      if (!success) {
+        setError('Ocorreu um erro ao criar a conta. Verifique os dados ou tente com o Google Auth.');
+      }
+    } catch (e: any) {
+      setError(e.message || 'Falha ao registrar.');
+    }
     setLoading(false);
   };
 
@@ -90,9 +99,16 @@ function SetupScreen() {
               value={formData.cargo}
               onChange={e => setFormData({ ...formData, cargo: e.target.value })}
             />
-            <div className="relative">
+            <Input 
+              label="Senha de Acesso (Opcional)" 
+              placeholder="Deixe em branco para forçar o uso do Google Auth"
+              type="password"
+              value={formData.password}
+              onChange={e => setFormData({ ...formData, password: e.target.value })}
+            />
+            <div className="relative mt-2">
               <div className="absolute inset-x-0 -top-3 flex justify-center">
-                <span className="bg-white px-2 text-[9px] font-black text-blue-600 uppercase tracking-widest leading-none">Segurança</span>
+                <span className="bg-white px-2 text-[9px] font-black text-blue-600 uppercase tracking-widest leading-none">Chave de Ativação Geral</span>
               </div>
               <Input 
                 label="Chave de Ativação" 
