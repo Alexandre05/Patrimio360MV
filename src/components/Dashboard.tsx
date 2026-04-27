@@ -27,6 +27,7 @@ import {
   Download,
   Upload
 } from 'lucide-react';
+import { motion } from 'motion/react';
 import { db, Inspection, Location } from '../lib/db';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { formatDate } from '../lib/utils';
@@ -650,16 +651,20 @@ export function Dashboard() {
       </main>
 
       {/* 🤳 Mobile Bottom Tab Bar */}
-      <nav className="fixed bottom-0 left-0 right-0 lg:hidden bg-card/80 backdrop-blur-xl border-t border-border flex items-center justify-around p-4 z-50">
+      <nav className="fixed bottom-0 left-0 right-0 lg:hidden bg-card/90 backdrop-blur-xl border-t border-border flex items-center justify-around p-4 pb-6 z-50">
         <MobileNavItem active={activeTab === 'home' && !selectedInspectionId} icon={LayoutGrid} onClick={() => handleTabChange('home')} />
         <MobileNavItem active={activeTab === 'inspections'} icon={ClipboardList} onClick={() => handleTabChange('inspections')} />
         <div className="relative -top-6">
-           <button 
+           <motion.button 
+             whileTap={{ scale: 0.9 }}
+             whileHover={{ scale: 1.05 }}
              onClick={() => handleTabChange('locations')}
-             className="w-14 h-14 bg-accent rounded-2xl flex items-center justify-center shadow-xl shadow-accent/30 text-white"
+             className={cn("w-14 h-14 rounded-2xl flex items-center justify-center shadow-xl shadow-accent/30 text-white transition-colors duration-300",
+               activeTab === 'locations' ? "bg-accent-focus ring-4 ring-accent/20" : "bg-accent"
+             )}
            >
-             <Plus className="w-6 h-6" />
-           </button>
+             <Plus className={cn("w-6 h-6 transition-transform duration-300", activeTab === 'locations' && "rotate-45")} />
+           </motion.button>
         </div>
         {isManager ? (
           <MobileNavItem active={activeTab === 'reports'} icon={BarChart3} onClick={() => handleTabChange('reports')} />
@@ -819,11 +824,18 @@ function MobileNavItem({ active, icon: Icon, onClick }: any) {
     <button 
       onClick={onClick}
       className={cn(
-        "p-2.5 rounded-2xl transition-all",
-        active ? "bg-primary text-white shadow-lg" : "text-text-muted"
+        "relative p-3 rounded-2xl flex items-center justify-center transition-colors outline-none",
+        active ? "text-primary" : "text-text-muted hover:text-text-main"
       )}
     >
-      <Icon className="w-6 h-6" />
+      {active && (
+        <motion.div
+          layoutId="mobile-nav-indicator"
+          className="absolute inset-0 bg-primary/10 rounded-2xl"
+          transition={{ type: "spring", bounce: 0.2, duration: 0.6 }}
+        />
+      )}
+      <Icon className={cn("w-6 h-6 relative z-10 transition-transform duration-300", active && "scale-110")} />
     </button>
   );
 }
