@@ -12,6 +12,7 @@ import { seedDatabase } from './lib/seed';
 import { db } from './lib/db';
 import { db as firestore } from './lib/firebase';
 import { doc, deleteDoc } from 'firebase/firestore';
+import { getAuth, sendPasswordResetEmail } from 'firebase/auth';
 
 import { PublicInspectionView } from './components/PublicInspectionView';
 
@@ -144,6 +145,8 @@ function LoginScreen() {
   const [useEmail, setUseEmail] = useState(false);
   const [emailInput, setEmailInput] = useState('');
   const [passwordInput, setPasswordInput] = useState('');
+  const [showForgotPassword, setShowForgotPassword] = useState(false);
+  const [resetMessage, setResetMessage] = useState('');
 
   const handleLogin = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
@@ -161,11 +164,33 @@ function LoginScreen() {
     } catch (err: any) {
       if (err.code === 'auth/invalid-login-credentials' || err.code === 'auth/user-not-found' || err.code === 'auth/wrong-password') {
         setError('E-mail ou senha incorretos.');
+      } else if (err.code === 'auth/unauthorized-domain') {
+        setError('Este domínio não está autorizado no Firebase. Adicione o domínio do app no Firebase Console em Authentication > Settings > Authorized domains, ou abra o app em uma nova guia.');
+      } else if (err.code === 'auth/popup-closed-by-user' || err.code === 'auth/cancelled-popup-request') {
+        setError('O login com o Google foi cancelado ou a janela foi fechada.');
       } else {
-        setError('Falha ao tentar realizar o login. Verifique sua conexão.');
+        setError('Falha no login: ' + (err.message || 'Erro de conexão.'));
       }
     }
     
+    setLoading(false);
+  };
+
+  const handleForgotPassword = async () => {
+    if (!emailInput) {
+      setError('Por favor, digite seu e-mail acima primeiro e então clique aqui.');
+      return;
+    }
+    setLoading(true);
+    setError('');
+    setResetMessage('');
+    try {
+      const auth = getAuth();
+      await sendPasswordResetEmail(auth, emailInput);
+      setResetMessage('E-mail de recuperação de senha enviado! Verifique sua caixa de entrada.');
+    } catch (err: any) {
+      setError('Não foi possível enviar o e-mail de recuperação. Tente novamente mais tarde.');
+    }
     setLoading(false);
   };
 
@@ -190,6 +215,12 @@ function LoginScreen() {
              </div>
            )}
 
+           {resetMessage && (
+             <div className="bg-primary/10 text-primary p-4 rounded-xl text-sm font-bold border border-primary/20 text-center">
+               {resetMessage}
+             </div>
+           )}
+
            {useEmail ? (
              <form onSubmit={handleLogin} className="flex flex-col gap-4">
                 <Input 
@@ -209,13 +240,23 @@ function LoginScreen() {
                 <Button type="submit" loading={loading} icon={LogIn} variant="primary" className="h-14 text-lg shadow-xl shadow-primary/20 border-2 border-transparent mt-2">
                   ENTRAR
                 </Button>
-                <button 
-                  type="button" 
-                  onClick={() => setUseEmail(false)} 
-                  className="text-xs text-text-muted hover:text-primary font-bold mt-2"
-                >
-                  ← Voltar para login com Google
-                </button>
+                <div className="flex flex-col items-center gap-2 mt-2">
+                  <button 
+                    type="button" 
+                    onClick={handleForgotPassword}
+                    disabled={loading}
+                    className="text-xs text-text-muted hover:text-primary font-bold transition-colors"
+                  >
+                    Esqueci minha senha
+                  </button>
+                  <button 
+                    type="button" 
+                    onClick={() => setUseEmail(false)} 
+                    className="text-xs text-text-muted hover:text-primary font-bold mt-2 transition-colors"
+                  >
+                    ← Voltar para login com Google
+                  </button>
+                </div>
              </form>
            ) : (
              <>

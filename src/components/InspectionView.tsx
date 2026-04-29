@@ -17,6 +17,7 @@ import { doc, deleteDoc, collection, query, where, getDocs } from 'firebase/fire
 export function InspectionView({ id, onBack }: { id: string, onBack: () => void }) {
   const { user } = useAuth();
   const isManager = user?.role === 'administrador' || user?.role === 'responsavel' || user?.role === 'prefeito';
+  const isCommittee = isManager || user?.role === 'vistoriador';
   const isOnline = useOnlineStatus();
   const inspection = useLiveQuery(() => db.inspections.get(id), [id]);
   const location = useLiveQuery(() => inspection ? db.locations.get(inspection.locationId) : undefined, [inspection]);
@@ -36,6 +37,7 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
   const [isTransferring, setIsTransferring] = useState(false);
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [transferCandidate, setTransferCandidate] = useState<Asset | null>(null);
   const [editingAssetId, setEditingAssetId] = useState<string | null>(null);
   const [historyAsset, setHistoryAsset] = useState<Asset | null>(null);
   const [assetHistory, setAssetHistory] = useState<{ asset: Asset, inspection: Inspection, location: Location }[] | null>(null);
@@ -101,6 +103,33 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
 
     const hash = generateAssetHash(newItem.name, newItem.patrimonyNumber, inspection?.locationId || '');
     
+    // Check if we are transferring an existing asset
+    if (transferCandidate && !editingAssetId) {
+      try {
+        const confirmTransfer = window.confirm(`Deseja TRANSFERIR o patrimônio ${transferCandidate.patrimonyNumber} para esta localização? ele será removido do local original.`);
+        if (confirmTransfer) {
+          await db.assets.update(transferCandidate.id, {
+            inspectionId: id,
+            hash: hash,
+            needsSync: true,
+            // Optionally update with new details provided in the form
+            condition: newItem.condition,
+            observations: newItem.observations,
+            quantity: newItem.quantity
+          });
+          setSuccessMessage("Item transferido com sucesso!");
+          setNewItem({ name: '', patrimonyNumber: '', condition: 'bom', observations: '', photos: [], quantity: 1 });
+          setIsAdding(false);
+          setTransferCandidate(null);
+          pushLocalChanges();
+          return;
+        }
+      } catch (err) {
+        console.error("Erro na transferência:", err);
+        setError("Não foi possível transferir o item.");
+      }
+    }
+
     // Duplication Check (only for new items)
     if (!editingAssetId) {
       if (newItem.patrimonyNumber) {
@@ -125,12 +154,9 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
           const otherInsp = await db.inspections.get(globalExisting.inspectionId);
           const otherLoc = otherInsp ? await db.locations.get(otherInsp.locationId) : null;
           
-          if (confirm(`O patrimônio ${newItem.patrimonyNumber} já está vinculado ao local "${otherLoc?.name || 'outro setor'}". Deseja cadastrá-lo aqui assim mesmo?`)) {
-             // Continue without returning
-          } else {
-             setDuplicateWarning(`O patrimônio ${newItem.patrimonyNumber} já pertence a outro local.`);
-             return;
-          }
+          setTransferCandidate(globalExisting);
+          setDuplicateWarning(`O patrimônio ${newItem.patrimonyNumber} já está vinculado ao local "${otherLoc?.name || 'outro setor'}".`);
+          return;
         }
       } else {
         // Local Check (same location, no patrimony)
@@ -194,8 +220,8 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
   };
 
   const handleDeleteAsset = async (assetId: string) => {
-    if (!isManager) {
-      setError("Apenas administradores podem excluir itens registrados.");
+    if (!isCommittee) {
+      setError("Apenas membros da comissão podem excluir itens registrados.");
       return;
     }
     if (confirmDeleteId !== assetId) {
@@ -646,7 +672,7 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
 
   const isFinalized = inspection.status === 'finalizada';
   const isConcluded = inspection.status === 'concluida';
-  const isLocked = isFinalized || isConcluded; // Bloquear se concluída ou finalizada
+  const isLocked = isFinalized || (isConcluded && !isCommittee); // Permitir que a comissão edite se estiver apenas concluída
 
   const handleBack = async () => {
     if (inspection?.status === 'em_andamento') {
@@ -701,7 +727,7 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
           </button>
         </div>
         <div className="flex items-center gap-4">
-           {!isLocked && isManager && (
+           {!isLocked && isCommittee && (
              <div className="flex items-center mr-2">
                {isConfirmingDeleteInspection ? (
                  <div className="flex items-center gap-2 bg-rose-50 border border-rose-100 p-1 rounded-xl animate-in slide-in-from-right-4 duration-300">
@@ -912,13 +938,38 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
                      label="Qual o nome do Item?" 
                      placeholder="Ex: Cadeira de Rodas, Mesa em L" 
                      value={newItem.name}
-                     onChange={e => setNewItem({...newItem, name: e.target.value})}
+                     onChange={e => {
+                       setNewItem({...newItem, name: e.target.value});
+                       if (duplicateWarning) { setDuplicateWarning(null); setTransferCandidate(null); }
+                     }}
                      onKeyDown={e => handleKeyDown(e, 0)}
                      error={duplicateWarning || undefined}
                      autoFocus
                      className="text-lg py-4 px-5 shadow-sm"
                    />
-                   {duplicateWarning && <div className="ml-2 text-rose-500 font-bold text-sm flex items-center gap-1 mt-1"><AlertCircle className="w-4 h-4"/> {duplicateWarning}</div>}
+                   {duplicateWarning && (
+                     <div className="flex flex-col gap-3 p-5 bg-rose-50 border border-rose-100 rounded-2xl animate-in fade-in slide-in-from-top-2 duration-300">
+                       <div className="flex items-center gap-3 text-rose-600 font-bold text-sm">
+                          <AlertCircle className="w-5 h-5 shrink-0"/> 
+                          <span className="leading-tight">{duplicateWarning}</span>
+                       </div>
+                       {transferCandidate && (
+                         <div className="flex flex-col gap-2 mt-1">
+                           <p className="text-[10px] text-rose-400 font-black uppercase tracking-widest pl-1">Ação de Auditoria:</p>
+                           <Button 
+                             variant="accent" 
+                             size="sm" 
+                             onClick={handleAddItem}
+                             className="w-full bg-rose-600 hover:bg-rose-700 text-white shadow-lg shadow-rose-600/20 h-14 rounded-xl text-xs font-black uppercase tracking-widest flex items-center justify-center gap-3"
+                           >
+                              <Zap className="w-5 h-5" />
+                              Transferir para esta Vistoria
+                           </Button>
+                           <p className="text-[9px] text-slate-400 font-medium text-center italic">Isso removerá o item do local original e o trará para cá.</p>
+                         </div>
+                       )}
+                     </div>
+                   )}
                  </div>
                  
                  <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
@@ -1079,7 +1130,7 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
                         >
                           <Trash2 className="w-4 h-4" />
                         </button>
-                        {isManager && (
+                        {isCommittee && (
                           <button 
                             onClick={() => setTransferAssetId(asset.id)}
                             className="p-2 bg-white text-slate-400 hover:text-amber-600 rounded-xl border border-slate-100 hover:border-amber-100 shadow-sm transition-all"
@@ -1143,7 +1194,7 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
                </div>
                <p className="font-black uppercase tracking-widest text-[11px] text-slate-400">Nenhum bem registrado</p>
                <p className="text-xs mt-1">Inicie o inventário clicando em adicionar.</p>
-                {isManager && (
+                {isCommittee && (
                   <Button 
                     variant="secondary" 
                     icon={Trash2} 

@@ -66,27 +66,36 @@ export function ScannerView({ onOpenInspection }: { onOpenInspection: (id: strin
     } else if (text.includes("/local/")) {
       isLocal = true;
       id = text.split("/local/")[1]?.split("?")[0];
+    } else if (text.includes("/item/") || text.includes("/asset/")) {
+      id = text.split("/item/")[1]?.split("?")[0] || text.split("/asset/")[1]?.split("?")[0];
+      // We will handle asset search below
     } else if (text.startsWith("VISTORIA_ID:")) {
       isVistoria = true;
       id = text.replace("VISTORIA_ID:", "");
     } else if (text.startsWith("LOCAL_ID:")) {
       isLocal = true;
       id = text.replace("LOCAL_ID:", "");
-    }
-
-    if (!id) {
-      setError("QR Code inválido - Identificador desconhecido");
-      setScanResult(null);
-      if (scannerRef.current) {
-        try { scannerRef.current.resume(); } catch(e){}
-      }
-      return;
+    } else {
+      // Could be a patrimony number directly or an asset ID
+      id = text;
     }
 
     setLoading(true);
     setError(null);
     try {
-      // Step 1: Let's check if it's an inspection ID in Dexie (Fastest)
+      const isOnline = window.navigator.onLine;
+
+      // 1. Try to check if it's a known Asset by ID or Patrimony (Dexie first)
+      const assetById = await db.assets.get(id);
+      const assetByPatrimony = await db.assets.where('patrimonyNumber').equals(id).first();
+      const asset = assetById || assetByPatrimony;
+
+      if (asset) {
+        onOpenInspection(asset.inspectionId, ''); // Opening inspection where it belongs
+        return;
+      }
+
+      // Step 2: Let's check if it's an inspection ID in Dexie
       if (isVistoria) {
          const localInsp = await db.inspections.get(id);
          if (localInsp) {
@@ -95,9 +104,7 @@ export function ScannerView({ onOpenInspection }: { onOpenInspection: (id: strin
          }
       }
 
-      const isOnline = window.navigator.onLine;
-
-      if (!isOnline) {
+      if (!window.navigator.onLine) {
          setError("Dados não disponíveis offline");
          setScanResult(null);
          setLoading(false);
@@ -150,9 +157,30 @@ export function ScannerView({ onOpenInspection }: { onOpenInspection: (id: strin
            onOpenInspection('NEW', locSnap.id);
            return;
          }
+      } else {
+        // Global Asset Search by ID or Patrimony in Firestore
+        const assetRef = doc(firestore, 'assets', id);
+        const assetSnap = await getDoc(assetRef);
+        
+        let foundAssetData: any = null;
+        if (assetSnap.exists()) {
+          foundAssetData = assetSnap.data();
+        } else {
+          // Search by patrimony number
+          const q = query(collection(firestore, 'assets'), where('patrimonyNumber', '==', id), limit(1));
+          const qSnap = await getDocs(q);
+          if (!qSnap.empty) {
+            foundAssetData = qSnap.docs[0].data();
+          }
+        }
+
+        if (foundAssetData) {
+          onOpenInspection(foundAssetData.inspectionId, '');
+          return;
+        }
       }
 
-      setError("Vistoria não encontrada ou acesso negado.");
+      setError("Código não reconhecido ou Vistoria não encontrada.");
       setScanResult(null);
       if (scannerRef.current) {
         try { scannerRef.current.resume(); } catch(e){}

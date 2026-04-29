@@ -36,17 +36,27 @@ export function UsersView() {
         const { getAuth, createUserWithEmailAndPassword, signOut } = await import('firebase/auth');
         const { initializeApp, deleteApp } = await import('firebase/app');
         
+        const secondaryAppName = "SecondaryApp_" + Date.now();
+        const secondaryApp = initializeApp(firebaseConfigInfo, secondaryAppName);
+        const secondaryAuth = getAuth(secondaryApp);
+        
         try {
-          const secondaryApp = initializeApp(firebaseConfigInfo, "SecondaryApp_" + Date.now());
-          const secondaryAuth = getAuth(secondaryApp);
           const result = await createUserWithEmailAndPassword(secondaryAuth, formData.email, formData.password);
           saveId = result.user.uid;
           await signOut(secondaryAuth);
-          await deleteApp(secondaryApp);
         } catch(e: any) {
           console.error("Erro ao registrar no Auth:", e);
-          alert("Não foi possível criar o acesso: " + (e.message || "Erro desconhecido."));
-          return;
+          if (e.code === 'auth/admin-restricted-operation' || e.code === 'auth/operation-not-allowed') {
+            alert("Não foi possível criar o usuário. O Firebase não permite criar contas com E-mail/Senha por segurança.\n\nPara liberar isso, acesse o painel 'Authentication' -> 'Settings' -> 'User Actions' (ou Identity Platform) e marque a opção 'Enable create (sign-up)'.");
+          } else if (e.code === 'auth/email-already-in-use') {
+            alert("Este E-mail já possui um registro de acesso. O usuário já pode logar. O seu cadastro foi efetuado sem alteração da senha, e ele deve usar a senha anterior.\n\nSe ele esqueceu a senha, peça para ele usar a opção 'Esqueci minha senha' na tela de Login.");
+            // We can still proceed to save the user data without creating the auth account.
+          } else {
+            alert("Não foi possível criar o acesso: " + (e.message || "Erro desconhecido."));
+            return;
+          }
+        } finally {
+          try { await deleteApp(secondaryApp); } catch(err) { console.error("Error deleting secondary app", err) }
         }
       }
 
@@ -66,7 +76,7 @@ export function UsersView() {
       if (editingUserId) {
         await db.users.update(editingUserId, userData as any);
       } else {
-        await db.users.add(userData as User);
+        await db.users.put(userData as User);
       }
       resetForm();
     } catch (err) {

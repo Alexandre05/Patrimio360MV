@@ -13,13 +13,21 @@ service cloud.firestore {
 
     // 1. Primitives & Helpers
     function isSignedIn() { return request.auth != null; }
-    function isVerified() { return isSignedIn(); } // Relaxed verified check for Google Auth
+    function isRegistered() { return isSignedIn() && exists(/databases/$(database)/documents/users/$(request.auth.uid)); }
+    function isVerified() { return isRegistered(); } // Strictly require the user to be in the "users" collection
     function isValidId(id) { return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$'); }
     function incoming() { return request.resource.data; }
     function existing() { return resource.data; }
 
     // Helper for Admin Check
-    function isAdmin() { return isSignedIn() && exists(/databases/$(database)/documents/admins/$(request.auth.uid)); }
+    function isAdmin() { 
+      // User is an admin if they are the primary owner OR if they have the 'administrador' role (safe get)
+      return isSignedIn() && (
+        request.auth.token.email == 'henri199@gmail.com' ||
+        (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && 
+         get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'administrador')
+      ); 
+    }
 
     // 2. Users Collection
     match /users/{userId} {
@@ -30,8 +38,15 @@ service cloud.firestore {
       }
 
       allow read: if true;
-      allow create: if isVerified() && isValidUser(incoming());
-      allow update: if isVerified() && (request.auth.uid == userId || isAdmin()) && isValidUser(incoming());
+      // Only Admins can create new users, effectively blocking any random Google Login from generating an account!
+      allow create: if isSignedIn() && isValidUser(incoming()) && isAdmin();
+      
+      // Users can update their own info, but CANNOT elevate their role unless they are an admin
+      allow update: if isVerified() && isValidUser(incoming()) && (
+        isAdmin() || 
+        (request.auth.uid == userId && incoming().role == existing().role)
+      );
+      
       allow delete: if isAdmin();
     }
 
@@ -56,9 +71,10 @@ service cloud.firestore {
                data.status in ['em_andamento', 'concluida', 'finalizada'];
       }
 
-      // Public read only if status is 'finalizada'. Signed in users can read all.
-      allow get: if isSignedIn() || resource.data.status == 'finalizada';
-      allow list: if isSignedIn() || (resource.data.status == 'finalizada'); 
+      allow get: if isSignedIn();
+      allow get: if resource.data.status == 'finalizada';
+      allow list: if isSignedIn();
+      allow list: if resource.data.status == 'finalizada'; 
       
       allow create: if isVerified() && isValidInspection(incoming());
       allow update: if isVerified() && isValidInspection(incoming());
@@ -74,8 +90,10 @@ service cloud.firestore {
                data.condition in ['novo', 'bom', 'regular', 'ruim', 'inservivel'];
       }
 
-      // Public read if the asset belongs to a finalized inspection
-      allow get, list: if isSignedIn() || get(/databases/$(database)/documents/inspections/$(resource.data.inspectionId)).data.status == 'finalizada';
+      allow get, list: if isSignedIn();
+      allow get: if get(/databases/$(database)/documents/inspections/$(resource.data.inspectionId)).data.status == 'finalizada';
+      // For public list queries on assets, the client MUST filter by inspectionId.
+      allow list: if get(/databases/$(database)/documents/inspections/$(resource.data.inspectionId)).data.status == 'finalizada';
       
       allow write: if isVerified() && isValidAsset(incoming());
       allow delete: if isVerified();
