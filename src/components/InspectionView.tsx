@@ -17,6 +17,7 @@ import { doc, deleteDoc, collection, query, where, getDocs } from 'firebase/fire
 export function InspectionView({ id, onBack }: { id: string, onBack: () => void }) {
   const { user } = useAuth();
   const isManager = user?.role === 'administrador' || user?.role === 'responsavel' || user?.role === 'prefeito';
+  const isCommittee = isManager || user?.role === 'vistoriador';
   const isOnline = useOnlineStatus();
   const inspection = useLiveQuery(() => db.inspections.get(id), [id]);
   const location = useLiveQuery(() => inspection ? db.locations.get(inspection.locationId) : undefined, [inspection]);
@@ -194,8 +195,8 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
   };
 
   const handleDeleteAsset = async (assetId: string) => {
-    if (!isManager) {
-      setError("Apenas administradores podem excluir itens registrados.");
+    if (!isCommittee) {
+      setError("Apenas membros da comissão podem excluir itens registrados.");
       return;
     }
     if (confirmDeleteId !== assetId) {
@@ -701,7 +702,7 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
           </button>
         </div>
         <div className="flex items-center gap-4">
-           {!isLocked && isManager && (
+           {!isLocked && isCommittee && (
              <div className="flex items-center mr-2">
                {isConfirmingDeleteInspection ? (
                  <div className="flex items-center gap-2 bg-rose-50 border border-rose-100 p-1 rounded-xl animate-in slide-in-from-right-4 duration-300">
@@ -1079,7 +1080,7 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
                         >
                           <Trash2 className="w-4 h-4" />
                         </button>
-                        {isManager && (
+                        {isCommittee && (
                           <button 
                             onClick={() => setTransferAssetId(asset.id)}
                             className="p-2 bg-white text-slate-400 hover:text-amber-600 rounded-xl border border-slate-100 hover:border-amber-100 shadow-sm transition-all"
@@ -1143,7 +1144,7 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
                </div>
                <p className="font-black uppercase tracking-widest text-[11px] text-slate-400">Nenhum bem registrado</p>
                <p className="text-xs mt-1">Inicie o inventário clicando em adicionar.</p>
-                {isManager && (
+                {isCommittee && (
                   <Button 
                     variant="secondary" 
                     icon={Trash2} 

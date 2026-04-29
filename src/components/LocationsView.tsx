@@ -23,6 +23,7 @@ export function LocationsView({ onSelectInspection }: { onSelectInspection: (id:
   const { user } = useAuth();
   const isAdmin = user?.role === 'administrador' || user?.role === 'prefeito';
   const isManager = user?.role === 'administrador' || user?.role === 'responsavel' || user?.role === 'prefeito';
+  const isCommittee = isManager || user?.role === 'vistoriador';
 
   const locations = useLiveQuery(() => db.locations.toArray());
   const inspections = useLiveQuery(() => db.inspections.toArray());
@@ -344,7 +345,7 @@ export function LocationsView({ onSelectInspection }: { onSelectInspection: (id:
                 className="pl-11 pr-6 py-3 bg-white border border-slate-100 rounded-2xl text-sm font-bold text-slate-900 shadow-sm focus:ring-2 focus:ring-slate-900 focus:outline-none transition-all w-full md:w-64"
               />
            </div>
-           {!isAdding && isAdmin && (
+           {!isAdding && isCommittee && (
              <Button variant="accent" icon={Plus} onClick={() => setIsAdding(true)} className="rounded-2xl h-12 shadow-xl shadow-slate-900/10">
                NOVO LOCAL
              </Button>
@@ -420,7 +421,7 @@ export function LocationsView({ onSelectInspection }: { onSelectInspection: (id:
                       {status.replace('_', ' ')}
                     </div>
                   )}
-                  {isAdmin && (
+                  {isCommittee && (
                     <div className="flex flex-col items-end gap-1">
                       {deleteConfirmId === loc.id ? (
                         <div className="flex items-center gap-1 animate-in slide-in-from-right-4 duration-300">

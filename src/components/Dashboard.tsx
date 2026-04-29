@@ -669,7 +669,7 @@ export function Dashboard() {
         {isManager ? (
           <MobileNavItem active={activeTab === 'reports'} icon={BarChart3} onClick={() => handleTabChange('reports')} />
         ) : (
-          <div className="w-11 h-11" /> // Placeholder to keep layout balanced if 5 items were expected
+          <MobileNavItem active={activeTab === 'scanner'} icon={Search} onClick={() => handleTabChange('scanner')} />
         )}
         <MobileNavItem active={activeTab === 'notifications'} icon={Bell} onClick={() => handleTabChange('notifications')} />
       </nav>
@@ -819,23 +819,30 @@ function NavItem({ active, label, icon: Icon, onClick, badge }: { active: boolea
   );
 }
 
-function MobileNavItem({ active, icon: Icon, onClick }: any) {
+function MobileNavItem({ active, icon: Icon, onClick, label }: any) {
   return (
     <button 
       onClick={onClick}
       className={cn(
-        "relative p-3 rounded-2xl flex items-center justify-center transition-colors outline-none",
-        active ? "text-primary" : "text-text-muted hover:text-text-main"
+        "relative p-3 rounded-2xl flex flex-col items-center justify-center transition-all outline-none",
+        active ? "text-primary scale-110" : "text-text-muted hover:text-text-main"
       )}
     >
       {active && (
         <motion.div
           layoutId="mobile-nav-indicator"
-          className="absolute inset-0 bg-primary/10 rounded-2xl"
-          transition={{ type: "spring", bounce: 0.2, duration: 0.6 }}
+          className="absolute -inset-1 bg-primary/10 rounded-2xl -z-10"
+          transition={{ type: "spring", bounce: 0.3, duration: 0.6 }}
         />
       )}
-      <Icon className={cn("w-6 h-6 relative z-10 transition-transform duration-300", active && "scale-110")} />
+      <Icon className={cn("w-6 h-6 transition-all duration-300", active ? "stroke-[2.5px]" : "stroke-2")} />
+      {active && (
+        <motion.div 
+          initial={{ scale: 0 }}
+          animate={{ scale: 1 }}
+          className="absolute -bottom-1 w-1 h-1 bg-primary rounded-full shadow-[0_0_8px_#2563eb]"
+        />
+      )}
     </button>
   );
 }
