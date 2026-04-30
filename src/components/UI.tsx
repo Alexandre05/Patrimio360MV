@@ -1,9 +1,12 @@
-import React, { ReactNode, Component, useState, useEffect } from 'react';
-import { LucideIcon, CloudUpload, CheckCircle2, AlertCircle } from 'lucide-react';
+import React, { ReactNode, useState, useEffect } from 'react';
+import { LucideIcon, CloudUpload, CheckCircle2, AlertCircle, AlertTriangle, Info, X } from 'lucide-react';
 import { cn } from '../lib/utils';
+import { useToast } from '../lib/ToastContext';
+import { motion, AnimatePresence } from 'motion/react';
 
 export function SyncToast() {
   const [status, setStatus] = useState<'idle' | 'syncing' | 'success' | 'error'>('idle');
+  const { toast } = useToast();
 
   useEffect(() => {
     let timeout: any;
@@ -16,7 +19,15 @@ export function SyncToast() {
     
     const handleEnd = (e: any) => {
       clearTimeout(timeout);
-      setStatus(e.detail?.success ? 'success' : 'error');
+      const isSuccess = e.detail?.success;
+      setStatus(isSuccess ? 'success' : 'error');
+      
+      if (isSuccess) {
+        toast('Dados sincronizados com sucesso!', 'success', 'Nuvem Atualizada');
+      } else {
+        toast('Erro ao sincronizar dados. Tente novamente.', 'error', 'Falha de Rede');
+      }
+
       setTimeout(() => setStatus('idle'), 3000);
     };
 
@@ -86,6 +97,56 @@ export class ErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorBoun
     }
     return this.props.children;
   }
+}
+
+interface AlertProps {
+  children: ReactNode;
+  variant?: 'success' | 'error' | 'warning' | 'info';
+  title?: string;
+  className?: string;
+  icon?: LucideIcon;
+}
+
+export function Alert({ 
+  children, 
+  variant = 'info', 
+  title, 
+  className,
+  icon: CustomIcon
+}: AlertProps) {
+  const variants = {
+    success: "bg-emerald-50 border-emerald-100 text-emerald-800 shadow-sm",
+    error: "bg-rose-50 border-rose-100 text-rose-800 shadow-sm",
+    warning: "bg-amber-50 border-amber-100 text-amber-800 shadow-sm",
+    info: "bg-indigo-50 border-indigo-100 text-indigo-800 shadow-sm"
+  };
+
+  const Icons = {
+    success: CheckCircle2,
+    error: AlertCircle,
+    warning: AlertTriangle,
+    info: Info
+  };
+
+  const Icon = CustomIcon || Icons[variant];
+
+  return (
+    <motion.div 
+      initial={{ opacity: 0, y: -4 }}
+      animate={{ opacity: 1, y: 0 }}
+      className={cn(
+        "p-4 rounded-2xl border flex gap-3 items-start",
+        variants[variant],
+        className
+      )}
+    >
+      <Icon className="w-5 h-5 shrink-0 mt-0.5 opacity-80" />
+      <div className="flex flex-col gap-0.5">
+        {title && <span className="text-[10px] font-black uppercase tracking-[0.2em] opacity-50 mb-0.5">{title}</span>}
+        <div className="text-[11px] font-bold leading-relaxed">{children}</div>
+      </div>
+    </motion.div>
+  );
 }
 
 interface CardProps {
