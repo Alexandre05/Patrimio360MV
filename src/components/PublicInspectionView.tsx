@@ -6,7 +6,10 @@ import { formatDate } from '../lib/utils';
 import { ShieldCheck, MapPin, Search, Box, CheckCircle2, AlertTriangle, AlertCircle, XCircle, Maximize2, X, Calendar, Landmark } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 
+import { useAuth } from '../lib/AuthContext';
+
 export function PublicInspectionView({ inspectionId: propId, locationId: propLocationId }: { inspectionId?: string; locationId?: string }) {
+  const { signInAsGuest } = useAuth();
   const [inspection, setInspection] = useState<Inspection | null>(null);
   const [location, setLocation] = useState<Location | null>(null);
   const [assets, setAssets] = useState<Asset[]>([]);
@@ -16,6 +19,15 @@ export function PublicInspectionView({ inspectionId: propId, locationId: propLoc
   const [selectedImage, setSelectedImage] = useState<string | null>(null);
 
   useEffect(() => {
+    // Ensure we are at least logged in as guest to satisfy rules
+    const initAuth = async () => {
+      const { auth } = await import('../lib/firebase');
+      if (!auth.currentUser) {
+        await signInAsGuest();
+      }
+    };
+    initAuth();
+
     let id = propId;
     let locId = propLocationId;
 

@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { Card, Button } from './UI';
-import { BarChart3, TrendingUp, AlertCircle, FileText, Download, Users, Award, Lightbulb, Copy, X } from 'lucide-react';
+import { BarChart3, TrendingUp, AlertCircle, FileText, Download, Users, Award, Lightbulb, Copy, X, ShieldCheck } from 'lucide-react';
 import { db, Asset, Location, Inspection } from '../lib/db';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { cn, formatDate } from '../lib/utils';
@@ -223,12 +223,7 @@ A manutenção dos bens atuais tornou-se antieconômica. A substituição imedia
   };
 
   return (
-    <div className="flex flex-col gap-10 animate-in fade-in duration-700 pb-20">
-      <div className="flex flex-col gap-2 px-2">
-        <h2 className="text-3xl font-black text-slate-900 tracking-tighter uppercase">Painel Analítico</h2>
-        <span className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] leading-none">Consolidado Geral de Ativos</span>
-      </div>
-
+    <div className="flex flex-col gap-10 animate-in fade-in slide-in-from-bottom-4 duration-700 pb-20">
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
         <div className="relative overflow-hidden rounded-[2.5rem] bg-slate-900 p-10 text-white shadow-2xl shadow-slate-900/20 group">
            <div className="relative z-10 flex flex-col gap-6">
@@ -236,8 +231,8 @@ A manutenção dos bens atuais tornou-se antieconômica. A substituição imedia
                  <TrendingUp className="w-7 h-7 text-white" />
               </div>
               <div className="flex flex-col">
-                 <span className="text-6xl font-black tracking-tighter leading-none stat-value">{stats.totalItens}</span>
-                 <span className="text-[11px] font-black uppercase tracking-[0.2em] text-slate-400 mt-4">Total de Bens Tombados</span>
+                 <span className="text-6xl font-display font-black tracking-tighter leading-none">{stats.totalItens}</span>
+                 <span className="text-[11px] font-black uppercase tracking-[0.3em] text-slate-400 mt-4 leading-none">Bens Catalogados</span>
               </div>
            </div>
            <BarChart3 className="absolute -bottom-10 -right-10 w-48 h-48 text-white/5 transform rotate-12 transition-transform group-hover:scale-125 duration-700" />
@@ -249,8 +244,8 @@ A manutenção dos bens atuais tornou-se antieconômica. A substituição imedia
                  <AlertCircle className="w-7 h-7 text-white" />
               </div>
               <div className="flex flex-col">
-                 <span className="text-6xl font-black tracking-tighter leading-none stat-value">{stats.ruins}</span>
-                 <span className="text-[11px] font-black uppercase tracking-[0.2em] text-rose-200 mt-4">Itens em Estado Crítico</span>
+                 <span className="text-6xl font-display font-black tracking-tighter leading-none">{stats.ruins}</span>
+                 <span className="text-[11px] font-black uppercase tracking-[0.3em] text-rose-200 mt-4 leading-none">Estado Crítico / Baixa</span>
               </div>
            </div>
            <AlertCircle className="absolute -bottom-10 -right-10 w-48 h-48 text-white/5 transform -rotate-12 transition-transform group-hover:scale-125 duration-700" />
@@ -258,108 +253,106 @@ A manutenção dos bens atuais tornou-se antieconômica. A substituição imedia
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-10">
-        <div className="lg:col-span-2 flex flex-col gap-6">
-          <div className="flex items-center justify-between px-2">
-            <div className="flex flex-col">
-              <h3 className="text-sm font-black text-slate-900 uppercase tracking-[0.2em]">Exportação de Dados</h3>
-              <span className="text-[10px] font-bold text-slate-400">Emissão de registros oficiais</span>
-            </div>
+        <div className="lg:col-span-2 flex flex-col gap-8">
+          <div className="flex flex-col gap-2">
+            <h3 className="text-xs font-black text-slate-400 uppercase tracking-[0.2em] ml-1">Central de Inteligência</h3>
+            <h4 className="text-2xl font-black text-slate-900 tracking-tight">Emissão de Auditorias</h4>
           </div>
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <ReportAction 
-              title="Gerar ETP de Substituição (Lei 14.133)" 
-              description="Inteligência Estratégica" 
+              title="ETP de Substituição" 
+              description="Rascunho Automático Lei 14.133" 
               icon={Lightbulb} 
-              color="amber" 
+              variant="amber" 
               onClick={() => setShowBiddingDraft(true)}
             />
             <ReportAction 
-              title="Lista de Inservíveis" 
-              description="Bens para leilão ou descarte" 
+              title="Bens Inservíveis" 
+              description="Processo de Descarte/Leilão" 
               icon={FileText} 
-              color="rose" 
+              variant="rose" 
               onClick={generateInserviceReport}
             />
             <ReportAction 
-              title="Por Localização" 
-              description="Planilha completa por sala" 
+              title="Mapa de Setores" 
+              description="Inventário por Localização" 
               icon={FileText} 
-              color="blue" 
+              variant="indigo" 
               onClick={generateLocationReport}
             />
             <ReportAction 
-              title="Sem Patrimônio" 
-              description="Itens para etiquetagem" 
-              icon={FileText} 
-              color="amber" 
+              title="Sem Selo" 
+              description="Itens Pendentes de Registro" 
+              icon={ShieldCheck} 
+              variant="slate" 
               onClick={generateNoPatrimonyReport}
             />
           </div>
         </div>
 
-        <div className="flex flex-col gap-6">
-          <div className="flex items-center justify-between px-2">
-            <div className="flex flex-col">
-              <h3 className="text-sm font-black text-slate-900 uppercase tracking-[0.2em]">Ranking Atividade</h3>
-              <span className="text-[10px] font-bold text-slate-400">Performance dos Vistoriadores</span>
-            </div>
+        <div className="flex flex-col gap-8">
+          <div className="flex flex-col gap-2">
+            <h3 className="text-xs font-black text-slate-400 uppercase tracking-[0.2em] ml-1">Produtividade</h3>
+            <h4 className="text-2xl font-black text-slate-900 tracking-tight">Ranking Agentes</h4>
           </div>
-          <div className="bg-white border border-slate-100 rounded-[2.5rem] p-8 shadow-sm flex flex-col gap-4">
+          <div className="bg-white border border-slate-100 rounded-[2.5rem] p-8 shadow-sm flex flex-col gap-6">
              {ranking.length > 0 ? ranking.slice(0, 5).map((item, idx) => (
                <div key={item.id} className="flex items-center gap-4 group">
                   <div className={cn(
-                    "w-10 h-10 rounded-xl flex items-center justify-center font-black text-xs transition-all duration-300",
-                    idx === 0 ? "bg-amber-100 text-amber-600" : "bg-slate-50 text-slate-400 group-hover:bg-slate-900 group-hover:text-white"
+                    "w-12 h-12 rounded-2xl flex items-center justify-center font-black text-sm transition-all duration-300",
+                    idx === 0 ? "bg-amber-100 text-amber-600 shadow-lg shadow-amber-500/10" : "bg-slate-50 text-slate-400 group-hover:bg-slate-900 group-hover:text-white"
                   )}>
-                    {idx === 0 ? <Award className="w-5 h-5" /> : idx + 1}
+                    {idx === 0 ? <Award className="w-6 h-6" /> : idx + 1}
                   </div>
                   <div className="flex flex-col flex-1 overflow-hidden">
                      <span className="font-bold text-slate-900 text-sm truncate">{item.name}</span>
-                     <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">{item.count} Vistorias</span>
+                     <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mt-0.5">{item.count} Vistorias</span>
                   </div>
-                  {idx === 0 && <span className="text-[8px] font-black text-amber-600 bg-amber-50 px-2 py-0.5 rounded-full uppercase tracking-tighter">Líder</span>}
+                  {idx === 0 && (
+                    <div className="flex flex-col items-end">
+                      <span className="text-[8px] font-black text-amber-600 bg-amber-50 px-2 py-1 rounded-lg uppercase tracking-tighter shadow-sm border border-amber-100">Destaque</span>
+                    </div>
+                  )}
                </div>
              )) : (
-               <div className="py-10 flex flex-col items-center justify-center text-center opacity-50 grayscale">
-                  <Users className="w-10 h-10 mb-4 text-slate-300" />
-                  <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Sem dados suficientes</p>
+               <div className="py-12 flex flex-col items-center justify-center text-center opacity-30">
+                  <Users className="w-12 h-12 mb-4 text-slate-300" />
+                  <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Dados Insuficientes</p>
                </div>
              )}
           </div>
         </div>
       </div>
 
-      <div className="flex flex-col gap-6">
-        <div className="flex items-center justify-between px-2">
-          <div className="flex flex-col">
-            <h3 className="text-sm font-black text-slate-900 uppercase tracking-[0.2em]">Inventário por Localização</h3>
-            <span className="text-[10px] font-bold text-slate-400">Resumo quantitativo de itens por sala/prédio</span>
-          </div>
+      <div className="flex flex-col gap-8">
+        <div className="flex flex-col gap-2">
+          <h3 className="text-xs font-black text-slate-400 uppercase tracking-[0.2em] ml-1">Consolidado Quantitativo</h3>
+          <h4 className="text-2xl font-black text-slate-900 tracking-tight">Itens por Localização</h4>
         </div>
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
            {locationSummary.map(loc => (
              <Card 
                key={loc.id} 
-               className="p-6 flex flex-col gap-4 border-slate-50 hover:border-blue-200 transition-all group"
+               className="p-8 flex flex-col gap-6 border-slate-50 hover:border-indigo-200 transition-all group rounded-[2.5rem] bg-white shadow-sm hover:shadow-xl hover:shadow-indigo-500/5"
                onClick={() => generateSingleLocationReport(loc.id)}
              >
                 <div className="flex items-center justify-between">
-                   <div className="w-10 h-10 rounded-xl bg-slate-50 flex items-center justify-center text-slate-400 group-hover:bg-blue-600 group-hover:text-white transition-colors">
-                      <FileText className="w-5 h-5" />
+                   <div className="w-12 h-12 rounded-2xl bg-indigo-50 text-indigo-400 flex items-center justify-center group-hover:bg-indigo-600 group-hover:text-white transition-colors duration-500 shadow-sm">
+                      <FileText className="w-6 h-6" />
                    </div>
                    <span className={cn(
-                     "text-[10px] font-black px-2 py-1 rounded-lg uppercase tracking-tighter",
-                     loc.itemCount > 0 ? "bg-emerald-50 text-emerald-600" : "bg-slate-50 text-slate-400"
+                     "text-[10px] font-black px-3 py-1.5 rounded-xl uppercase tracking-tighter shadow-sm border",
+                     loc.itemCount > 0 ? "bg-emerald-50 text-emerald-600 border-emerald-100" : "bg-slate-50 text-slate-400 border-slate-100"
                    )}>
-                     {loc.itemCount} Itens
+                     {loc.itemCount} Bens
                    </span>
                 </div>
                 <div className="flex flex-col">
-                   <span className="font-bold text-slate-900 group-hover:text-blue-600 transition-colors truncate">{loc.name}</span>
-                   <span className="text-[9px] text-slate-400 uppercase font-black tracking-widest mt-1 line-clamp-1">{loc.description}</span>
+                   <span className="font-bold text-slate-900 group-hover:text-indigo-600 transition-colors truncate text-lg tracking-tight mb-1">{loc.name}</span>
+                   <span className="text-[9px] text-slate-400 uppercase font-black tracking-widest leading-relaxed line-clamp-1 opacity-70 italic">{loc.description}</span>
                 </div>
-                <button className="mt-2 text-[8px] font-black text-blue-600 uppercase tracking-widest flex items-center gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
-                   GERAR PDF SALA <Download className="w-3 h-3" />
+                <button className="flex items-center gap-2 text-[10px] font-black text-indigo-600 uppercase tracking-widest opacity-0 translate-y-2 group-hover:opacity-100 group-hover:translate-y-0 transition-all duration-500">
+                   GERAR PDF <Download className="w-3.5 h-3.5" />
                 </button>
              </Card>
            ))}
@@ -367,75 +360,79 @@ A manutenção dos bens atuais tornou-se antieconômica. A substituição imedia
       </div>
 
       {showBiddingDraft && (
-        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-900/40 backdrop-blur-sm animate-in fade-in duration-200">
-          <div className="bg-white w-full max-w-4xl max-h-[90vh] flex flex-col rounded-[2.5rem] shadow-2xl relative overflow-hidden">
-            <div className="flex items-center justify-between p-8 border-b border-slate-100 bg-slate-50/50">
-              <div className="flex items-center gap-4">
-                <div className="w-14 h-14 bg-amber-100 text-amber-600 rounded-[1.5rem] flex items-center justify-center border border-amber-200 shadow-sm">
-                   <Lightbulb className="w-7 h-7" />
+        <div className="fixed inset-0 z-[100] flex items-center justify-center p-6 bg-slate-950/40 backdrop-blur-md animate-in fade-in duration-300">
+          <Card className="w-full max-w-4xl max-h-[90vh] flex flex-col border-none shadow-[0_50px_100px_-20px_rgba(0,0,0,0.25)] relative overflow-hidden rounded-[3.5rem] bg-white">
+            <div className="absolute top-0 left-0 w-full h-2 bg-amber-500"></div>
+            <div className="flex items-center justify-between p-10 pb-6">
+              <div className="flex items-center gap-6">
+                <div className="w-16 h-16 bg-amber-500 rounded-[1.8rem] flex items-center justify-center text-white shadow-2xl shadow-amber-500/20">
+                   <Lightbulb className="w-8 h-8" />
                 </div>
-                <div>
-                  <h2 className="text-2xl font-black text-slate-800 tracking-tight">Estudo Técnico Preliminar (ETP)</h2>
-                  <p className="text-sm font-bold tracking-widest text-slate-500 uppercase">Rascunho Automático - Lei 14.133/2021</p>
+                <div className="flex flex-col">
+                  <h2 className="text-3xl font-black text-slate-900 tracking-tight leading-none uppercase">Estudo Técnico (ETP)</h2>
+                  <span className="text-[10px] font-black tracking-[0.3em] text-slate-400 mt-2 uppercase">Geração Automatizada • Lei 14.133</span>
                 </div>
               </div>
               <button 
                 onClick={() => setShowBiddingDraft(false)}
-                className="w-12 h-12 flex items-center justify-center bg-white rounded-2xl text-slate-400 hover:text-rose-500 hover:bg-rose-50 transition-all border border-slate-200"
+                className="w-12 h-12 flex items-center justify-center bg-slate-50 rounded-2xl text-slate-400 hover:text-rose-500 hover:bg-rose-50 transition-all border border-slate-100"
               >
                 <X className="w-6 h-6" />
               </button>
             </div>
             
-            <div className="flex-1 overflow-y-auto p-8 bg-slate-50 relative">
+            <div className="flex-1 overflow-y-auto px-10 py-4">
                <textarea 
                  readOnly
                  value={getBiddingDraftText()}
-                 className="w-full h-full min-h-[400px] p-6 rounded-2xl border border-slate-200 bg-white text-slate-700 font-mono text-sm leading-relaxed focus:outline-none focus:ring-4 focus:ring-amber-500/10 resize-none shadow-sm"
+                 className="w-full h-full min-h-[450px] p-10 rounded-[2.5rem] border-2 border-slate-50 bg-slate-50/30 text-slate-700 font-mono text-sm leading-loose focus:outline-none resize-none shadow-inner"
                />
             </div>
 
-            <div className="p-8 border-t border-slate-100 bg-white flex flex-col sm:flex-row justify-between items-center gap-6">
-              <p className="text-xs font-semibold text-slate-400 max-w-md leading-relaxed">
-                Este é um rascunho base gerado automaticamente a partir dos itens classificados como <strong>ruins/inservíveis</strong> no inventário. Revise as informações antes de utilizar no processo licitatório oficial.
-              </p>
+            <div className="p-10 bg-white flex flex-col md:flex-row justify-between items-center gap-8">
+              <div className="flex items-start gap-4 flex-1">
+                 <div className="w-10 h-10 bg-amber-50 rounded-xl flex items-center justify-center shrink-0 border border-amber-100">
+                    <AlertCircle className="w-5 h-5 text-amber-600" />
+                 </div>
+                 <p className="text-[11px] font-medium text-slate-400 leading-relaxed max-w-md">
+                   Este documento é um rascunho baseado nos bens classificados em <strong>estado crítico</strong>. Revise cuidadosamente antes de anexar ao seu processo administrativo.
+                 </p>
+              </div>
               <Button 
-                variant="primary" 
-                className={cn("whitespace-nowrap transition-all duration-300", copied ? "bg-emerald-600 hover:bg-emerald-700 shadow-emerald-600/20" : "")}
+                variant="accent" 
+                className={cn("px-12 h-16 text-xs uppercase tracking-widest transition-all duration-500", copied ? "bg-emerald-600 scale-95" : "bg-slate-900")}
                 onClick={copyToClipboard}
               >
-                {copied ? "COPIADO PARA ÁREA DE TRANSFERÊNCIA!" : "COPIAR RASCUNHO"} {copied ? <Download className="w-4 h-4 ml-2" /> : <Copy className="w-4 h-4 ml-2" />}
+                {copied ? "TEXTO COPIADO!" : "COPIAR ESTRUTURA"} {copied ? <Download className="w-4 h-4 ml-2" /> : <Copy className="w-4 h-4 ml-2" />}
               </Button>
             </div>
-          </div>
+          </Card>
         </div>
       )}
-
     </div>
   );
 }
 
-function ReportAction({ title, description, icon: Icon, color = 'blue', onClick }: { title: string, description: string, icon: any, color?: string, onClick: () => void }) {
-  const colorClasses = {
-    rose: "bg-rose-50 text-rose-600 border-rose-100",
-    blue: "bg-blue-50 text-blue-600 border-blue-100",
-    amber: "bg-amber-50 text-amber-600 border-amber-100",
-  }[color] || "bg-slate-50 text-slate-600 border-slate-100";
+function ReportAction({ title, description, icon: Icon, variant = 'slate', onClick }: { title: string, description: string, icon: any, variant?: 'rose' | 'indigo' | 'amber' | 'slate', onClick: () => void }) {
+  const styles = {
+    rose: "bg-rose-50 text-rose-600 border-rose-100 hover:bg-rose-600 hover:text-white",
+    indigo: "bg-indigo-50 text-indigo-600 border-indigo-100 hover:bg-indigo-600 hover:text-white",
+    amber: "bg-amber-50 text-amber-600 border-amber-100 hover:bg-amber-500 hover:text-white",
+    slate: "bg-slate-50 text-slate-500 border-slate-100 hover:bg-slate-900 hover:text-white",
+  }[variant];
 
   return (
-    <Card className="p-8 flex flex-col gap-6 rounded-[2.5rem] border-slate-50 hover:border-slate-200 cursor-pointer group transition-all duration-500 hover:shadow-2xl hover:shadow-slate-200/50" onClick={onClick}>
-       <div className={cn("w-16 h-16 rounded-[1.5rem] flex items-center justify-center transition-all duration-500 group-hover:bg-slate-900 group-hover:text-white", colorClasses)}>
-          <Icon className="w-8 h-8 transition-transform group-hover:rotate-12" />
+    <Card className="px-8 py-10 flex flex-col gap-6 rounded-[2.5rem] border-slate-100 hover:border-transparent transition-all duration-500 cursor-pointer shadow-sm hover:shadow-2xl group relative overflow-hidden" onClick={onClick}>
+       <div className={cn("w-14 h-14 rounded-2xl flex items-center justify-center transition-all duration-700 shadow-sm border", styles)}>
+          <Icon className="w-7 h-7 transform group-hover:rotate-12 transition-transform duration-500" />
        </div>
        <div className="flex flex-col">
-          <span className="font-black text-slate-900 text-lg uppercase tracking-tight leading-tight group-hover:text-blue-600 transition-colors">{title}</span>
-          <span className="text-[10px] text-slate-400 font-bold uppercase tracking-widest mt-2">{description}</span>
+          <span className="font-black text-slate-900 text-lg uppercase tracking-tight leading-none group-hover:text-indigo-600 transition-colors mb-2">{title}</span>
+          <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest leading-none opacity-80">{description}</span>
        </div>
-       <div className="pt-2">
-          <button className="flex items-center gap-2 text-[10px] font-black text-slate-900 uppercase tracking-widest opacity-0 -translate-y-2 group-hover:opacity-100 group-hover:translate-y-0 transition-all duration-500">
-            EMITIR PDF <Download className="w-3 h-3" />
-          </button>
-       </div>
+       <button className="flex items-center gap-2 text-[10px] font-black text-slate-900 uppercase tracking-widest opacity-0 translate-y-2 group-hover:opacity-100 group-hover:translate-y-0 transition-all duration-500">
+          PDF <Download className="w-3.5 h-3.5" />
+       </button>
     </Card>
   );
 }

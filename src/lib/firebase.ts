@@ -1,5 +1,14 @@
 import { initializeApp } from 'firebase/app';
-import { getAuth, GoogleAuthProvider, signInWithPopup, signOut as firebaseSignOut, onAuthStateChanged } from 'firebase/auth';
+import { 
+  getAuth, 
+  GoogleAuthProvider, 
+  signInWithPopup, 
+  signOut as firebaseSignOut, 
+  onAuthStateChanged,
+  setPersistence,
+  browserLocalPersistence
+} from 'firebase/auth';
+import { getStorage } from 'firebase/storage';
 import { 
   initializeFirestore, 
   doc, 
@@ -23,12 +32,20 @@ export const firebaseConfigInfo = firebaseConfig;
 export const firebaseApp = app;
 export const auth = getAuth(app);
 
+// Improve persistence for shared environments
+setPersistence(auth, browserLocalPersistence).catch(err => console.error("Persistence error:", err));
+
+export const storage = getStorage(app);
+
 // Use initializeFirestore with experimentalForceLongPolling for better stability in iframe environments
 export const db = initializeFirestore(app, {
   experimentalForceLongPolling: true,
 }, firebaseConfig.firestoreDatabaseId);
 
 export const googleProvider = new GoogleAuthProvider();
+googleProvider.setCustomParameters({
+  prompt: 'select_account'
+});
 
 export interface FirestoreErrorInfo {
   error: string;
@@ -45,8 +62,18 @@ export interface FirestoreErrorInfo {
 
 export function handleFirestoreError(error: any, operationType: any, path: string | null = null): never {
   const user = auth.currentUser;
+  const message = error.message || String(error);
+  
+  // Check for specific quota or connectivity errors
+  const isQuotaExceeded = message.includes('Quota exceeded') || message.includes('quota') || message.includes('limit');
+  const isOffline = message.includes('offline');
+
   const errorInfo: FirestoreErrorInfo = {
-    error: error.message || String(error),
+    error: isQuotaExceeded 
+      ? "LIMITE DE COTAS EXCEDIDO: O sistema atingiu o limite de uso diário gratuito do Google Cloud. Os dados locais continuam seguros, mas a sincronização em nuvem voltará ao normal amanhã."
+      : isOffline 
+        ? "SEM CONEXÃO: Verifique sua internet. O sistema continuará funcionando no modo offline."
+        : message,
     operationType,
     path,
     authInfo: {

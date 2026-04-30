@@ -1,32 +1,32 @@
-@import url('https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap');
 @import "tailwindcss";
 @import "leaflet/dist/leaflet.css";
 
 @theme {
   --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
-  --font-display: "Outfit", ui-sans-serif, system-ui, sans-serif;
+  --font-display: "Plus Jakarta Sans", ui-sans-serif, system-ui, sans-serif;
   --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
   
-  --color-primary: #004587;
-  --color-primary-light: #0061bd;
-  --color-accent: #f59e0b;
-  --color-bg: #f8fafc;
-  --color-card: #ffffff;
-  --color-border: #e2e8f0;
-  --color-text-muted: #64748b;
+  --color-primary: #0F172A;
+  --color-primary-light: #1E293B;
+  --color-accent: #6366F1;
+  --color-success: #10B981;
+  --color-warning: #F59E0B;
+  --color-danger: #EF4444;
+  --color-bg: #F8FAFC;
+  --color-card: #FFFFFF;
+  --color-border: #E2E8F0;
+  --color-text-muted: #64748B;
 }
 
 @layer base {
   body {
     @apply bg-bg text-primary font-sans antialiased selection:bg-accent selection:text-white;
   }
-  h1, h2, h3, h4, h5, h6 {
-    @apply font-display tracking-tight text-primary;
-  }
 }
 
 .glass-card {
-  @apply bg-white/70 backdrop-blur-xl border border-white/40 shadow-[0_8px_30px_rgb(0,0,0,0.04)] rounded-[2rem];
+  @apply bg-white/70 backdrop-blur-xl border border-white/40 shadow-[0_4px_24px_rgba(0,0,0,0.04)] rounded-[1.5rem];
 }
 
 .bento-grid {

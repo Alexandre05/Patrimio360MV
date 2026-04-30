@@ -112,20 +112,61 @@ export function Dashboard() {
   const concludedInspectionsCount = useLiveQuery(() => db.inspections.where('status').anyOf('concluida', 'finalizada').count());
   const totalAssetsCount = useLiveQuery(() => db.assets.count());
   const unreadNotifications = useLiveQuery(() => user ? db.notifications.where('targetUserId').equals(user.userId).and(n => !n.read).count() : 0, [user]);
-  const unsyncedCount = useLiveQuery(() => db.assets.filter(a => a.needsSync === true).count()) || 0;
+  const unsyncedCount = useLiveQuery(() => 
+    db.assets.filter(a => 
+      a.needsSync === true || 
+      (a.photos && a.photos.some(p => typeof p === 'string' && p.startsWith('data:image')))
+    ).count()
+  ) || 0;
   const isAdmin = user?.role === 'administrador' || user?.role === 'prefeito';
   const isManager = user?.role === 'administrador' || user?.role === 'responsavel' || user?.role === 'prefeito';
+
+  const [quotaExceeded, setQuotaExceeded] = useState(false);
+
+  const [isSyncing, setIsSyncing] = useState(false);
+  const [syncError, setSyncError] = useState(false);
+
+  useEffect(() => {
+    const handleStart = () => { setIsSyncing(true); setSyncError(false); };
+    const handleEnd = (e: any) => { 
+      setIsSyncing(false); 
+      if (!e.detail?.success) setSyncError(true);
+    };
+
+    window.addEventListener('app-sync-start', handleStart);
+    window.addEventListener('app-sync-end', handleEnd);
+    return () => {
+      window.removeEventListener('app-sync-start', handleStart);
+      window.removeEventListener('app-sync-end', handleEnd);
+    };
+  }, []);
 
   useEffect(() => {
     if (user) {
       setupSync();
-      pushLocalChanges();
       
-      checkAndGenerateNotifications(user.userId).catch(err => {
-        console.error("Erro ao gerar notificações:", err);
-      });
+      const syncAndNotify = async () => {
+        try {
+          await pushLocalChanges();
+        } catch (err: any) {
+          if (err.message?.includes('LIMITE DE COTAS')) setQuotaExceeded(true);
+        }
+        
+        try {
+          await checkAndGenerateNotifications(user.userId);
+        } catch (err: any) {
+          if (err.message?.includes('LIMITE DE COTAS')) setQuotaExceeded(true);
+        }
+      };
+
+      syncAndNotify();
+
+      if (isOnline) {
+        const interval = setInterval(syncAndNotify, 30000);
+        return () => clearInterval(interval);
+      }
     }
-  }, [user]);
+  }, [user, isOnline]);
 
   if (selectedInspectionId) {
     return <InspectionView id={selectedInspectionId} onBack={() => {
@@ -259,111 +300,108 @@ export function Dashboard() {
       case 'home':
         return (
           <div className="flex flex-col gap-10 animate-in fade-in slide-in-from-bottom-4 duration-700">
-            {/* 🏰 Hero Moderno */}
-            <div className="relative overflow-hidden rounded-[3rem] bg-card border border-border px-8 py-12 text-primary shadow-xl group">
-              <div className="relative z-10 flex flex-col md:flex-row items-center justify-between gap-10">
-                <div className="flex flex-col gap-4 text-center md:text-left max-w-xl">
-                  <div className="inline-flex items-center gap-2 px-4 py-2 bg-bg backdrop-blur-md rounded-full w-fit mx-auto md:mx-0">
-                    <Zap className="w-4 h-4 text-accent fill-accent" />
-                    <span className="text-[10px] font-black uppercase tracking-widest text-text-muted">Resumo Operacional • Manoel Viana</span>
+            {/* 🚨 Alerta de Cota Excedida */}
+            {quotaExceeded && (
+              <div className="bg-amber-50 border border-amber-200 rounded-[2.5rem] p-6 flex flex-col md:flex-row items-center gap-6 animate-in slide-in-from-top-4 duration-500 shadow-xl shadow-amber-500/5">
+                <div className="w-16 h-16 bg-white rounded-3xl flex items-center justify-center shadow-lg shadow-amber-500/10 shrink-0">
+                  <AlertCircle className="w-8 h-8 text-amber-500" />
+                </div>
+                <div className="flex flex-col gap-1 text-center md:text-left">
+                  <span className="text-lg font-black text-amber-900 tracking-tight uppercase leading-none">Limite de Sincronização Atingido</span>
+                  <span className="text-xs font-bold text-amber-600/70 leading-relaxed">
+                    O Google Cloud atingiu o limite gratuito de hoje. <strong>Suas vistorias continuam sendo salvas normalmente neste dispositivo</strong> e serão enviadas para a nuvem automaticamente assim que a cota for reiniciada (geralmente à meia-noite).
+                  </span>
+                </div>
+              </div>
+            )}
+             {/* 🏰 Hero Moderno */}
+            <div className="relative overflow-hidden rounded-[2.5rem] bg-white border border-slate-100 p-8 lg:p-12 text-slate-900 shadow-[0_20px_60px_-15px_rgba(0,0,0,0.03)] group">
+              <div className="relative z-10 flex flex-col lg:flex-row items-center justify-between gap-12">
+                <div className="flex flex-col gap-6 text-center lg:text-left max-w-2xl">
+                  <div className="inline-flex items-center gap-2 px-3 py-1.5 bg-slate-50 border border-slate-100 rounded-full w-fit mx-auto lg:mx-0">
+                    <Zap className="w-4 h-4 text-indigo-600" />
+                    <span className="text-[10px] font-bold uppercase tracking-widest text-slate-500">Manoel Viana • Sistema Oficial</span>
                   </div>
-                  <h2 className="text-4xl md:text-5xl font-black tracking-tighter leading-[0.9] text-primary">
-                    Gestão <br /> 
-                    <span className="text-primary-light">Patrimonial</span>
+                  <h2 className="text-4xl lg:text-6xl font-display font-extrabold tracking-tight leading-[0.9] text-slate-900">
+                    Sua Vistoria <br /> 
+                    <span className="text-indigo-600">360 Graus.</span>
                   </h2>
-                  <p className="text-text-muted text-sm font-medium leading-relaxed">
-                    Painel inteligente para monitoramento, vistoria e homologação dos bens públicos municipais. Segurança e transparência em tempo real.
+                  <p className="text-slate-500 text-lg font-medium leading-relaxed max-w-lg">
+                    Software inteligente de auditoria patrimonial. Monitore, escaneie e homologue bens públicos com transparência total.
                   </p>
-                  <div className="flex flex-wrap items-center justify-center md:justify-start gap-4 mt-2">
-                    <Button variant="accent" icon={Plus} onClick={() => setActiveTab('locations')} className="rounded-2xl px-10 h-14 uppercase tracking-widest font-black text-[10px] shadow-2xl shadow-accent/30">
-                      Iniciar Vistoria
+                  <div className="flex flex-wrap items-center justify-center lg:justify-start gap-4 mt-4">
+                    <Button variant="accent" icon={Plus} onClick={() => setActiveTab('locations')} className="px-10 h-16 text-xs uppercase tracking-widest">
+                      Nova Vistoria
                     </Button>
-                    <Button variant="secondary" onClick={() => setActiveTab('scanner')} className="rounded-2xl px-10 h-14 uppercase tracking-widest font-black text-[10px] border-border text-primary hover:bg-bg hover:text-primary">
-                      Escanear QR Code
+                    <Button variant="outline" icon={Search} onClick={() => setActiveTab('scanner')} className="px-10 h-16 text-xs uppercase tracking-widest bg-white">
+                      Escanear QR
                     </Button>
+                    
                     {isManager && (
-                      <button onClick={async () => {
-                        const allInspections = await db.inspections.toArray();
-                        const allLocations = await db.locations.toArray();
-                        let clearedInps = 0;
-                        let clearedAssets = 0;
-                        let clearedLocs = 0;
-                        
-                        // 1. Clear Empty Inspections
-                        for (const i of allInspections) {
-                           const c = await db.assets.where('inspectionId').equals(i.id).count();
-                           if (c === 0) {
-                              await db.inspections.delete(i.id);
-                              try { await deleteDoc(doc(firestore, 'inspections', i.id)); } catch(e){}
-                              clearedInps++;
-                           }
-                        }
-
-                        // 2. Clear Empty Locations
-                        for (const l of allLocations) {
-                          const c = await db.inspections.where('locationId').equals(l.id).count();
-                          if (c === 0) {
-                            await db.locations.delete(l.id);
-                            try { await deleteDoc(doc(firestore, 'locations', l.id)); } catch(e){}
-                            clearedLocs++;
+                      <div className="flex items-center gap-4 ml-2">
+                        <button onClick={async () => {
+                          const allInspections = await db.inspections.toArray();
+                          const allLocations = await db.locations.toArray();
+                          let clearedInps = 0;
+                          let clearedAssets = 0;
+                          let clearedLocs = 0;
+                          
+                          for (const i of allInspections) {
+                             const c = await db.assets.where('inspectionId').equals(i.id).count();
+                             if (c === 0) {
+                                await db.inspections.delete(i.id);
+                                try { await deleteDoc(doc(firestore, 'inspections', i.id)); } catch(e){}
+                                clearedInps++;
+                             }
                           }
-                        }
 
-                        // 3. Clear Orphan Assets
-                        const allAssets = await db.assets.toArray();
-                        for (const a of allAssets) {
-                          const insp = await db.inspections.get(a.inspectionId);
-                          if (!insp) {
-                            await db.assets.delete(a.id);
-                            try { await deleteDoc(doc(firestore, 'assets', a.id)); } catch(e){}
-                            clearedAssets++;
+                          for (const l of allLocations) {
+                            const c = await db.inspections.where('locationId').equals(l.id).count();
+                            if (c === 0) {
+                              await db.locations.delete(l.id);
+                              try { await deleteDoc(doc(firestore, 'locations', l.id)); } catch(e){}
+                              clearedLocs++;
+                            }
                           }
-                        }
 
-                        if (clearedInps > 0 || clearedAssets > 0 || clearedLocs > 0) {
-                          alert(`Limpeza concluída:\n- ${clearedLocs} Locais vazios\n- ${clearedInps} Vistorias vazias\n- ${clearedAssets} Itens órfãos`);
-                          window.location.reload();
-                        }
-                        else alert('Nenhuma irregularidade encontrada.');
-                      }} className="text-[10px] font-black uppercase text-slate-400 hover:text-rose-500 transition-colors underline underline-offset-4">Limpar Fantasmas</button>
-                    )}
-                    {isManager && (
-                      <button onClick={async () => {
-                        if (confirm("ATENÇÃO: Isso irá apagar TODOS os dados locais (vistorias não sincronizadas serão perdidas). Deseja continuar?")) {
-                          await db.delete();
-                          window.location.reload();
-                        }
-                      }} className="text-[10px] font-black uppercase text-rose-500 hover:text-rose-700 transition-colors underline underline-offset-4">Resetar Banco Local</button>
-                    )}
-                    <div className="hidden sm:flex items-center gap-3 px-6 py-4 bg-white/5 border border-white/10 rounded-2xl backdrop-blur-sm">
-                      <Clock className="w-5 h-5 text-slate-500" />
-                      <div className="flex flex-col leading-none">
-                        <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Último Login</span>
-                        <span className="text-sm font-bold text-slate-300 mt-1">{new Date().toLocaleTimeString()}</span>
+                          const allAssets = await db.assets.toArray();
+                          for (const a of allAssets) {
+                            const insp = await db.inspections.get(a.inspectionId);
+                            if (!insp) {
+                              await db.assets.delete(a.id);
+                              try { await deleteDoc(doc(firestore, 'assets', a.id)); } catch(e){}
+                              clearedAssets++;
+                            }
+                          }
+
+                          if (clearedInps > 0 || clearedAssets > 0 || clearedLocs > 0) {
+                            alert(`Limpeza concluída:\n- ${clearedLocs} Locais vazios\n- ${clearedInps} Vistorias vazias\n- ${clearedAssets} Itens órfãos`);
+                            window.location.reload();
+                          }
+                          else alert('Tudo em ordem.');
+                        }} className="text-[10px] font-bold uppercase text-slate-400 hover:text-indigo-600 transition-colors">Higienizar</button>
                       </div>
-                    </div>
+                    )}
                   </div>
                 </div>
                 
-                <div className="hidden lg:flex flex-col gap-4 relative">
-                   <div className="p-8 bg-card border border-border rounded-[2.5rem] shadow-xl flex flex-col items-center gap-2 transform rotate-2 hover:rotate-0 transition-transform duration-500 cursor-pointer group/card" onClick={() => setActiveTab('notifications')}>
-                      <div className="w-16 h-16 bg-bg rounded-3xl flex items-center justify-center shadow-lg mb-2 group-hover/card:scale-110 transition-transform border border-border">
-                        <Bell className="w-8 h-8 text-primary" />
+                <div className="hidden lg:flex flex-col gap-6 relative">
+                   <Card className="p-8 bg-slate-900 border-slate-800 rounded-[2rem] shadow-2xl flex flex-col items-center gap-3 transform rotate-2 hover:rotate-0 transition-all duration-500 cursor-pointer group/card" onClick={() => setActiveTab('notifications')}>
+                      <div className="w-16 h-16 bg-white/5 rounded-2xl flex items-center justify-center border border-white/10 mb-2 transition-transform group-hover/card:scale-110">
+                        <Bell className="w-8 h-8 text-indigo-400" />
                       </div>
-                      <span className="text-3xl font-black text-primary">{unreadNotifications || 0}</span>
-                      <span className="text-[10px] font-black text-text-muted uppercase tracking-widest">Avisos Pendentes</span>
-                   </div>
-                   <div className="absolute -top-12 -left-20 p-6 bg-primary-light/10 backdrop-blur-md border border-primary-light/20 rounded-[2rem] shadow-lg flex flex-col items-center gap-1 transform -rotate-6 scale-90">
-                      <ShieldCheck className="w-6 h-6 text-primary-light" />
-                      <span className="text-[10px] font-black text-primary-light uppercase tracking-widest mt-1">Concluídas</span>
-                      <span className="text-xl font-bold text-primary">{concludedInspectionsCount || 0}</span>
+                      <span className="text-4xl font-display font-black text-white leading-none">{unreadNotifications || 0}</span>
+                      <span className="text-[10px] font-bold text-slate-500 uppercase tracking-widest text-center">Alertas Críticos<br/>Pendentes</span>
+                   </Card>
+                   <div className="absolute -top-16 -left-24 p-6 bg-indigo-600 rounded-[2rem] shadow-2xl shadow-indigo-500/20 flex flex-col items-center gap-1 transform -rotate-6 scale-90 border border-indigo-500">
+                      <ShieldCheck className="w-8 h-8 text-white" />
+                      <span className="text-[10px] font-bold text-indigo-200 uppercase tracking-widest mt-2">Vistorias</span>
+                      <span className="text-2xl font-display font-extrabold text-white leading-none">{concludedInspectionsCount || 0}</span>
                    </div>
                 </div>
               </div>
               
-              {/* Background Accents */}
-              <Building2 className="absolute -bottom-20 -right-20 w-96 h-96 text-primary/5 transform -rotate-12 pointer-events-none transition-transform duration-1000 group-hover:scale-110" />
-              <div className="absolute top-0 right-0 w-64 h-64 bg-accent/10 blur-[100px] rounded-full -translate-y-1/2 translate-x-1/2"></div>
+              <Building2 className="absolute -bottom-24 -right-16 w-80 h-80 text-slate-100 opacity-20 transform -rotate-12 pointer-events-none group-hover:scale-110 transition-transform duration-1000" />
             </div>
 
             {/* 📊 2. Cards de Resumo */}
@@ -440,15 +478,26 @@ export function Dashboard() {
             ) : (
               <div className="flex flex-col items-center gap-3 py-6 bg-card rounded-[2.5rem] border border-border mt-4 group shadow-sm">
                 <div className="flex items-center gap-2">
-                  <div className="w-2 h-2 rounded-full bg-emerald-500 shadow-[0_0_12px_#10b981] animate-pulse"></div>
+                  <div className={cn(
+                    "w-2 h-2 rounded-full shadow-[0_0_12px] animate-pulse",
+                    isSyncing ? "bg-emerald-500 shadow-emerald-500" : 
+                    syncError ? "bg-amber-500 shadow-amber-500" : 
+                    unsyncedCount > 0 ? "bg-blue-500 shadow-blue-500" : "bg-emerald-500 shadow-emerald-500"
+                  )}></div>
                   <span className="text-[10px] font-black text-text-muted uppercase tracking-[0.2em] leading-none">
-                    {unsyncedCount > 0 ? `Sincronizando ${unsyncedCount} registros com a prefeitura...` : 'Nuvem e Dispositivo Sincronizados (100%)'}
+                    {isSyncing ? `Sincronizando ${unsyncedCount} registros com a prefeitura...` :
+                     syncError && unsyncedCount > 0 ? `Sincronização pausada (${unsyncedCount} registros pendentes)` :
+                     unsyncedCount > 0 ? `Aguardando para sincronizar ${unsyncedCount} registros...` : 
+                     'Nuvem e Dispositivo Sincronizados (100%)'}
                   </span>
                 </div>
-                {unsyncedCount > 0 && (
+                {isSyncing && (
                   <div className="w-64 h-1.5 bg-slate-200 rounded-full overflow-hidden shadow-inner translate-y-1">
                     <div className="h-full bg-emerald-500 animate-progress origin-left rounded-full"></div>
                   </div>
+                )}
+                {syncError && unsyncedCount > 0 && (
+                   <span className="text-[9px] font-bold text-amber-600 uppercase">Aguardando disponibilidade da rede ou cotas</span>
                 )}
               </div>
             )}
@@ -518,44 +567,46 @@ export function Dashboard() {
       </div>
 
       {/* 🖥️ Desktop Sidebar */}
-      <aside className="hidden lg:flex flex-col w-72 bg-card border-r border-border p-8 sticky top-0 h-screen">
-        <div className="flex items-center gap-3 mb-10 pl-2">
-           <div className="w-10 h-10 bg-primary rounded-xl flex items-center justify-center shadow-xl shadow-primary/20">
+      <aside className="hidden lg:flex flex-col w-80 bg-white border-r border-slate-100 p-8 sticky top-0 h-screen transition-all">
+        <div className="flex items-center gap-3 mb-12 pl-2">
+           <div className="w-11 h-11 bg-indigo-600 rounded-xl flex items-center justify-center shadow-xl shadow-indigo-500/20">
               <ShieldCheck className="w-6 h-6 text-white" />
            </div>
            <div className="flex flex-col leading-none">
-              <span className="font-black text-xl tracking-tighter text-primary">PATRI-MV</span>
-              <span className="text-[9px] font-black text-text-muted uppercase tracking-widest leading-none mt-1">Manoel Viana</span>
+              <span className="font-display font-extrabold text-2xl tracking-tighter text-slate-900">PATRI<span className="text-indigo-600">360</span></span>
+              <span className="text-[10px] font-bold text-slate-400 uppercase tracking-[0.2em] leading-none mt-1">Manoel Viana</span>
            </div>
         </div>
 
-        <nav className="flex flex-col gap-2 flex-1">
-          <NavItem active={activeTab === 'home' && !selectedInspectionId} label="Início" icon={LayoutGrid} onClick={() => handleTabChange('home')} />
-          <NavItem active={activeTab === 'scanner'} label="Escanear Vistoria" icon={Search} onClick={() => handleTabChange('scanner')} />
-          <NavItem active={activeTab === 'notifications'} label="Notificações" icon={Bell} onClick={() => handleTabChange('notifications')} badge={unreadNotifications || 0} />
-          <NavItem active={activeTab === 'inspections'} label="Vistorias" icon={ClipboardList} onClick={() => handleTabChange('inspections')} />
-          <NavItem active={activeTab === 'locations'} label="Localizações" icon={Building2} onClick={() => handleTabChange('locations')} />
+        <nav className="flex flex-col gap-1.5 flex-1">
+          <NavItem active={activeTab === 'home' && !selectedInspectionId} label="Dashboard" icon={LayoutGrid} onClick={() => handleTabChange('home')} />
+          <NavItem active={activeTab === 'scanner'} label="Scanner QR" icon={Search} onClick={() => handleTabChange('scanner')} />
+          <NavItem active={activeTab === 'notifications'} label="Alertas" icon={Bell} onClick={() => handleTabChange('notifications')} badge={unreadNotifications || 0} />
+          <div className="h-4" />
+          <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest px-4 mb-2">Gestão Patrimonial</span>
+          <NavItem active={activeTab === 'inspections'} label="Dossiês" icon={ClipboardList} onClick={() => handleTabChange('inspections')} />
+          <NavItem active={activeTab === 'locations'} label="Setores" icon={Building2} onClick={() => handleTabChange('locations')} />
           {isManager && <NavItem active={activeTab === 'reports'} label="Relatórios" icon={BarChart3} onClick={() => handleTabChange('reports')} />}
           {isAdmin && (
-            <NavItem active={activeTab === 'users'} label="Membros" icon={Users} onClick={() => handleTabChange('users')} />
+            <NavItem active={activeTab === 'users'} label="Equipe" icon={Users} onClick={() => handleTabChange('users')} />
           )}
         </nav>
 
-        <div className="mt-auto flex flex-col gap-4">
-          <div className="p-4 bg-bg rounded-3xl flex items-center gap-3 ring-1 ring-border">
-             <div className="w-10 h-10 bg-card rounded-2xl flex items-center justify-center shadow-sm text-text-muted font-black text-xs uppercase border border-border">
+        <div className="mt-auto pt-8 border-t border-slate-100">
+          <div className="p-4 bg-slate-50 rounded-2xl flex items-center gap-3 border border-slate-100 mb-4 transition-all hover:bg-slate-100 cursor-default">
+             <div className="w-10 h-10 bg-white rounded-xl flex items-center justify-center shadow-sm text-indigo-600 font-bold text-sm border border-slate-200">
                 {user?.name.charAt(0)}
              </div>
              <div className="flex flex-col overflow-hidden">
-                <span className="text-sm font-bold text-primary truncate">{user?.name}</span>
-                <span className="text-[10px] font-black text-text-muted uppercase tracking-widest">{user?.role}</span>
+                <span className="text-sm font-bold text-slate-900 truncate">{user?.name}</span>
+                <span className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">{user?.role}</span>
              </div>
           </div>
           <button 
             onClick={signOut}
-            className="flex items-center gap-3 px-6 py-4 rounded-2xl text-rose-500 hover:bg-rose-50 font-bold text-sm transition-all group outline-none"
+            className="flex items-center gap-3 w-full px-4 py-3 rounded-xl text-slate-500 hover:text-rose-600 hover:bg-rose-50 font-bold text-sm transition-all group outline-none"
           >
-            <LogOut className="w-5 h-5 transition-transform group-hover:-translate-x-1" /> Sair do Sistema
+            <LogOut className="w-5 h-5 transition-transform group-hover:-translate-x-1" /> Sair
           </button>
         </div>
       </aside>
@@ -684,27 +735,26 @@ function SummaryCard({ label, value, icon: Icon, onClick, variant = 'default' }:
     <Card 
       onClick={onClick}
       className={cn(
-        "group h-40 flex flex-col justify-between border-bg px-6 py-6",
-        variant === 'accent' ? "bg-primary text-white border-transparent" : "bg-card shadow-sm hover:shadow-xl"
+        "group h-40 flex flex-col justify-between border-slate-100 px-6 py-6",
+        variant === 'accent' ? "bg-slate-900 border-transparent" : "bg-white shadow-sm hover:shadow-xl"
       )}
     >
       <div className="flex items-start justify-between">
         <div className={cn(
           "w-12 h-12 rounded-2xl flex items-center justify-center transition-all duration-500",
-          variant === 'accent' ? "bg-white/10" : "bg-bg group-hover:bg-primary text-primary group-hover:text-white"
+          variant === 'accent' ? "bg-white/10" : "bg-slate-50 group-hover:bg-slate-900 text-slate-500 group-hover:text-white"
         )}>
           <Icon className="w-6 h-6 transform group-hover:rotate-12 transition-transform" />
         </div>
-        <span className={cn(
-          "text-[10px] font-black uppercase tracking-[0.2em] transform rotate-90 origin-right translate-y-4 opacity-30",
-          variant === 'accent' ? "text-white" : "text-primary"
-        )}>DADOS</span>
       </div>
       <div className="flex flex-col">
-        <span className="text-4xl font-black stat-value tracking-tighter leading-none">{value}</span>
         <span className={cn(
-          "text-[10px] uppercase font-black tracking-[0.15em] mt-2",
-          variant === 'accent' ? "text-primary-light" : "text-text-muted"
+          "text-4xl font-display font-extrabold tracking-tight leading-none",
+          variant === 'accent' ? "text-white" : "text-slate-900"
+        )}>{value}</span>
+        <span className={cn(
+          "text-[10px] uppercase font-bold tracking-widest mt-2",
+          variant === 'accent' ? "text-slate-400" : "text-slate-500"
         )}>{label}</span>
       </div>
     </Card>
@@ -745,25 +795,22 @@ function RecentInspectionRow({ inspection, locationName, onClick }: { inspection
   return (
     <Card 
       onClick={onClick}
-      className="flex items-center justify-between py-5 px-6 group border-border hover:border-primary-light"
+      className="flex items-center justify-between p-4 lg:p-6 group hover:border-slate-300 transition-all border-slate-100"
     >
-      <div className="flex items-center gap-5">
+      <div className="flex items-center gap-6 min-w-0">
         <div className={cn(
-          "w-14 h-14 rounded-2xl flex items-center justify-center border-2 transition-all group-hover:scale-105 relative",
-          isFinalized ? "bg-emerald-50/50 border-emerald-100/50" : "bg-blue-50/50 border-blue-100/50"
+          "w-14 h-14 rounded-2xl flex items-center justify-center shrink-0 border transition-all duration-500",
+          isFinalized ? "bg-emerald-50 border-emerald-100 text-emerald-600" : 
+          isInProgress ? "bg-indigo-50 border-indigo-100 text-indigo-600" : 
+          "bg-slate-50 border-slate-100 text-slate-400"
         )}>
-          <ClipboardList className={cn("w-6 h-6", isFinalized ? "text-emerald-500" : "text-blue-500")} />
-          {isInProgress && (assetCount === 0) && (
-            <div className="absolute -top-1 -right-1 w-4 h-4 bg-amber-500 rounded-full border-2 border-white flex items-center justify-center">
-              <AlertCircle className="w-2.5 h-2.5 text-white" />
-            </div>
-          )}
+          {isFinalized ? <CheckCircle2 className="w-7 h-7" /> : <ClipboardList className="w-7 h-7" />}
         </div>
-        <div className="flex flex-col gap-1">
-          <div className="flex items-center gap-2">
-            <span className="font-bold text-slate-900 text-lg tracking-tight group-hover:text-blue-600 transition-colors line-clamp-1">{locationName}</span>
+        <div className="flex flex-col min-w-0">
+          <div className="flex items-center gap-2 mb-1">
+            <h4 className="text-sm font-bold text-slate-900 truncate tracking-tight">{locationName}</h4>
             {isInProgress && (assetCount === 0) && (
-              <span className="bg-amber-100 text-amber-700 text-[8px] font-black uppercase px-2 py-0.5 rounded-full tracking-widest">Sem itens</span>
+              <span className="bg-amber-100 text-amber-700 text-[8px] font-bold uppercase px-2 py-0.5 rounded-lg tracking-widest">Sem itens</span>
             )}
           </div>
           <div className="flex items-center gap-3 text-[10px] font-bold">
@@ -773,7 +820,7 @@ function RecentInspectionRow({ inspection, locationName, onClick }: { inspection
             <div className="w-1 h-1 rounded-full bg-slate-200"></div>
             <span className={cn(
               "uppercase tracking-[0.1em]",
-              isFinalized ? "text-emerald-600" : isInProgress ? "text-blue-600" : "text-slate-600"
+              isFinalized ? "text-emerald-600" : isInProgress ? "text-indigo-600" : "text-slate-600"
             )}>
               {inspection.status.replace('_', ' ')}
             </span>
@@ -786,9 +833,9 @@ function RecentInspectionRow({ inspection, locationName, onClick }: { inspection
         variant={isInProgress ? "accent" : "secondary"}
         icon={isInProgress ? PlayCircle : Eye}
         onClick={onClick}
-        className="hidden sm:flex text-[10px] font-black h-10 px-6 uppercase tracking-widest rounded-xl"
+        className="hidden sm:flex h-11 px-8 uppercase tracking-widest"
       >
-        {isInProgress ? "Continuar" : "Ver"}
+        {isInProgress ? "Continuar" : "Visualizar"}
       </Button>
 
       <ArrowRight className="w-5 h-5 text-slate-300 sm:hidden group-hover:text-slate-900 transition-transform group-hover:translate-x-1" />
@@ -801,16 +848,16 @@ function NavItem({ active, label, icon: Icon, onClick, badge }: { active: boolea
     <button 
       onClick={onClick}
       className={cn(
-        "flex items-center gap-4 px-6 py-4 rounded-2xl font-bold text-sm transition-all group relative",
-        active ? "bg-primary text-white shadow-2xl shadow-primary/20" : "text-text-muted hover:bg-bg hover:text-primary"
+        "flex items-center gap-4 px-6 py-4 rounded-xl font-bold text-sm transition-all group relative",
+        active ? "bg-slate-900 text-white shadow-xl shadow-slate-200" : "text-slate-500 hover:bg-slate-50 hover:text-slate-900"
       )}
     >
       <Icon className={cn("w-5 h-5 transition-transform duration-300", active ? "scale-110" : "group-hover:scale-110")} />
       <span className="flex-1 text-left tracking-tight">{label}</span>
-      {badge && badge > 0 ? (
+      {badge !== undefined && badge > 0 ? (
         <span className={cn(
-          "px-2 py-0.5 rounded-full text-[9px] font-black flex items-center justify-center",
-          active ? "bg-white/20 text-white" : "bg-rose-500 text-white"
+          "px-2 py-0.5 rounded-lg text-[9px] font-black flex items-center justify-center border",
+          active ? "bg-indigo-600 border-indigo-500 text-white" : "bg-indigo-50 border-indigo-100 text-indigo-600"
         )}>
           {badge}
         </span>
@@ -825,24 +872,17 @@ function MobileNavItem({ active, icon: Icon, onClick, label }: any) {
       onClick={onClick}
       className={cn(
         "relative p-3 rounded-2xl flex flex-col items-center justify-center transition-all outline-none",
-        active ? "text-primary scale-110" : "text-text-muted hover:text-text-main"
+        active ? "text-slate-900 scale-110" : "text-slate-400 hover:text-slate-600"
       )}
     >
       {active && (
         <motion.div
           layoutId="mobile-nav-indicator"
-          className="absolute -inset-1 bg-primary/10 rounded-2xl -z-10"
+          className="absolute -inset-1 bg-slate-900/5 rounded-2xl -z-10"
           transition={{ type: "spring", bounce: 0.3, duration: 0.6 }}
         />
       )}
       <Icon className={cn("w-6 h-6 transition-all duration-300", active ? "stroke-[2.5px]" : "stroke-2")} />
-      {active && (
-        <motion.div 
-          initial={{ scale: 0 }}
-          animate={{ scale: 1 }}
-          className="absolute -bottom-1 w-1 h-1 bg-primary rounded-full shadow-[0_0_8px_#2563eb]"
-        />
-      )}
     </button>
   );
 }

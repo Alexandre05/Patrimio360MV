@@ -1,13 +1,21 @@
 import React, { createContext, useContext, useEffect, useState } from 'react';
 import { User, db as localDb } from './db';
 import { auth, db as firestore, googleProvider } from './firebase';
-import { onAuthStateChanged, signInWithPopup, signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut as firebaseSignOut } from 'firebase/auth';
+import { 
+  onAuthStateChanged, 
+  signInWithPopup, 
+  signInWithEmailAndPassword, 
+  createUserWithEmailAndPassword, 
+  signOut as firebaseSignOut,
+  signInAnonymously
+} from 'firebase/auth';
 import { doc, getDoc, setDoc, collection, query, limit, getDocs, where } from 'firebase/firestore';
 
 interface AuthContextType {
   user: User | null;
   loading: boolean;
   signIn: (email?: string, password?: string) => Promise<boolean>;
+  signInAsGuest: () => Promise<void>;
   signUp: (userData: Omit<User, 'userId'>, password?: string) => Promise<boolean>;
   signOut: () => Promise<void>;
   isFirstUser: boolean;
@@ -23,6 +31,20 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
       if (firebaseUser) {
+        // If it is an anonymous user (guest citizen)
+        if (firebaseUser.isAnonymous) {
+          setUser({
+            userId: firebaseUser.uid,
+            name: 'Cidadão (Consulta)',
+            email: 'public@patri-mv.gov.br',
+            role: 'vistoriador', // Using low level role just to satisfy internal types if needed, rules will handle actual access
+            status: 'ativo',
+            cargo: 'Visitante'
+          });
+          setLoading(false);
+          return;
+        }
+
         let userDoc = await getDoc(doc(firestore, 'users', firebaseUser.uid));
         
         if (userDoc.exists()) {
@@ -68,32 +90,52 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const checkFirstUser = async () => {
-    // Only check if explicitly needed or as a one-time safety check
-    // We avoid doing this on every unauthenticated load to prevent console 403 errors
     if (auth.currentUser) {
       setIsFirstUser(false);
       return;
     }
     
-    // Improved logic: skip check if browser already has user session or if it's a known non-first-user environment
-    if (localStorage.getItem('not_first_user')) {
+    const cachedNotFirst = localStorage.getItem('not_first_user');
+    if (cachedNotFirst === 'true') {
       setIsFirstUser(false);
       return;
     }
 
     try {
-      // Limit to 1 to minimize read cost and check existence efficiently
+      // Check for sentinel document (allowed public read in rules)
+      const configDoc = await getDoc(doc(firestore, 'users', '_config'));
+      
+      if (configDoc.exists()) {
+        setIsFirstUser(false);
+        localStorage.setItem('not_first_user', 'true');
+        return;
+      }
+
+      // If sentinel is missing, we check if the collection is truly empty
+      // Note: This might fail if rules are strict, which is fine
       const q = query(collection(firestore, 'users'), limit(1));
-      const snapshot = await getDocs(q);
-      const isEmpty = snapshot.empty;
+      const querySnapshot = await getDocs(q);
+      
+      const isEmpty = querySnapshot.empty;
       setIsFirstUser(isEmpty);
+      
       if (!isEmpty) {
         localStorage.setItem('not_first_user', 'true');
       }
+    } catch (e: any) {
+      // If we get a permission error, it means the rules are already active
+      // usually implying that the system is already set up and secured.
+      console.log("CheckFirstUser: Access restricted, assuming not first setup.");
+      setIsFirstUser(false);
+      localStorage.setItem('not_first_user', 'true');
+    }
+  };
+
+  const signInAsGuest = async () => {
+    try {
+      await signInAnonymously(auth);
     } catch (e) {
-      // 403 is expected for public users if rules are tight. That's fine.
-      console.log("Check users skipped/denied (Public Access).");
-      setIsFirstUser(false); 
+      console.error("Erro ao entrar como convidado:", e);
     }
   };
 
@@ -108,11 +150,17 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         firebaseUser = result.user;
       }
       
+      // Check admins collection first for super admin privileges
+      const adminDoc = await getDoc(doc(firestore, 'admins', firebaseUser.uid));
+      const isAdmin = adminDoc.exists();
+
       let userDoc = await getDoc(doc(firestore, 'users', firebaseUser.uid));
       
       if (userDoc.exists()) {
         const userData = userDoc.data() as User;
-        setUser(userData);
+        // Inject super admin status if found in admins collection
+        const updatedUser = { ...userData, role: isAdmin ? 'administrador' : userData.role };
+        setUser(updatedUser);
         return true;
       } else if (firebaseUser.email) {
         // Fallback: Check if there's a user record with this email created by the admin
@@ -123,13 +171,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           const userData = oldDoc.data() as User;
           
           // Migrate the document to the new UID
-          const newUserData = { ...userData, userId: firebaseUser.uid };
+          const newUserData = { ...userData, userId: firebaseUser.uid, role: isAdmin ? 'administrador' : userData.role };
           await setDoc(doc(firestore, 'users', firebaseUser.uid), newUserData);
           
           try {
-             // Clean up old document
              const { deleteDoc } = await import('firebase/firestore');
-             if (oldDoc.id !== firebaseUser.uid) {
+             if (oldDoc.id !== firebaseUser.uid && oldDoc.id !== '_config') {
                await deleteDoc(doc(firestore, 'users', oldDoc.id));
              }
           } catch(e) { }
@@ -139,14 +186,31 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         }
       }
       
-      // Logged in but not registered in Patri-MV
+      // If they are in the 'admins' collection but don't have a record in 'users' yet, 
+      // let them in (they probably need to register or we can auto-create)
+      if (isAdmin) {
+        const newUser: User = {
+          userId: firebaseUser.uid,
+          name: firebaseUser.displayName || 'Administrador',
+          email: firebaseUser.email || '',
+          role: 'administrador',
+          status: 'ativo',
+          cargo: 'Super Admin'
+        };
+        await setDoc(doc(firestore, 'users', firebaseUser.uid), newUser);
+        setUser(newUser);
+        return true;
+      }
+      
       if (auth.currentUser) {
         await firebaseSignOut(auth);
       }
       return false;
     } catch (e: any) {
       console.error("Erro no login:", e);
-      // Let the app handle the specific error (could throw instead, but returning false is fine or throw for UI)
+      if (e.code === 'auth/network-request-failed') {
+        throw new Error("ERRO DE REDE: O login com Google falhou. Isso acontece quando o iframe é bloqueado pelo navegador ou por problemas de conexão. Por favor, tente abrir o aplicativo em uma NOVA ABA ou verifique sua conexão.");
+      }
       throw e;
     }
   };
@@ -167,6 +231,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       
       if (!firebaseUser) return false;
 
+      // If it's the first user, create the sentinel document
+      if (isFirstUser) {
+        await setDoc(doc(firestore, 'users', '_config'), {
+          initializedAt: new Date().toISOString(),
+          initialAdmin: firebaseUser.uid
+        });
+      }
+
       const newUser: User = {
         ...userData,
         userId: firebaseUser.uid,
@@ -176,6 +248,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       await setDoc(doc(firestore, 'users', firebaseUser.uid), newUser);
       setUser(newUser);
       setIsFirstUser(false);
+      localStorage.setItem('not_first_user', 'true');
       return true;
     } catch (e) {
       console.error("Erro ao cadastrar usuário:", e);
@@ -196,7 +269,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   };
 
   return (
-    <AuthContext.Provider value={{ user, loading, signIn, signUp, signOut, isFirstUser }}>
+    <AuthContext.Provider value={{ user, loading, signIn, signInAsGuest, signUp, signOut, isFirstUser }}>
       {children}
     </AuthContext.Provider>
   );
