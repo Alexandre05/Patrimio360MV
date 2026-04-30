@@ -622,6 +622,14 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
         doc.text(`Homologado por: ${inspection.finalizedBy === user?.userId ? user?.name : 'Autoridade Municipal'}`, 14, 50);
       }
 
+      // Dynamic QR Code Info
+      const qrData = `https://patrimonio360-75ade.web.app/local/${location?.id}`;
+      doc.setFontSize(10);
+      doc.setTextColor(100);
+      doc.text('Este documento contém um QR Code DINÂMICO vinculado ao SETOR.', 14, 56);
+      doc.text('A leitura deste código sempre exibirá a auditoria mais recente homologada.', 14, 61);
+      doc.setTextColor(0);
+
       const tableData = assets?.map(a => [
         a.name,
         a.patrimonyNumber || '-',
@@ -646,14 +654,15 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
       }
 
       // Add QR Code to the bottom if exists
-      if (inspection?.qrCodeData) {
+      if (true) { // Always generate for the location in the PDF
         const finalY = (doc as any).lastAutoTable.finalY + 10;
-        if (finalY < 250) {
+        if (finalY < 230) {
           doc.setFontSize(10);
-          doc.text('Selo de Autenticidade (QR Code):', 14, finalY);
+          doc.setFont('helvetica', 'bold');
+          doc.text('SELO PERMANENTE DE TRANSPARÊNCIA (PORTA DO SETOR):', 14, finalY);
           
-          // Get QR Code Image from SVG
-          const qrSvg = document.querySelector('#qr-code-container svg');
+          // Get QR Code Image from SVG (Dynamic URL for Location)
+          const qrSvg = document.querySelector('#qr-code-dynamic svg');
           if (qrSvg) {
             const svgData = new XMLSerializer().serializeToString(qrSvg);
             const canvas = document.createElement('canvas');
@@ -689,9 +698,12 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
     }
   };
 
-  const handlePrintQRCode = () => {
+  const handlePrintQRCode = (type: 'vistoria' | 'local' = 'local') => {
     try {
-      const qrData = inspection?.qrCodeData;
+      const qrData = type === 'local' 
+        ? `https://patrimonio360-75ade.web.app/local/${location?.id}`
+        : inspection?.qrCodeData;
+
       if (!qrData) return;
 
       const printWindow = window.open('', '_blank');
@@ -700,27 +712,32 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
         return;
       }
 
-      const qrSvg = document.querySelector('#qr-code-container svg')?.outerHTML || '';
+      const qrSvg = document.querySelector(type === 'local' ? '#qr-code-dynamic svg' : '#qr-code-container svg')?.outerHTML || '';
       
       printWindow.document.write(`
         <html>
           <head>
-            <title>Imprimir QR Code - ${location?.name}</title>
+            <title>QR Code ${type === 'local' ? 'Permanente' : 'Vistoria'} - ${location?.name}</title>
             <style>
-              body { font-family: sans-serif; display: flex; flex-direction: column; items-center; justify-content: center; height: 100vh; margin: 0; text-align: center; }
-              .card { border: 2px solid #000; padding: 40px; border-radius: 20px; }
-              h1 { margin-bottom: 0px; font-size: 24px; }
-              p { font-size: 14px; color: #666; margin-top: 5px; font-weight: bold; }
-              .qr { margin: 20px 0; }
+              body { font-family: sans-serif; display: flex; flex-direction: column; items: center; justify-content: center; height: 100vh; margin: 0; text-align: center; background: #f8fafc; }
+              .card { border: 4px solid #1e293b; padding: 50px; border-radius: 40px; background: white; box-shadow: 0 20px 50px rgba(0,0,0,0.1); max-width: 400px; }
+              .gov-header { font-size: 10px; font-weight: 900; color: #64748b; text-transform: uppercase; letter-spacing: 3px; margin-bottom: 20px; }
+              h1 { margin: 10px 0; font-size: 28px; color: #0f172a; font-weight: 900; }
+              .qr { margin: 30px 0; padding: 20px; background: white; border: 1px solid #e2e8f0; border-radius: 20px; }
+              .type-badge { background: ${type === 'local' ? '#4f46e5' : '#10b981'}; color: white; padding: 6px 12px; rounded: 20px; font-size: 9px; font-weight: 900; text-transform: uppercase; letter-spacing: 1px; border-radius: 10px; margin-bottom: 15px; display: inline-block; }
+              .footer-text { font-size: 11px; color: #94a3b8; font-weight: bold; margin-top: 10px; }
+              .dynamic-badge { color: #4f46e5; border: 1px solid #e0e7ff; background: #f5f3ff; padding: 8px; border-radius: 12px; font-size: 10px; margin-top: 15px; font-weight: bold; }
             </style>
           </head>
           <body>
             <div class="card">
+              <div class="gov-header">Patrimônio Público</div>
+              <div class="type-badge">${type === 'local' ? 'Selo Permanente' : 'Selo de Vistoria'}</div>
               <h1>${location?.name}</h1>
-              <p>PATRIMÔNIO PÚBLICO - MANOEL VIANA</p>
               <div class="qr">${qrSvg}</div>
-              <p>ID: ${inspection?.id.slice(0, 12)}</p>
-              <p style="color: #10b981; font-size: 11px;">DATA: ${formatDate(inspection?.date || 0)}</p>
+              <p class="footer-text">Controle Social de Bens Municipais</p>
+              ${type === 'local' ? '<div class="dynamic-badge">Este código não expira e será atualizado em cada nova vistoria homologada.</div>' : ''}
+              <p style="font-size: 8px; color: #cbd5e1; margin-top: 20px;">ID: ${type === 'local' ? location?.id : inspection?.id}</p>
             </div>
             <script>
               setTimeout(() => { window.print(); window.close(); }, 500);
@@ -960,12 +977,35 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
               </div>
               
               <div className="flex flex-wrap gap-4">
-                 <Button variant="accent" size="sm" onClick={generatePDF} icon={Save} className="px-10 h-16 text-xs uppercase tracking-widest">
-                   Baixar Auditoria (PDF)
+                 <div id="qr-code-container" className="hidden">
+                   <QRCodeSVG value={inspection.qrCodeData || ''} size={512} level="H" />
+                 </div>
+                 <div id="qr-code-dynamic" className="hidden">
+                   <QRCodeSVG value={`https://patrimonio360-75ade.web.app/local/${location.id}`} size={512} level="H" />
+                 </div>
+
+                 <Button variant="accent" size="sm" onClick={generatePDF} icon={Save} className="px-8 md:px-10 h-16 text-[10px] uppercase tracking-widest rounded-2xl">
+                   Baixar Dossiê (PDF)
                  </Button>
-                 <Button variant="outline" size="sm" icon={UserPlus} className="px-8 h-16 text-xs uppercase tracking-widest bg-white" onClick={handlePrintQRCode}>
-                   Imprimir QR Code
-                 </Button>
+                 
+                 <div className="flex flex-1 gap-2">
+                    <Button 
+                      variant="outline" 
+                      onClick={() => handlePrintQRCode('local')}
+                      icon={ImageIcon}
+                      className="flex-1 h-16 border-indigo-100 text-indigo-600 font-black text-[10px] uppercase tracking-widest hover:bg-indigo-50 rounded-2xl bg-white"
+                    >
+                      QR Permanente
+                    </Button>
+                    <Button 
+                      variant="outline" 
+                      onClick={() => handlePrintQRCode('vistoria')}
+                      icon={Database}
+                      className="flex-1 h-16 border-slate-200 text-slate-500 font-black text-[10px] uppercase tracking-widest hover:bg-slate-50 rounded-2xl bg-white"
+                    >
+                      Etiqueta Data
+                    </Button>
+                 </div>
               </div>
             </div>
           </Card>
