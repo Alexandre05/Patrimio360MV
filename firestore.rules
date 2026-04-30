@@ -21,12 +21,20 @@ service cloud.firestore {
 
     // Helper for Admin Check
     function isAdmin() { 
-      // User is an admin if they are the primary owner OR if they have the 'administrador' role (safe get)
-      return isSignedIn() && (
-        request.auth.token.email == 'henri199@gmail.com' ||
-        (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && 
-         get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'administrador')
-      ); 
+      // User is an admin if they exist in the 'admins' collection
+      // This is the most secure way to manage master privileges.
+      return isSignedIn() && exists(/databases/$(database)/documents/admins/$(request.auth.uid));
+    }
+
+    // Helper for Role Check
+    function hasRole(role) {
+      return isSignedIn() && 
+             exists(/databases/$(database)/documents/users/$(request.auth.uid)) && 
+             get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == role;
+    }
+
+    function isSystemAdmin() {
+      return isAdmin() || hasRole('administrador');
     }
 
     // 2. Users Collection
@@ -37,17 +45,31 @@ service cloud.firestore {
                data.email is string && data.email.size() <= 100;
       }
 
-      allow read: if true;
-      // Only Admins can create new users, effectively blocking any random Google Login from generating an account!
-      allow create: if isSignedIn() && isValidUser(incoming()) && isAdmin();
+      allow read: if isSignedIn(); // Restricted to signed in users
+      
+      // Permission to create a user:
+      // 1. You are a System Admin (in admins collection or has role administrador)
+      // 2. OR this is the very first user (bootstrapping)
+      // For bootstrapping, we use a sentinel document /users/_config
+      allow create: if isSignedIn() && isValidUser(incoming()) && (
+        isSystemAdmin() || 
+        !exists(/databases/$(database)/documents/users/_config)
+      );
       
       // Users can update their own info, but CANNOT elevate their role unless they are an admin
       allow update: if isVerified() && isValidUser(incoming()) && (
-        isAdmin() || 
+        isSystemAdmin() || 
         (request.auth.uid == userId && incoming().role == existing().role)
       );
       
-      allow delete: if isAdmin();
+      allow delete: if isSystemAdmin();
+    }
+
+    // Config Sentinel
+    match /users/_config {
+      allow read: if true;
+      allow create: if isSignedIn() && !exists(/databases/$(database)/documents/users/_config);
+      allow update, delete: if isSystemAdmin();
     }
 
     // 3. Locations Collection
@@ -87,13 +109,12 @@ service cloud.firestore {
         return isValidId(data.id) &&
                data.name is string && data.name.size() <= 150 &&
                data.inspectionId is string &&
-               data.condition in ['novo', 'bom', 'regular', 'ruim', 'inservivel'];
+               data.condition in ['novo', 'bom', 'regular', 'ruim', 'inservivel'] &&
+               (data.get('isPublic', false) is bool);
       }
 
       allow get, list: if isSignedIn();
-      allow get: if get(/databases/$(database)/documents/inspections/$(resource.data.inspectionId)).data.status == 'finalizada';
-      // For public list queries on assets, the client MUST filter by inspectionId.
-      allow list: if get(/databases/$(database)/documents/inspections/$(resource.data.inspectionId)).data.status == 'finalizada';
+      allow get, list: if resource.data.isPublic == true;
       
       allow write: if isVerified() && isValidAsset(incoming());
       allow delete: if isVerified();

@@ -1,6 +1,7 @@
 import { db as dexie } from './db';
 import { db as firestore, auth, handleFirestoreError } from './firebase';
 import { collection, doc, setDoc, getDocs, onSnapshot, query, where, writeBatch, Timestamp, deleteDoc } from 'firebase/firestore';
+import { uploadAssetPhoto } from './storageService';
 
 // Synchronize simple collections (one-way: Cloud -> Local)
 export function setupSync() {
@@ -99,34 +100,75 @@ export function setupSync() {
   }, (error) => console.error("Sync Users Error:", error));
 }
 
+let isPushing = false;
+
 // Push local changes to cloud
 export async function pushLocalChanges() {
+  if (isPushing) return;
+  
   const allAssets = await dexie.assets.toArray();
-  const unsyncedAssets = allAssets.filter(a => a.needsSync === true);
-  if (unsyncedAssets.length === 0) return;
+  // We want to push unsynced assets OR assets that still have Base64 photos (migration)
+  const unsyncedAssets = allAssets.filter(a => 
+    a.needsSync === true || 
+    (a.photos && a.photos.some(p => typeof p === 'string' && p.startsWith('data:image')))
+  );
+  
+  if (unsyncedAssets.length === 0) {
+    // Dispatch end event anyway to ensure UI states are cleared
+    window.dispatchEvent(new CustomEvent('app-sync-end', { detail: { success: true } }));
+    return;
+  }
 
+  isPushing = true;
   window.dispatchEvent(new CustomEvent('app-sync-start'));
 
   try {
-    const batch = writeBatch(firestore);
+    // Process each asset and its photos
     for (const asset of unsyncedAssets) {
       const { needsSync, ...data } = asset;
+      let photoUpdateNeeded = false;
+      
+      // Handle photos: Upload Base64 to Storage if needed
+      if (data.photos && data.photos.length > 0) {
+        const processedPhotos = await Promise.all(
+          data.photos.map(async (photo, index) => {
+            if (typeof photo === 'string' && photo.startsWith('data:image')) {
+              try {
+                const storagePath = `assets/${asset.id}/photo_${index}_${Date.now()}.jpg`;
+                const downloadURL = await uploadAssetPhoto(photo, storagePath);
+                photoUpdateNeeded = true;
+                return downloadURL;
+              } catch (err) {
+                console.error(`Falha no upload da foto ${index} do item ${asset.id}:`, err);
+                return photo;
+              }
+            }
+            return photo;
+          })
+        );
+        
+        if (photoUpdateNeeded) {
+          data.photos = processedPhotos;
+          await dexie.assets.update(asset.id, { photos: processedPhotos });
+        }
+      }
+
+      if (data.isPublic === undefined) {
+        (data as any).isPublic = true;
+      }
+
       const assetRef = doc(firestore, 'assets', asset.id);
-      batch.set(assetRef, data);
+      await setDoc(assetRef, data);
+      await dexie.assets.update(asset.id, { needsSync: false });
     }
   
-    await batch.commit();
-    
-    // Mark as synced locally
-    await dexie.assets.where('id').anyOf(unsyncedAssets.map(a => a.id)).modify({ needsSync: false as any });
-    
-    // Add small delay for UI polish
-    setTimeout(() => {
-      window.dispatchEvent(new CustomEvent('app-sync-end', { detail: { success: true } }));
-    }, 800);
+    await new Promise(resolve => setTimeout(resolve, 500));
+    window.dispatchEvent(new CustomEvent('app-sync-end', { detail: { success: true } }));
   } catch (error) {
-    handleFirestoreError(error, 'write', 'assets/batch');
+    console.error("Sync Error:", error);
     window.dispatchEvent(new CustomEvent('app-sync-end', { detail: { success: false } }));
+  } finally {
+    isPushing = false;
   }
 }
 
@@ -137,10 +179,11 @@ export async function syncInspection(inspectionId: string) {
     window.dispatchEvent(new CustomEvent('app-sync-start'));
     try {
       await setDoc(doc(firestore, 'inspections', inspection.id), inspection);
-      setTimeout(() => window.dispatchEvent(new CustomEvent('app-sync-end', { detail: { success: true } })), 800);
+      await new Promise(resolve => setTimeout(resolve, 800));
+      window.dispatchEvent(new CustomEvent('app-sync-end', { detail: { success: true } }));
     } catch (error) {
-      handleFirestoreError(error, 'write', `inspections/${inspectionId}`);
       window.dispatchEvent(new CustomEvent('app-sync-end', { detail: { success: false } }));
+      handleFirestoreError(error, 'write', `inspections/${inspectionId}`);
     }
   }
 }
@@ -151,10 +194,11 @@ export async function syncLocation(locationId: string) {
     window.dispatchEvent(new CustomEvent('app-sync-start'));
     try {
       await setDoc(doc(firestore, 'locations', location.id), location);
-      setTimeout(() => window.dispatchEvent(new CustomEvent('app-sync-end', { detail: { success: true } })), 800);
+      await new Promise(resolve => setTimeout(resolve, 800));
+      window.dispatchEvent(new CustomEvent('app-sync-end', { detail: { success: true } }));
     } catch (error) {
-      handleFirestoreError(error, 'write', `locations/${locationId}`);
       window.dispatchEvent(new CustomEvent('app-sync-end', { detail: { success: false } }));
+      handleFirestoreError(error, 'write', `locations/${locationId}`);
     }
   }
 }

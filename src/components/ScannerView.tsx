@@ -216,78 +216,95 @@ export function ScannerView({ onOpenInspection }: { onOpenInspection: (id: strin
   };
 
   return (
-    <div className="flex flex-col min-h-[80vh] md:min-h-0 bg-bg md:bg-transparent -m-4 md:m-0 p-4 md:p-0 animate-in fade-in duration-500">
-      <div className="flex flex-col items-center mb-8 mt-4 text-center">
-        <div className="w-16 h-16 bg-accent/20 rounded-full flex items-center justify-center mb-4 shadow-sm border border-accent/30">
-           <Camera className="w-8 h-8 text-accent" />
+    <div className="flex flex-col min-h-[80vh] md:min-h-0 animate-in fade-in duration-700 pb-20">
+      <div className="flex flex-col items-center mb-12 mt-10 text-center gap-6">
+        <div className="w-20 h-20 bg-indigo-600 rounded-[2rem] flex items-center justify-center shadow-2xl shadow-indigo-600/30 transform hover:scale-110 transition-transform duration-500">
+           <Camera className="w-10 h-10 text-white" />
         </div>
-        <h2 className="text-3xl md:text-4xl font-display tracking-tight font-black text-primary mb-3">Escanear QR Code</h2>
-        <p className="text-text-muted font-medium text-sm md:text-base max-w-sm">Aponte a câmera para um código de patrimônio ou para iniciar/continuar uma vistoria.</p>
+        <div className="flex flex-col gap-2">
+          <h2 className="text-4xl font-display font-extrabold text-slate-900 tracking-tight leading-tight">Mapeamento Inteligente</h2>
+          <p className="text-sm font-medium text-slate-400 uppercase tracking-[0.2em] max-w-sm mx-auto leading-relaxed">
+            Aponte para o QR Code de patrimônio ou ambiente para iniciar a auditoria instantânea.
+          </p>
+        </div>
       </div>
 
-      <div style={{ display: scanResult ? 'none' : 'block' }} className="flex-1 flex flex-col">
-        <Card className="p-4 md:p-6 overflow-hidden shadow-2xl relative max-w-md mx-auto w-full border-2 border-border rounded-[2.5rem] bg-card">
-           <div className="relative rounded-2xl overflow-hidden bg-slate-900 isolate shadow-[inset_0_4px_20px_rgba(0,0,0,0.5)]">
-             <div id="qr-reader" className="w-full text-center qr-reader-container [&_#qr-reader-results]:hidden !border-none min-h-[300px] flex items-center justify-center" />
+      <div style={{ display: scanResult ? 'none' : 'block' }} className="flex-1 flex flex-col max-w-xl mx-auto w-full">
+        <Card className="p-8 md:p-10 overflow-hidden shadow-[0_40px_100px_-20px_rgba(0,0,0,0.1)] rounded-[3.5rem] bg-white border-none relative">
+           <div className="relative rounded-[2rem] overflow-hidden bg-slate-900 shadow-[inset_0_4px_30px_rgba(0,0,0,0.8)] border-8 border-slate-50">
+             <div id="qr-reader" className="w-full text-center qr-reader-container !border-none min-h-[350px] flex items-center justify-center opacity-80" />
              
              {/* Scanner Overlay (Mira) */}
-             <div className="absolute inset-0 z-10 pointer-events-none flex flex-col items-center justify-center space-y-4">
-                 <div className="w-56 h-56 md:w-64 md:h-64 border-2 border-white/20 rounded-3xl relative">
+             <div className="absolute inset-0 z-10 pointer-events-none flex flex-col items-center justify-center gap-6">
+                 <div className="w-64 h-64 md:w-72 md:h-72 border-2 border-white/10 rounded-[2.5rem] relative">
                     {/* Corner marks */}
-                    <div className="absolute -top-1 -left-1 w-10 h-10 border-t-8 border-l-8 border-emerald-500 rounded-tl-2xl"></div>
-                    <div className="absolute -top-1 -right-1 w-10 h-10 border-t-8 border-r-8 border-emerald-500 rounded-tr-2xl"></div>
-                    <div className="absolute -bottom-1 -left-1 w-10 h-10 border-b-8 border-l-8 border-emerald-500 rounded-bl-2xl"></div>
-                    <div className="absolute -bottom-1 -right-1 w-10 h-10 border-b-8 border-r-8 border-emerald-500 rounded-br-2xl"></div>
+                    <div className="absolute -top-2 -left-2 w-14 h-14 border-t-[10px] border-l-[10px] border-indigo-500 rounded-tl-[1.5rem]"></div>
+                    <div className="absolute -top-2 -right-2 w-14 h-14 border-t-[10px] border-r-[10px] border-indigo-500 rounded-tr-[1.5rem]"></div>
+                    <div className="absolute -bottom-2 -left-2 w-14 h-14 border-b-[10px] border-l-[10px] border-indigo-500 rounded-bl-[1.5rem]"></div>
+                    <div className="absolute -bottom-2 -right-2 w-14 h-14 border-b-[10px] border-r-[10px] border-indigo-500 rounded-br-[1.5rem]"></div>
                     
                     {/* Scanning animation line */}
-                    <div className="absolute top-0 left-2 tracking-line w-[calc(100%-1rem)] h-[3px] rounded-full bg-emerald-500 shadow-[0_0_12px_4px_rgba(16,185,129,0.7)] animate-scan"></div>
+                    <div className="absolute top-0 left-4 tracking-line w-[calc(100%-2rem)] h-[4px] rounded-full bg-indigo-400 shadow-[0_0_20px_6px_rgba(129,140,248,0.8)]"></div>
                  </div>
                  
-                 <div className="bg-primary/80 backdrop-blur-md text-white text-xs md:text-sm font-semibold px-6 py-3 rounded-2xl absolute bottom-6 max-w-[90%] text-center border border-white/10 shadow-lg">
-                   Centralize o Código na marcação
+                 <div className="bg-indigo-600/90 backdrop-blur-md text-white text-[10px] font-black uppercase tracking-[0.2em] px-8 py-3.5 rounded-2xl border border-white/20 shadow-2xl">
+                    Posicione o código no centro
                  </div>
              </div>
            </div>
            
            {error && (
-             <div className="text-rose-600 mt-6 text-center font-bold bg-rose-50 p-4 rounded-2xl border border-rose-200 flex items-center gap-3 justify-center shadow-sm">
-               <X className="w-5 h-5 shrink-0" />
-               <span className="text-sm">{error}</span>
+             <div className="mt-8 flex items-center gap-4 bg-rose-50 border border-rose-100 p-6 rounded-3xl animate-in shake duration-500 text-rose-600 shadow-xl shadow-rose-900/5">
+                <div className="w-10 h-10 rounded-xl bg-white flex items-center justify-center shrink-0 border border-rose-100 shadow-sm">
+                  <X className="w-5 h-5" />
+                </div>
+                <p className="text-xs font-bold uppercase tracking-widest leading-relaxed">{error}</p>
              </div>
            )}
 
-           <div className="mt-6 flex flex-col gap-4">
-              <div className="flex items-start gap-4 p-5 bg-primary-light/10 rounded-2xl border border-primary-light/20 text-primary-light text-sm shadow-sm transition-all hover:bg-primary-light/20">
-                <Info className="w-6 h-6 flex-shrink-0 text-primary-light" />
-                <p className="font-medium leading-relaxed">Se o leitor não focar, afaste um pouco o celular ou use lente bem iluminada.</p>
+           <div className="mt-10 flex flex-col gap-6">
+              <div className="flex items-start gap-4 p-6 bg-slate-50 border border-slate-100 rounded-[2rem] text-slate-500 text-sm transition-all hover:bg-slate-100/50 group">
+                <div className="w-10 h-10 rounded-xl bg-white flex items-center justify-center shrink-0 border border-slate-100 shadow-sm group-hover:scale-110 transition-transform">
+                   <Info className="w-5 h-5 text-indigo-600" />
+                </div>
+                <div className="flex flex-col gap-1">
+                  <p className="text-xs font-bold text-slate-900 uppercase tracking-widest">Dica de Captura</p>
+                  <p className="text-xs font-medium leading-relaxed opacity-80">Afaste levemente o dispositivo caso o foco esteja demorando ou utilize iluminação direta sobre o selo patrimonial.</p>
+                </div>
               </div>
 
-              <Button 
-                variant="outline" 
+              <button 
                 onClick={openGoogleLens}
-                className="w-full h-16 border-2 border-border hover:border-primary-light hover:bg-bg transition-all rounded-2xl flex items-center justify-center gap-4 shadow-sm group"
+                className="w-full h-20 bg-white border-2 border-slate-50 hover:border-indigo-100 hover:bg-indigo-50/10 transition-all duration-500 rounded-[2rem] flex items-center px-8 gap-5 group shadow-sm hover:shadow-xl hover:shadow-indigo-900/5"
               >
-                <div className="w-10 h-10 rounded-xl bg-bg group-hover:bg-card flex items-center justify-center shadow-sm border border-border transition-colors">
-                   <Search className="w-5 h-5 text-text-muted" />
+                <div className="w-12 h-12 rounded-xl bg-slate-50 group-hover:bg-indigo-600 flex items-center justify-center shadow-inner transition-all duration-500">
+                   <Search className="w-6 h-6 text-slate-400 group-hover:text-white" />
                 </div>
-                <span className="font-bold text-primary group-hover:text-primary-light text-base">Utilizar Scanner Externo</span>
-                <ExternalLink className="w-5 h-5 text-text-muted group-hover:text-primary-light transition-colors ml-auto" />
-              </Button>
+                <div className="flex flex-col items-start gap-1">
+                   <span className="font-display font-extrabold text-slate-900 text-base tracking-tight group-hover:text-indigo-600 transition-colors">Scanner Externo</span>
+                   <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Google Lens / Nativo</span>
+                </div>
+                <ExternalLink className="w-5 h-5 text-slate-300 group-hover:text-indigo-600 transition-all ml-auto group-hover:translate-x-1 group-hover:-translate-y-1" />
+              </button>
            </div>
         </Card>
       </div>
 
       {loading && scanResult && (
-        <div className="flex-1 flex flex-col items-center justify-center py-20 gap-8 animate-in fade-in zoom-in-95 duration-500">
+        <div className="flex-1 flex flex-col items-center justify-center py-20 gap-10 animate-in fade-in zoom-in-95 duration-700">
            <div className="relative">
-             <div className="w-24 h-24 bg-emerald-100 rounded-[2rem] flex items-center justify-center animate-pulse shadow-2xl shadow-emerald-500/30 border-4 border-card">
-                <CheckCircle2 className="w-12 h-12 text-emerald-500 drop-shadow-md" />
+             <div className="w-32 h-32 bg-emerald-100 rounded-[3rem] flex items-center justify-center animate-pulse shadow-[0_40px_80px_-15px_rgba(16,185,129,0.4)] border-4 border-white relative z-10">
+                <CheckCircle2 className="w-16 h-16 text-emerald-600 drop-shadow-md" />
              </div>
-             <div className="absolute inset-0 bg-emerald-400 rounded-[2rem] animate-ping opacity-20"></div>
+             <div className="absolute inset-0 bg-emerald-400 rounded-[3rem] animate-ping opacity-10"></div>
+             <div className="absolute -inset-4 bg-emerald-50 rounded-[4rem] animate-pulse opacity-50 -z-10"></div>
            </div>
-           <div className="flex flex-col items-center gap-3">
-             <h3 className="font-display font-black text-3xl text-emerald-700 tracking-tight">Leitura Concluída</h3>
-             <p className="text-text-muted font-bold tracking-widest uppercase text-xs animate-pulse bg-bg px-4 py-2 rounded-full">Carregando dados...</p>
+           <div className="flex flex-col items-center gap-4">
+             <h3 className="font-display font-black text-4xl text-slate-900 tracking-tight">Capturado!</h3>
+             <div className="flex items-center gap-3 bg-white px-6 py-3 rounded-2xl shadow-xl shadow-slate-200/50 border border-slate-50">
+                <div className="w-2 h-2 bg-emerald-500 rounded-full animate-bounce"></div>
+                <p className="text-slate-400 font-black uppercase tracking-[0.3em] text-[10px]">Puxando dossiê...</p>
+             </div>
            </div>
         </div>
       )}

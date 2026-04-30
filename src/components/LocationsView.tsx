@@ -1,12 +1,13 @@
 import React, { useState, MouseEvent } from 'react';
 import { Card, Button, Input } from './UI';
-import { Building2, Plus, ArrowRight, Trash2, AlertCircle, X, Search, History, Calendar, CheckSquare, Map } from 'lucide-react';
+import { Building2, Plus, ArrowRight, Trash2, AlertCircle, X, Search, History, Calendar, CheckSquare, Map, ShieldCheck } from 'lucide-react';
 import { db, generateId, Inspection } from '../lib/db';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { cn, formatDate } from '../lib/utils';
 import { useAuth } from '../lib/AuthContext';
 import { syncLocation, syncInspection, pushLocalChanges } from '../lib/syncService';
 import { db as firestore } from '../lib/firebase';
+import { QRCodePrintCard } from './QRCodePrintCard';
 import { doc, deleteDoc } from 'firebase/firestore';
 import { MapContainer, TileLayer, Marker, Popup } from 'react-leaflet';
 import L from 'leaflet';
@@ -32,6 +33,7 @@ export function LocationsView({ onSelectInspection }: { onSelectInspection: (id:
   const [searchTerm, setSearchTerm] = useState('');
   const [isAdding, setIsAdding] = useState(false);
   const [showHistoryFor, setShowHistoryFor] = useState<string | null>(null);
+  const [showQRCodeFor, setShowQRCodeFor] = useState<{id: string, name: string} | null>(null);
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
   const [deleteInspectionConfirmId, setDeleteInspectionConfirmId] = useState<string | null>(null);
   const [blockingError, setBlockingError] = useState<{id: string, message: string} | null>(null);
@@ -205,29 +207,44 @@ export function LocationsView({ onSelectInspection }: { onSelectInspection: (id:
   };
 
   return (
-    <div className="flex flex-col gap-8 animate-in fade-in duration-700 pb-20">
+    <div className="flex flex-col gap-10 animate-in fade-in duration-700 pb-20 px-1">
+      {showQRCodeFor && (
+        <div className="fixed inset-0 z-[110] flex items-center justify-center p-6 animate-in fade-in duration-200">
+           <div className="absolute inset-0 bg-slate-900/60 backdrop-blur-md" onClick={() => setShowQRCodeFor(null)} />
+           <div className="relative animate-in zoom-in-95 duration-300">
+             <QRCodePrintCard id={showQRCodeFor.id} name={showQRCodeFor.name} type="local" />
+             <button 
+               onClick={() => setShowQRCodeFor(null)} 
+               className="absolute -top-4 -right-4 w-10 h-10 bg-white rounded-full flex items-center justify-center shadow-lg text-slate-400 hover:text-slate-900 transition-colors border border-slate-100"
+             >
+               <X className="w-5 h-5" />
+             </button>
+           </div>
+        </div>
+      )}
+
       {showHistoryFor && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 md:p-10 pointer-events-none">
           <div className="absolute inset-0 bg-slate-900/40 backdrop-blur-sm pointer-events-auto" onClick={() => setShowHistoryFor(null)} />
-          <Card className="w-full max-w-2xl max-h-[80vh] flex flex-col p-0 overflow-hidden shadow-2xl animate-in zoom-in-95 duration-300 pointer-events-auto rounded-[3rem] border-none">
+          <Card className="w-full max-w-2xl max-h-[80vh] flex flex-col p-0 overflow-hidden shadow-2xl animate-in zoom-in-95 duration-300 pointer-events-auto rounded-[3rem] border-none bg-white">
              <div className="p-8 bg-slate-900 text-white flex items-center justify-between shrink-0">
                 <div className="flex items-center gap-4">
-                   <div className="w-12 h-12 bg-white/10 rounded-2xl flex items-center justify-center">
-                      <History className="w-6 h-6 text-white" />
+                   <div className="w-14 h-14 bg-white/10 rounded-[1.5rem] flex items-center justify-center border border-white/10">
+                      <History className="w-7 h-7 text-white" />
                    </div>
                    <div className="flex flex-col">
-                      <h3 className="font-black text-xl uppercase tracking-tight">Histórico de Vistorias</h3>
-                      <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest leading-none mt-1">
+                      <h3 className="font-display font-extrabold text-2xl tracking-tight leading-none">Histórico de Auditorias</h3>
+                      <span className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] mt-3">
                         {locations?.find(l => l.id === showHistoryFor)?.name}
                       </span>
                    </div>
                 </div>
-                <button onClick={() => setShowHistoryFor(null)} className="p-2 hover:bg-white/10 rounded-xl transition-colors">
-                   <X className="w-6 h-6" />
+                <button onClick={() => setShowHistoryFor(null)} className="p-3 hover:bg-white/10 rounded-2xl transition-colors">
+                   <X className="w-7 h-7" />
                 </button>
              </div>
              
-             <div className="flex-1 overflow-y-auto p-6 md:p-8 flex flex-col gap-3">
+             <div className="flex-1 overflow-y-auto p-6 md:p-10 flex flex-col gap-4 custom-scrollbar bg-slate-50/50">
                 {inspections?.filter(i => i.locationId === showHistoryFor)
                   .sort((a, b) => b.date - a.date)
                   .map(insp => (
@@ -237,124 +254,142 @@ export function LocationsView({ onSelectInspection }: { onSelectInspection: (id:
                        setShowHistoryFor(null);
                        onSelectInspection(insp.id);
                      }}
-                     className="flex items-center justify-between p-5 bg-slate-50 border border-slate-100 rounded-3xl hover:bg-white hover:border-slate-200 hover:shadow-lg transition-all cursor-pointer group"
+                     className="flex items-center justify-between p-6 bg-white border border-slate-100 rounded-[2rem] hover:border-indigo-200 hover:shadow-xl hover:shadow-indigo-900/5 transition-all cursor-pointer group"
                    >
-                     <div className="flex items-center gap-4">
+                     <div className="flex items-center gap-5">
                         <div className={cn(
-                          "w-10 h-10 rounded-xl flex items-center justify-center border transition-all",
+                          "w-12 h-12 rounded-2xl flex items-center justify-center border transition-all shadow-sm",
                           insp.status === 'finalizada' ? "bg-emerald-50 border-emerald-100 text-emerald-600" : 
-                          insp.status === 'em_andamento' ? "bg-blue-50 border-blue-100 text-blue-600" :
+                          insp.status === 'em_andamento' ? "bg-indigo-50 border-indigo-100 text-indigo-600" :
                           "bg-amber-50 border-amber-100 text-amber-600"
                         )}>
-                          {insp.status === 'finalizada' ? <CheckSquare className="w-5 h-5" /> : <Calendar className="w-5 h-5" />}
+                          {insp.status === 'finalizada' ? <ShieldCheck className="w-6 h-6" /> : <Calendar className="w-6 h-6" />}
                         </div>
-                        <div className="flex flex-col">
-                          <span className="text-sm font-black text-slate-900 uppercase tracking-tight">
+                        <div className="flex flex-col gap-1">
+                          <span className="text-lg font-display font-extrabold text-slate-900 tracking-tight leading-none">
                             {formatDate(insp.date).split(',')[0]}
                           </span>
-                          <div className="flex items-center gap-2">
-                             <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mt-0.5">
+                          <div className="flex items-center gap-3">
+                             <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">
                                 {insp.status.replace('_', ' ')}
                              </span>
                              {(assets || []).filter(a => a.inspectionId === insp.id).length === 0 && (
-                               <span className="text-[8px] font-black text-rose-500 uppercase tracking-tighter bg-rose-50 px-1.5 py-0.5 rounded border border-rose-100">Vazia</span>
+                               <span className="text-[9px] font-black text-rose-500 uppercase tracking-widest bg-rose-50 px-2 py-0.5 rounded-lg border border-rose-100">Dossiê Vazio</span>
                              )}
                           </div>
                         </div>
                      </div>
-                     <div className="flex items-center gap-3">
+                     <div className="flex items-center gap-4">
                        {isManager && (assets || []).filter(a => a.inspectionId === insp.id).length === 0 && (
-                         <div className="flex items-center gap-1">
+                         <div className="flex items-center">
                            {deleteInspectionConfirmId === insp.id ? (
-                              <div className="flex items-center gap-1 animate-in slide-in-from-right-2 duration-300">
+                              <div className="flex items-center gap-2 animate-in slide-in-from-right-4 duration-300">
                                  <button 
                                    onClick={(e) => handleDeleteInspection(e, insp.id)}
-                                   className="bg-rose-600 text-white text-[8px] font-black px-2 py-1.5 rounded-lg shadow-sm"
+                                   className="bg-rose-600 text-white text-[10px] font-black px-4 py-2 rounded-xl shadow-lg shadow-rose-600/20 uppercase tracking-widest"
                                  >
-                                   SIM
+                                   Sim
                                  </button>
                                  <button 
                                    onClick={(e) => { e.stopPropagation(); setDeleteInspectionConfirmId(null); }}
-                                   className="bg-slate-200 text-slate-500 text-[8px] font-black px-2 py-1.5 rounded-lg"
+                                   className="bg-slate-200 text-slate-600 text-[10px] font-black px-4 py-2 rounded-xl"
                                  >
-                                   NÃO
+                                   Não
                                  </button>
                               </div>
                            ) : (
                              <button 
                                onClick={(e) => { e.stopPropagation(); setDeleteInspectionConfirmId(insp.id); }}
-                               className="p-2 text-slate-300 hover:text-rose-500 hover:bg-rose-50 rounded-xl transition-all"
+                               className="p-3 text-slate-300 hover:text-rose-600 hover:bg-rose-50 rounded-2xl transition-all"
                                title="Excluir Vistoria Vazia"
                              >
-                               <Trash2 className="w-4 h-4" />
+                               <Trash2 className="w-5 h-5" />
                              </button>
                            )}
                          </div>
                        )}
-                       <ArrowRight className="w-5 h-5 text-slate-300 group-hover:text-slate-900 transition-all group-hover:translate-x-1" />
+                       <div className="p-3 bg-slate-50 rounded-2xl group-hover:bg-indigo-600 group-hover:text-white transition-all shadow-sm">
+                          <ArrowRight className="w-5 h-5 group-hover:translate-x-1 transition-transform" />
+                       </div>
                      </div>
                    </div>
                 ))}
                 {inspections?.filter(i => i.locationId === showHistoryFor).length === 0 && (
-                   <div className="py-20 text-center text-slate-300">
-                      <AlertCircle className="w-12 h-12 mx-auto opacity-20 mb-4" />
-                      <p className="font-bold tracking-widest text-[10px] uppercase">Nenhuma vistoria anterior</p>
+                   <div className="py-24 text-center text-slate-300">
+                      <div className="w-20 h-20 bg-white rounded-[2rem] flex items-center justify-center mx-auto mb-6 shadow-sm">
+                        <History className="w-10 h-10 opacity-20" />
+                      </div>
+                      <p className="font-extrabold tracking-tight text-xl text-slate-900 mb-1">Sem histórico de vistorias</p>
+                      <p className="text-slate-400 text-sm font-medium">Este local ainda não passou por auditorias.</p>
                    </div>
                 )}
              </div>
              
-             <div className="p-6 bg-slate-50 border-t border-slate-100 shrink-0 flex items-center justify-between">
+             <div className="p-10 bg-white border-t border-slate-100 shrink-0 flex flex-col md:flex-row items-stretch md:items-center justify-between gap-6">
                 {isManager && (
                   <button 
                     onClick={() => handleDeleteAllEmptyInspections(showHistoryFor)}
-                    className="text-[9px] font-black text-rose-500 hover:text-rose-600 uppercase tracking-widest px-4 py-2 bg-rose-50 hover:bg-rose-100 rounded-xl transition-all"
+                    className="text-[10px] font-black text-slate-400 hover:text-rose-600 uppercase tracking-widest px-6 py-3 bg-slate-50 hover:bg-rose-50 rounded-2xl transition-all border border-transparent hover:border-rose-100"
                   >
-                    Excluir Vazias
+                    Excluir Auditorias Vazias
                   </button>
                 )}
-                <Button onClick={() => handleStartInspection(showHistoryFor)} variant="accent" icon={Plus} className="rounded-2xl px-8 uppercase font-black text-[10px] tracking-widest h-12 shadow-xl shadow-blue-600/20">
-                  Nova Vistoria Agora
+                <Button onClick={() => handleStartInspection(showHistoryFor)} variant="accent" icon={Plus} className="rounded-2xl px-12 uppercase font-black text-[10px] tracking-widest h-14 shadow-2xl shadow-indigo-600/20">
+                  Iniciar Nova Vistoria
                 </Button>
              </div>
           </Card>
         </div>
       )}
 
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-6 px-2">
-        <div className="flex flex-col gap-1">
-          <h2 className="text-3xl font-black text-slate-900 tracking-tighter uppercase">Localizações</h2>
-          <span className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] leading-none">Gestão de prédios e repartições</span>
+      <div className="flex flex-col md:flex-row md:items-end justify-between gap-8 md:px-2">
+        <div className="flex flex-col gap-2">
+          <h2 className="text-4xl font-display font-extrabold text-slate-900 tracking-tight">Ambientes Auditorados</h2>
+          <p className="text-sm font-medium text-slate-400 uppercase tracking-[0.2em] max-w-md">Gerencie repartições, prédios e salas para vistorias patrimoniais.</p>
         </div>
         
-        <div className="flex items-center gap-3">
-           <Button 
-             variant={viewMode === 'map' ? 'primary' : 'secondary'} 
-             icon={Map} 
-             onClick={() => setViewMode(viewMode === 'map' ? 'list' : 'map')} 
-             className="rounded-2xl h-12 shadow-xl"
-           >
-             {viewMode === 'map' ? 'VER LISTA' : 'VER MAPA'}
-           </Button>
+        <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-4">
+           <div className="bg-white p-1.5 rounded-2xl border border-slate-100 shadow-sm flex items-center self-center sm:self-auto">
+              <button 
+                onClick={() => setViewMode('list')} 
+                className={cn(
+                  "px-6 py-2.5 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all",
+                  viewMode === 'list' ? "bg-slate-900 text-white shadow-lg" : "bg-transparent text-slate-400 hover:text-slate-900"
+                )}
+              >
+                Lista
+              </button>
+              <button 
+                onClick={() => setViewMode('map')} 
+                className={cn(
+                  "px-6 py-2.5 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all",
+                  viewMode === 'map' ? "bg-slate-900 text-white shadow-lg" : "bg-transparent text-slate-400 hover:text-slate-900"
+                )}
+              >
+                Mapa
+              </button>
+           </div>
+
            <div className="relative group">
-              <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400 group-focus-within:text-slate-900 transition-colors" />
+              <Search className="absolute left-5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400 group-focus-within:text-indigo-600 transition-colors" />
               <input 
                 type="text" 
-                placeholder="Buscar local..." 
+                placeholder="Filtrar locais..." 
                 value={searchTerm}
                 onChange={e => setSearchTerm(e.target.value)}
-                className="pl-11 pr-6 py-3 bg-white border border-slate-100 rounded-2xl text-sm font-bold text-slate-900 shadow-sm focus:ring-2 focus:ring-slate-900 focus:outline-none transition-all w-full md:w-64"
+                className="pl-12 pr-6 py-4 bg-white border border-slate-100 rounded-2xl text-sm font-bold text-slate-900 shadow-sm focus:ring-4 focus:ring-indigo-50 focus:border-indigo-200 focus:outline-none transition-all w-full sm:w-64"
               />
            </div>
            {!isAdding && isCommittee && (
-             <Button variant="accent" icon={Plus} onClick={() => setIsAdding(true)} className="rounded-2xl h-12 shadow-xl shadow-slate-900/10">
-               NOVO LOCAL
+             <Button variant="accent" icon={Plus} onClick={() => setIsAdding(true)} className="rounded-2xl h-14 px-8 font-black uppercase tracking-widest text-[9px] shadow-xl shadow-indigo-600/20">
+               CADASTRAR UNIDADE
              </Button>
            )}
         </div>
       </div>
 
       {viewMode === 'map' ? (
-        <Card className="w-full h-[600px] p-0 overflow-hidden relative z-0 border-2 shadow-2xl rounded-[2.5rem]">
+        <Card className="w-full h-[650px] p-0 overflow-hidden relative z-0 border-none shadow-[0_30px_100px_-20px_rgba(0,0,0,0.1)] rounded-[3rem]">
           <MapContainer center={[-29.5878, -55.4828]} zoom={12} style={{ height: '100%', width: '100%', zIndex: 0 }}>
             <TileLayer
               attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
@@ -362,17 +397,19 @@ export function LocationsView({ onSelectInspection }: { onSelectInspection: (id:
             />
             {filteredLocations?.filter(loc => loc.latitude && loc.longitude).map(loc => (
                 <Marker key={loc.id} position={[loc.latitude!, loc.longitude!]}>
-                  <Popup>
-                    <div className="flex flex-col gap-2 p-1 min-w-[200px]">
-                       <h3 className="font-bold text-slate-900 text-base">{loc.name}</h3>
-                       <p className="text-xs text-slate-500">{loc.description}</p>
+                  <Popup className="custom-popup">
+                    <div className="flex flex-col gap-3 p-4 min-w-[240px]">
+                       <div className="flex flex-col gap-1">
+                          <h3 className="font-display font-bold text-slate-900 text-lg leading-tight uppercase tracking-tight">{loc.name}</h3>
+                          <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">{loc.description}</p>
+                       </div>
                        <Button 
                          size="sm"
                          variant="primary"
                          onClick={() => handleStartInspection(loc.id)}
-                         className="mt-2 w-full text-[10px]"
+                         className="mt-2 w-full text-[10px] font-black uppercase tracking-[0.2em] h-10 rounded-xl"
                        >
-                         {getLatestStatus(loc.id) === 'em_andamento' ? 'CONTINUAR' : 'CRIAR / REVISAR'}
+                         {getLatestStatus(loc.id) === 'em_andamento' ? 'CONTINUAR' : 'AUDITAR'}
                        </Button>
                     </div>
                   </Popup>
@@ -381,23 +418,28 @@ export function LocationsView({ onSelectInspection }: { onSelectInspection: (id:
           </MapContainer>
         </Card>
       ) : (
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
         {isAdding && (
-          <Card className="p-8 border-2 border-slate-900 ring-8 ring-slate-900/5 animate-in zoom-in-95 duration-300 rounded-[2.5rem] flex flex-col gap-6 relative z-10">
+          <Card className="p-10 border-none shadow-[0_40px_100px_-20px_rgba(79,70,229,0.15)] ring-1 ring-indigo-100 animate-in zoom-in-95 duration-500 rounded-[3rem] flex flex-col gap-8 relative z-10 bg-white">
             <div className="flex items-center justify-between">
-               <h3 className="font-black text-slate-900 uppercase tracking-tight">Cadastrar Prédio</h3>
-               <button onClick={() => setIsAdding(false)} className="p-2 hover:bg-slate-50 rounded-xl transition-colors text-slate-400">
-                  <X className="w-5 h-5" />
+               <div className="flex flex-col">
+                  <h3 className="font-display font-extrabold text-2xl text-slate-900 tracking-tight">Novo Ambiente</h3>
+                  <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mt-1">Identificação da unidade</p>
+               </div>
+               <button onClick={() => setIsAdding(false)} className="p-3 hover:bg-slate-50 rounded-2xl transition-colors text-slate-400 border border-transparent hover:border-slate-100">
+                  <X className="w-6 h-6" />
                </button>
             </div>
-            <Input label="Nome da Unidade" placeholder="Ex: Secretaria de Saúde" value={newLoc.name} onChange={e => setNewLoc({...newLoc, name: e.target.value})} />
-            <Input label="Endereço / Descrição" placeholder="Rua Central, nº 123" value={newLoc.description} onChange={e => setNewLoc({...newLoc, description: e.target.value})} />
-            <div className="flex gap-4">
-              <Input label="Latitude (Opcional)" placeholder="-29.5878" type="number" step="any" value={newLoc.latitude} onChange={e => setNewLoc({...newLoc, latitude: e.target.value})} />
-              <Input label="Longitude (Opcional)" placeholder="-55.4828" type="number" step="any" value={newLoc.longitude} onChange={e => setNewLoc({...newLoc, longitude: e.target.value})} />
+            <div className="flex flex-col gap-5">
+              <Input label="Nome da Unidade" placeholder="Ex: Secretaria de Saúde" value={newLoc.name} onChange={e => setNewLoc({...newLoc, name: e.target.value})} />
+              <Input label="Endereço / Descrição" placeholder="Rua Central, nº 123" value={newLoc.description} onChange={e => setNewLoc({...newLoc, description: e.target.value})} />
+              <div className="flex gap-4">
+                <Input label="Latitude (Opcional)" placeholder="-29.5878" type="number" step="any" value={newLoc.latitude} onChange={e => setNewLoc({...newLoc, latitude: e.target.value})} />
+                <Input label="Longitude (Opcional)" placeholder="-55.4828" type="number" step="any" value={newLoc.longitude} onChange={e => setNewLoc({...newLoc, longitude: e.target.value})} />
+              </div>
             </div>
-            <Button onClick={handleAddLocation} icon={CheckCircle2} className="h-14 font-black tracking-widest text-lg rounded-[1.2rem]" variant="accent">
-               CONFIRMAR
+            <Button onClick={handleAddLocation} icon={ShieldCheck} className="h-16 font-black tracking-[0.2em] text-sm rounded-2xl shadow-xl shadow-indigo-600/20" variant="accent">
+               SALVAR UNIDADE
             </Button>
           </Card>
         )}
@@ -405,18 +447,18 @@ export function LocationsView({ onSelectInspection }: { onSelectInspection: (id:
         {filteredLocations?.map(loc => {
           const status = getLatestStatus(loc.id);
           return (
-            <Card key={loc.id} className="group p-8 rounded-[2.5rem] flex flex-col gap-6 border-slate-50 hover:border-slate-200 transition-all duration-500 hover:shadow-2xl hover:shadow-slate-200/50 relative overflow-hidden">
+            <Card key={loc.id} className="group p-10 rounded-[3rem] flex flex-col gap-8 border-none shadow-[0_8px_40px_-15px_rgba(0,0,0,0.03)] hover:shadow-[0_30px_80px_-20px_rgba(79,70,229,0.12)] hover:-translate-y-2 transition-all duration-700 bg-white relative overflow-hidden">
               <div className="flex items-start justify-between">
-                <div className="w-14 h-14 bg-slate-50 group-hover:bg-slate-900 rounded-2xl flex items-center justify-center transition-all duration-500 text-slate-400 group-hover:text-white shadow-sm">
-                  <Building2 className="w-7 h-7" />
+                <div className="w-20 h-16 bg-slate-50 group-hover:bg-indigo-600 rounded-[1.5rem] flex items-center justify-center transition-all duration-700 text-slate-400 group-hover:text-white shadow-sm border border-slate-100 group-hover:border-indigo-600 group-hover:shadow-indigo-600/20">
+                  <Building2 className="w-8 h-8" />
                 </div>
-                <div className="flex flex-col items-end gap-2">
+                <div className="flex flex-col items-end gap-3">
                   {status && (
                     <div className={cn(
-                      "text-[9px] font-black uppercase tracking-widest px-3 py-1 rounded-full border",
-                      status === 'em_andamento' ? "bg-blue-50 text-blue-600 border-blue-100" :
-                      status === 'concluida' ? "bg-amber-50 text-amber-600 border-amber-100" :
-                      "bg-emerald-50 text-emerald-600 border-emerald-100"
+                      "text-[9px] font-black uppercase tracking-[0.15em] px-4 py-1.5 rounded-full border shadow-sm transition-all",
+                      status === 'em_andamento' ? "bg-indigo-50 text-indigo-600 border-indigo-100 ring-4 ring-indigo-500/5" :
+                      status === 'concluida' ? "bg-amber-50 text-amber-600 border-amber-100 ring-4 ring-amber-500/5" :
+                      "bg-emerald-50 text-emerald-600 border-emerald-100 ring-4 ring-emerald-500/5"
                     )}>
                       {status.replace('_', ' ')}
                     </div>
@@ -424,24 +466,24 @@ export function LocationsView({ onSelectInspection }: { onSelectInspection: (id:
                   {isCommittee && (
                     <div className="flex flex-col items-end gap-1">
                       {deleteConfirmId === loc.id ? (
-                        <div className="flex items-center gap-1 animate-in slide-in-from-right-4 duration-300">
+                        <div className="flex items-center gap-2 animate-in slide-in-from-right-4 duration-300">
                           <button 
                             onClick={(e) => { e.stopPropagation(); handleDeleteLocation(loc.id, loc.name); }}
-                            className="bg-rose-600 text-white text-[8px] font-black px-3 py-1.5 rounded-lg shadow-lg shadow-rose-600/20 uppercase"
+                            className="bg-rose-600 text-white text-[9px] font-black px-4 py-2 rounded-xl shadow-lg shadow-rose-600/20 uppercase tracking-widest"
                           >
-                            Sim
+                            Excluir
                           </button>
                           <button 
                             onClick={(e) => { e.stopPropagation(); setDeleteConfirmId(null); }}
-                            className="bg-slate-100 text-slate-400 text-[8px] font-black px-3 py-1.5 rounded-lg uppercase"
+                            className="bg-slate-100 text-slate-400 text-[9px] font-black px-4 py-2 rounded-xl"
                           >
-                            Não
+                            Manter
                           </button>
                         </div>
                       ) : blockingError?.id === loc.id ? (
-                        <div className="flex items-center gap-1.5 bg-rose-50 border border-rose-100 px-3 py-1.5 rounded-lg animate-in shake duration-500">
+                        <div className="flex items-center gap-2 bg-rose-50 border border-rose-100 px-4 py-2 rounded-xl animate-in shake duration-500 shadow-sm">
                            <AlertCircle className="w-3 h-3 text-rose-500" />
-                           <span className="text-[8px] font-bold text-rose-600 uppercase tracking-tighter">Local com Itens</span>
+                           <span className="text-[9px] font-black text-rose-600 uppercase tracking-widest">Local com Itens</span>
                         </div>
                       ) : (
                         <button 
@@ -449,7 +491,7 @@ export function LocationsView({ onSelectInspection }: { onSelectInspection: (id:
                             e.stopPropagation();
                             setDeleteConfirmId(loc.id);
                           }}
-                          className="opacity-0 group-hover:opacity-100 p-2 text-slate-300 hover:text-rose-500 hover:bg-rose-50 rounded-xl transition-all duration-300"
+                          className="opacity-0 group-hover:opacity-100 p-3 text-slate-300 hover:text-rose-500 hover:bg-rose-50 rounded-2xl transition-all duration-300"
                         >
                           <Trash2 className="w-5 h-5" />
                         </button>
@@ -459,36 +501,50 @@ export function LocationsView({ onSelectInspection }: { onSelectInspection: (id:
                 </div>
               </div>
               
-              <div className="flex flex-col">
-                <span className="text-xl font-black text-slate-900 tracking-tight leading-tight group-hover:text-blue-600 transition-colors uppercase">{loc.name}</span>
-                <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest mt-2">{loc.description}</span>
+              <div className="flex flex-col gap-2">
+                <h4 className="text-2xl font-display font-extrabold text-slate-900 tracking-tight leading-tight group-hover:text-indigo-600 transition-colors uppercase">{loc.name}</h4>
+                <p className="text-sm font-medium text-slate-400 uppercase tracking-widest line-clamp-1">{loc.description}</p>
               </div>
 
-              <div className="pt-2 flex flex-col gap-3">
+              <div className="pt-2 flex flex-col gap-4">
                 <Button 
                   variant="secondary" 
                   size="sm" 
                   onClick={() => handleStartInspection(loc.id)}
-                  className="w-full h-12 rounded-xl text-[10px] font-black uppercase tracking-widest group-hover:bg-slate-900 group-hover:text-white transition-all duration-500"
+                  className="w-full h-16 rounded-2xl text-[10px] font-black uppercase tracking-[0.2em] group-hover:bg-slate-900 group-hover:text-white group-hover:shadow-xl group-hover:shadow-slate-900/20 transition-all duration-700 flex items-center justify-center gap-3"
                 >
-                  {status === 'em_andamento' ? 'CONTINUAR VISTORIA' : status === 'concluida' ? 'REVISAR VISTORIA' : 'CRIAR VISTORIA'} <ArrowRight className="w-4 h-4 ml-2" />
+                  {status === 'em_andamento' ? 'CONTINUAR AUDITORIA' : status === 'concluida' ? 'REVISAR DOSSIÊ' : 'INICIAR AUDITORIA'} <ArrowRight className="w-5 h-5 group-hover:translate-x-2 transition-transform" />
                 </Button>
                 
-                <button 
-                  onClick={() => setShowHistoryFor(loc.id)}
-                  className="flex items-center justify-center gap-2 text-[10px] font-black text-slate-400 hover:text-slate-900 uppercase tracking-widest py-2 transition-all"
-                >
-                   <History className="w-4 h-4" /> Histórico Completo
-                </button>
+                <div className="flex flex-col gap-2">
+                  <button 
+                    onClick={() => setShowHistoryFor(loc.id)}
+                    className="flex items-center justify-center gap-3 text-[9px] font-black text-slate-400 hover:text-slate-900 uppercase tracking-widest py-3 transition-all hover:bg-slate-50 rounded-xl"
+                  >
+                     <History className="w-4 h-4" /> Histórico de Dossiês
+                  </button>
+
+                  {isAdmin && (
+                    <button 
+                      onClick={() => setShowQRCodeFor({ id: loc.id, name: loc.name })}
+                      className="flex items-center justify-center gap-3 text-[9px] font-black text-indigo-600 hover:text-indigo-800 uppercase tracking-widest py-3 bg-indigo-50 hover:bg-indigo-100 rounded-xl transition-all border border-indigo-100 ring-4 ring-indigo-500/0 hover:ring-indigo-500/5"
+                    >
+                      <Search className="w-4 h-4" /> Etiquetagem de Ambiente
+                    </button>
+                  )}
+                </div>
               </div>
             </Card>
           );
         })}
 
         {!isAdding && filteredLocations?.length === 0 && (
-          <div className="col-span-full py-20 flex flex-col items-center justify-center text-slate-300">
-             <AlertCircle className="w-12 h-12 opacity-20 mb-4" />
-             <p className="font-bold tracking-widest text-xs uppercase text-slate-400">Nenhuma localização encontrada</p>
+          <div className="col-span-full py-32 flex flex-col items-center justify-center text-slate-300 border-2 border-dashed border-slate-100 rounded-[3rem] bg-slate-50/20 group">
+             <Map className="w-16 h-16 opacity-20 mb-6 group-hover:scale-110 transition-transform duration-500" />
+             <div className="text-center">
+                <p className="font-display font-extrabold text-2xl text-slate-900 tracking-tight mb-2">Nenhum ambiente encontrado</p>
+                <p className="text-slate-400 font-medium max-w-xs mx-auto">Tente ajustar seus filtros ou cadastre um novo local de vistoria.</p>
+             </div>
           </div>
         )}
       </div>

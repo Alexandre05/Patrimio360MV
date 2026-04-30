@@ -6,8 +6,16 @@ export function SyncToast() {
   const [status, setStatus] = useState<'idle' | 'syncing' | 'success' | 'error'>('idle');
 
   useEffect(() => {
-    const handleStart = () => setStatus('syncing');
+    let timeout: any;
+    const handleStart = () => {
+      setStatus('syncing');
+      // Safety timeout: if sync takes more than 30s, force idle to clear UI
+      clearTimeout(timeout);
+      timeout = setTimeout(() => setStatus('idle'), 30000);
+    };
+    
     const handleEnd = (e: any) => {
+      clearTimeout(timeout);
       setStatus(e.detail?.success ? 'success' : 'error');
       setTimeout(() => setStatus('idle'), 3000);
     };
@@ -17,6 +25,7 @@ export function SyncToast() {
     return () => {
       window.removeEventListener('app-sync-start', handleStart);
       window.removeEventListener('app-sync-end', handleEnd);
+      clearTimeout(timeout);
     };
   }, []);
 
@@ -25,10 +34,10 @@ export function SyncToast() {
   return (
     <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-[100] animate-in slide-in-from-bottom-5 fade-in duration-300">
       <div className={cn(
-        "flex items-center gap-3 px-6 py-3 rounded-full border shadow-2xl backdrop-blur-md transition-all duration-500",
-        status === 'syncing' ? "bg-slate-900/90 border-slate-700 text-white" :
-        status === 'success' ? "bg-emerald-500/90 border-emerald-400 text-white" :
-        "bg-rose-500/90 border-rose-400 text-white"
+        "flex items-center gap-3 px-6 py-3 rounded-2xl border shadow-2xl backdrop-blur-md transition-all duration-500",
+        status === 'syncing' ? "bg-slate-900 border-slate-700 text-white" :
+        status === 'success' ? "bg-emerald-600 border-emerald-400 text-white shadow-emerald-500/20" :
+        "bg-rose-600 border-rose-400 text-white shadow-rose-500/20"
       )}>
         {status === 'syncing' && <CloudUpload className="w-5 h-5 animate-pulse" />}
         {status === 'success' && <CheckCircle2 className="w-5 h-5 animate-in zoom-in" />}
@@ -93,8 +102,8 @@ export function Card({ children, className, onClick, id, ...props }: CardProps) 
       id={id}
       onClick={onClick}
       className={cn(
-        "bg-card backdrop-blur-xl border border-border/60 rounded-2xl p-6 shadow-[0_8px_30px_rgb(0,0,0,0.04)] transition-all duration-300",
-        onClick && "cursor-pointer hover:shadow-[0_20px_40px_rgb(0,0,0,0.08)] hover:-translate-y-1 active:scale-[0.98]",
+        "bg-card border border-border/50 rounded-[1.5rem] p-6 shadow-[0_4px_24px_-4px_rgba(0,0,0,0.04),0_12px_32px_-4px_rgba(0,0,0,0.02)] transition-all duration-300",
+        onClick && "cursor-pointer hover:shadow-[0_20px_40px_-12px_rgba(0,0,0,0.12)] hover:border-slate-300 hover:-translate-y-1 active:scale-[0.98]",
         className
       )}
       {...props}
@@ -127,24 +136,24 @@ export function Button({
   ...props 
 }: ButtonProps) {
   const variants = {
-    primary: "bg-primary text-white hover:bg-primary-light shadow-[0_4px_14px_0_rgb(0,0,0,0.1)] hover:shadow-[0_6px_20px_rgba(0,0,0,0.15)]",
-    secondary: "bg-card text-primary border border-border hover:bg-bg shadow-sm",
-    accent: "bg-accent text-white shadow-md hover:shadow-lg border border-transparent opacity-100 hover:opacity-90",
-    danger: "bg-gradient-to-r from-rose-500 to-rose-600 text-white hover:from-rose-600 hover:to-rose-700 shadow-[0_4px_14px_0_rgba(225,29,72,0.2)] border border-rose-500/50",
-    ghost: "bg-transparent text-text-muted hover:bg-bg hover:text-primary",
-    outline: "bg-card/50 backdrop-blur-sm border border-border text-primary hover:bg-card hover:border-slate-400 hover:shadow-sm"
+    primary: "bg-slate-900 text-white hover:bg-slate-800 shadow-[0_4px_12px_rgba(15,23,42,0.15)]",
+    secondary: "bg-white text-slate-900 border border-slate-200 hover:bg-slate-50 shadow-sm",
+    accent: "bg-indigo-600 text-white shadow-indigo-200 shadow-lg hover:shadow-indigo-300 hover:bg-indigo-700",
+    danger: "bg-rose-600 text-white hover:bg-rose-700 shadow-rose-200 shadow-lg",
+    ghost: "bg-transparent text-slate-500 hover:bg-slate-100 hover:text-slate-900",
+    outline: "bg-transparent border-2 border-slate-200 text-slate-900 hover:border-slate-400 hover:bg-slate-50"
   };
 
   const sizes = {
-    sm: "px-3 py-1.5 text-xs font-semibold rounded-lg",
-    md: "px-5 py-2.5 text-sm font-semibold rounded-xl",
-    lg: "px-6 py-3 text-base font-semibold rounded-2xl"
+    sm: "px-3 py-1.5 text-xs font-bold rounded-lg",
+    md: "px-5 py-2.5 text-sm font-bold rounded-xl",
+    lg: "px-6 py-3 text-base font-bold rounded-2xl"
   };
 
   return (
     <button
       className={cn(
-        "flex items-center justify-center gap-2 font-medium tracking-tight transition-all duration-300 active:scale-95 disabled:opacity-50 disabled:pointer-events-none",
+        "flex items-center justify-center gap-2.5 font-bold tracking-tight transition-all duration-300 active:scale-95 disabled:opacity-50 disabled:pointer-events-none",
         variants[variant],
         sizes[size as keyof typeof sizes],
         className
@@ -178,20 +187,20 @@ interface InputProps {
 export const Input = React.forwardRef<HTMLInputElement, InputProps>(
   ({ label, error, hint, className, id, ...props }, ref) => {
     return (
-      <div className="flex flex-col gap-1.5 w-full">
-        {label && <label className="text-[12px] font-semibold text-text-muted ml-1">{label}</label>}
+      <div className="flex flex-col gap-2 w-full">
+        {label && <label className="text-[12px] font-bold text-slate-500 ml-1 uppercase tracking-wider">{label}</label>}
         <input
           id={id}
           ref={ref}
           className={cn(
-            "px-4 py-2.5 rounded-xl border border-border outline-none transition-all duration-300 bg-card shadow-sm font-medium placeholder:text-slate-400 focus:border-accent focus:ring-4 focus:ring-accent/10 hover:border-slate-300 text-primary",
+            "px-4 py-3 rounded-2xl border border-slate-200 outline-none transition-all duration-300 bg-white shadow-sm font-medium placeholder:text-slate-400 focus:border-indigo-500 focus:ring-4 focus:ring-indigo-500/10 hover:border-slate-300 text-slate-900",
             error && "border-rose-300 bg-rose-50/30 focus:border-rose-500 focus:ring-rose-500/20",
             className
           )}
           {...props}
         />
-        {error && <span className="text-[11px] font-medium text-rose-600 ml-1">{error}</span>}
-        {hint && !error && <span className="text-[11px] font-medium text-text-muted ml-1">{hint}</span>}
+        {error && <span className="text-[11px] font-bold text-rose-600 ml-1 uppercase tracking-tighter">{error}</span>}
+        {hint && !error && <span className="text-[11px] font-bold text-slate-400 ml-1 italic">{hint}</span>}
       </div>
     );
   }
