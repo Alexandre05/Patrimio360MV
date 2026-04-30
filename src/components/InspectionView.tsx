@@ -73,12 +73,16 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
   const nameRef = useRef<HTMLInputElement>(null);
   const patrimonyRef = useRef<HTMLInputElement>(null);
   const conditionRef = useRef<HTMLSelectElement>(null);
+  const quantityRef = useRef<HTMLInputElement>(null);
   const obsRef = useRef<HTMLTextAreaElement>(null);
+  const addButtonRef = useRef<HTMLButtonElement>(null);
 
-  const formRefs = [nameRef, patrimonyRef, conditionRef, obsRef];
+  const formRefs = [nameRef, patrimonyRef, conditionRef, quantityRef, obsRef, addButtonRef];
 
   const navigateFields = (direction: 'next' | 'prev') => {
     const currentIndex = formRefs.findIndex(ref => ref.current === document.activeElement);
+    if (currentIndex === -1) return;
+    
     if (direction === 'next') {
       const nextIndex = (currentIndex + 1) % formRefs.length;
       formRefs[nextIndex].current?.focus();
@@ -89,18 +93,23 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
   };
 
   const handleKeyDown = (e: React.KeyboardEvent, fieldIndex: number) => {
-    if (e.key === 'ArrowRight' && (e.currentTarget as any).selectionEnd === (e.currentTarget as any).value?.length) {
+    const isTextarea = e.currentTarget.tagName === 'TEXTAREA';
+    const isInput = e.currentTarget.tagName === 'INPUT';
+    
+    // For text inputs and textareas, only navigate if cursor is at bounds OR if it's a select/button
+    const canMoveRight = !isInput && !isTextarea || (e.currentTarget as any).selectionEnd === (e.currentTarget as any).value?.length;
+    const canMoveLeft = !isInput && !isTextarea || (e.currentTarget as any).selectionStart === 0;
+
+    if (e.key === 'ArrowRight' && canMoveRight) {
       navigateFields('next');
-    } else if (e.key === 'ArrowLeft' && (e.currentTarget as any).selectionStart === 0) {
+    } else if (e.key === 'ArrowLeft' && canMoveLeft) {
       navigateFields('prev');
-    } else if (e.key === 'Enter' && e.currentTarget.tagName !== 'TEXTAREA') {
+    } else if (e.key === 'Enter' && !isTextarea) {
       e.preventDefault();
-      if (fieldIndex === formRefs.length - 2) { // Before Observations (which is a textarea)
-         obsRef.current?.focus();
-      } else if (fieldIndex === formRefs.length - 1) { // Current is Observations or we hit enter on a select
-         handleAddItem();
+      if (fieldIndex === formRefs.length - 1) {
+        handleAddItem();
       } else {
-         navigateFields('next');
+        navigateFields('next');
       }
     }
   };
@@ -1135,9 +1144,11 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
                     <div className="flex flex-col gap-4">
                       <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest ml-1">Quantidade</label>
                       <Input 
+                        ref={quantityRef}
                         type="number"
                         value={newItem.quantity?.toString()}
                         onChange={e => setNewItem({...newItem, quantity: Math.max(1, parseInt(e.target.value) || 1)})}
+                        onKeyDown={e => handleKeyDown(e, 3)}
                         min={1}
                         className="text-center font-bold text-lg h-16 shadow-sm"
                       />
@@ -1151,7 +1162,7 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
                       placeholder="Identificou avarias ou detalhes específicos? Descreva aqui..." 
                       value={newItem.observations}
                       onChange={e => setNewItem({...newItem, observations: e.target.value})}
-                      onKeyDown={e => handleKeyDown(e, 3)}
+                      onKeyDown={e => handleKeyDown(e, 4)}
                       className="text-base p-6 min-h-[160px] resize-none"
                     />
                  </div>
@@ -1202,8 +1213,10 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
                     Descartar
                   </Button>
                   <Button 
+                    ref={addButtonRef}
                     variant="accent" 
                     onClick={handleAddItem}
+                    onKeyDown={e => handleKeyDown(e, 5)}
                     disabled={!newItem.name}
                     className="flex-[2] h-16 rounded-2xl text-xs uppercase font-black tracking-widest shadow-2xl shadow-indigo-500/30"
                   >

@@ -113,20 +113,15 @@ export function Card({ children, className, onClick, id, ...props }: CardProps) 
   );
 }
 
-interface ButtonProps {
+interface ButtonProps extends React.ButtonHTMLAttributes<HTMLButtonElement> {
   children?: ReactNode;
   variant?: 'primary' | 'secondary' | 'danger' | 'ghost' | 'outline' | 'accent';
   icon?: LucideIcon;
   loading?: boolean;
-  className?: string;
-  onClick?: (e: any) => void;
-  type?: "button" | "submit" | "reset";
-  disabled?: boolean;
   size?: 'sm' | 'md' | 'lg';
-  title?: string;
 }
 
-export function Button({ 
+export const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(({ 
   children, 
   variant = 'primary', 
   icon: Icon, 
@@ -134,7 +129,7 @@ export function Button({
   className, 
   size = 'md',
   ...props 
-}: ButtonProps) {
+}, ref) => {
   const variants = {
     primary: "bg-slate-900 text-white hover:bg-slate-800 shadow-[0_4px_12px_rgba(15,23,42,0.15)]",
     secondary: "bg-white text-slate-900 border border-slate-200 hover:bg-slate-50 shadow-sm",
@@ -152,6 +147,7 @@ export function Button({
 
   return (
     <button
+      ref={ref}
       className={cn(
         "flex items-center justify-center gap-2.5 font-bold tracking-tight transition-all duration-300 active:scale-95 disabled:opacity-50 disabled:pointer-events-none",
         variants[variant],
@@ -169,7 +165,7 @@ export function Button({
       ) : children}
     </button>
   );
-}
+});
 
 interface InputProps extends React.InputHTMLAttributes<HTMLInputElement> {
   label?: string;
