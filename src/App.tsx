@@ -5,8 +5,9 @@
 
 import React, { useState, useEffect } from 'react';
 import { AuthProvider, useAuth } from './lib/AuthContext';
+import { ToastProvider, useToast } from './lib/ToastContext';
 import { Dashboard } from './components/Dashboard';
-import { Card, Button, Input } from './components/UI';
+import { Card, Button, Input, Alert } from './components/UI';
 import { Building2, LogIn, ShieldCheck, UserPlus, UserCheck, Search } from 'lucide-react';
 import { seedDatabase } from './lib/seed';
 import { db } from './lib/db';
@@ -219,15 +220,15 @@ function LoginScreen() {
 
         <div className="w-full flex flex-col gap-6">
            {error && (
-             <div className="bg-rose-50 text-rose-600 p-6 rounded-2xl text-xs font-bold border border-rose-100 text-center animate-in shake duration-500 shadow-lg shadow-rose-900/5">
+             <Alert variant="error" title="Erro de Acesso">
                 {error}
-             </div>
+             </Alert>
            )}
 
            {resetMessage && (
-             <div className="bg-emerald-50 text-emerald-600 p-6 rounded-2xl text-xs font-bold border border-emerald-100 text-center shadow-lg shadow-emerald-900/5">
+             <Alert variant="success" title="Sucesso">
                 {resetMessage}
-             </div>
+             </Alert>
            )}
 
            {useEmail ? (
@@ -427,8 +428,10 @@ import { SyncToast } from './components/UI';
 export default function App() {
   return (
     <AuthProvider>
-      <Main />
-      <SyncToast />
+      <ToastProvider>
+        <Main />
+        <SyncToast />
+      </ToastProvider>
     </AuthProvider>
   );
 }

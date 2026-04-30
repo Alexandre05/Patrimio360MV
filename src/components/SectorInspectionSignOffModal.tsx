@@ -14,12 +14,13 @@ import {
   MapPin,
   ClipboardList
 } from 'lucide-react';
-import { Card, Button, Input } from './UI';
+import { Card, Button, Input, Alert } from './UI';
 import { db as firestore, handleFirestoreError } from '../lib/firebase';
-import { doc, setDoc, serverTimestamp } from 'firebase/firestore';
+import { doc, setDoc } from 'firebase/firestore';
 import { Asset, Location, Inspection } from '../lib/db';
 import { formatDate } from '../lib/utils';
 import { useAuth } from '../lib/AuthContext';
+import { useToast } from '../lib/ToastContext';
 
 interface SectorInspectionSignOffModalProps {
   isOpen: boolean;
@@ -39,6 +40,7 @@ export function SectorInspectionSignOffModal({
   onComplete 
 }: SectorInspectionSignOffModalProps) {
   const { user } = useAuth();
+  const { toast } = useToast();
   const sigPad = useRef<SignatureCanvas>(null);
   const [responsibleName, setResponsibleName] = useState('');
   const [isSaving, setIsSaving] = useState(false);
@@ -148,11 +150,13 @@ export function SectorInspectionSignOffModal({
 
       await setDoc(doc(firestore, 'sector_inspections', docId), sectorData);
       
+      toast('Vistoria encerrada com sucesso!', 'success', 'Finalizado');
       generatePDF(signatureBase64, now);
       onComplete();
     } catch (err: any) {
       console.error(err);
-      setError('Falha ao salvar encerramento. Verifique sua conexão.');
+      toast('Não foi possível salvar o encerramento.', 'error', 'Erro de Conexão');
+      setError('Falha ao salvar encerramento no servidor.');
     } finally {
       setIsSaving(false);
     }
@@ -246,10 +250,9 @@ export function SectorInspectionSignOffModal({
           </div>
 
           {error && (
-            <div className="p-4 bg-rose-50 border border-rose-100 rounded-2xl flex items-center gap-3 text-rose-600 animate-in shake duration-500">
-              <AlertCircle className="w-5 h-5 shrink-0" />
-              <p className="text-[10px] font-black uppercase tracking-widest leading-relaxed">{error}</p>
-            </div>
+            <Alert variant="error" title="Atenção">
+              {error}
+            </Alert>
           )}
 
           <div className="bg-indigo-50/30 p-5 rounded-2xl border border-indigo-100/30">

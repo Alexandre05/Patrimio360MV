@@ -5,6 +5,7 @@ import { ArrowLeft, Plus, Image as ImageIcon, Trash2, Camera, UserPlus, Save, Ch
 import { db, Asset, generateAssetHash, generateId, AssetCondition, InspectionStatus, Inspection, Location } from '../lib/db';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { useAuth } from '../lib/AuthContext';
+import { useToast } from '../lib/ToastContext';
 import { formatDate, cn } from '../lib/utils';
 import { QRCodeSVG } from 'qrcode.react';
 import jsPDF from 'jspdf';
@@ -17,6 +18,7 @@ import { SectorInspectionSignOffModal } from './SectorInspectionSignOffModal';
 
 export function InspectionView({ id, onBack }: { id: string, onBack: () => void }) {
   const { user } = useAuth();
+  const { toast } = useToast();
   const isManager = user?.role === 'administrador' || user?.role === 'responsavel' || user?.role === 'prefeito';
   const isCommittee = isManager || user?.role === 'vistoriador';
   const isOnline = useOnlineStatus();
@@ -172,15 +174,16 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
             observations: newItem.observations,
             quantity: newItem.quantity
           });
-          setSuccessMessage("Item transferido com sucesso!");
           setNewItem({ name: '', patrimonyNumber: '', condition: 'bom', observations: '', photos: [], quantity: 1 });
           setIsAdding(false);
           setTransferCandidate(null);
+          toast("Item transferido com sucesso!", "success", "Transferência");
           pushLocalChanges();
           return;
         }
       } catch (err) {
         console.error("Erro na transferência:", err);
+        toast("Não foi possível transferir o item.", "error");
         setError("Não foi possível transferir o item.");
       }
     }
@@ -245,7 +248,7 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
         needsSync: true,
         quantity: newItem.quantity
       });
-      setSuccessMessage("Salvado com sucesso!");
+      toast("Registro atualizado!", "success", "Item Editado");
     } else {
       const assetId = generateId();
       await db.assets.add({
@@ -262,7 +265,7 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
         needsSync: true,
         quantity: newItem.quantity
       });
-      setSuccessMessage("Adicionado com sucesso!");
+      toast("Item adicionado à vistoria!", "success", "Novo Patrimônio");
     }
 
     // Trigger sync
