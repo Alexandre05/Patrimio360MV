@@ -171,16 +171,9 @@ export function Button({
   );
 }
 
-interface InputProps {
+interface InputProps extends React.InputHTMLAttributes<HTMLInputElement> {
   label?: string;
   error?: string;
-  placeholder?: string;
-  type?: string;
-  required?: boolean;
-  value?: any;
-  onChange?: (e: any) => void;
-  className?: string;
-  id?: string;
   hint?: string;
 }
 
@@ -206,7 +199,12 @@ export const Input = React.forwardRef<HTMLInputElement, InputProps>(
   }
 );
 
-export const Textarea = React.forwardRef<HTMLTextAreaElement, InputProps>(
+interface TextareaProps extends React.TextareaHTMLAttributes<HTMLTextAreaElement> {
+  label?: string;
+  error?: string;
+}
+
+export const Textarea = React.forwardRef<HTMLTextAreaElement, TextareaProps>(
   ({ label, error, className, id, ...props }, ref) => {
     return (
       <div className="flex flex-col gap-1.5 w-full">

@@ -120,6 +120,24 @@ service cloud.firestore {
       allow delete: if isVerified();
     }
 
+    // 6. Sector Inspections
+    match /sector_inspections/{id} {
+      function isValidSectorInspection(data) {
+        return isValidId(data.id) &&
+               data.locationName is string && data.locationName.size() <= 200 &&
+               data.inspectionId is string &&
+               data.assetIds is list && data.assetIds.size() > 0 &&
+               data.responsibleName is string && data.responsibleName.size() <= 150 &&
+               data.signatureBase64 is string &&
+               data.signedAt is int &&
+               data.signedByUser == request.auth.uid;
+      }
+
+      allow get, list: if isSignedIn();
+      allow create: if isVerified() && isValidSectorInspection(incoming());
+      allow update, delete: if isSystemAdmin();
+    }
+
     // Admins Collection
     match /admins/{adminId} {
       allow read: if isSignedIn();

@@ -1,7 +1,7 @@
 import React, { useState, useRef } from 'react';
 import { Card, Button, Input, Select, Textarea } from './UI';
 import { useOnlineStatus } from '../lib/hooks';
-import { ArrowLeft, Plus, Image as ImageIcon, Trash2, Camera, UserPlus, Save, CheckCircle2, History, Eye, PlayCircle, ArrowRight, X, Edit2, Search, ShieldCheck, AlertCircle, Home, ChevronLeft, ChevronRight, Zap, Copy, Database } from 'lucide-react';
+import { ArrowLeft, Plus, Image as ImageIcon, Trash2, Camera, UserPlus, Save, CheckCircle2, History, Eye, PlayCircle, ArrowRight, X, Edit2, Search, ShieldCheck, AlertCircle, Home, ChevronLeft, ChevronRight, Zap, Copy, Database, Signature } from 'lucide-react';
 import { db, Asset, generateAssetHash, generateId, AssetCondition, InspectionStatus, Inspection, Location } from '../lib/db';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { useAuth } from '../lib/AuthContext';
@@ -13,6 +13,7 @@ import { compressImage } from '../lib/image';
 import { pushLocalChanges, syncInspection } from '../lib/syncService';
 import { db as firestore } from '../lib/firebase';
 import { doc, deleteDoc, collection, query, where, getDocs } from 'firebase/firestore';
+import { SectorInspectionSignOffModal } from './SectorInspectionSignOffModal';
 
 export function InspectionView({ id, onBack }: { id: string, onBack: () => void }) {
   const { user } = useAuth();
@@ -33,6 +34,7 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
   const [isConfirmingReopen, setIsConfirmingReopen] = useState(false);
   const [isDeletingInspection, setIsDeletingInspection] = useState(false);
   const [isConfirmingDeleteInspection, setIsConfirmingDeleteInspection] = useState(false);
+  const [isSignOffModalOpen, setIsSignOffModalOpen] = useState(false);
   const [transferAssetId, setTransferAssetId] = useState<string | null>(null);
   const [isTransferring, setIsTransferring] = useState(false);
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
@@ -42,8 +44,31 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
   const [historyAsset, setHistoryAsset] = useState<Asset | null>(null);
   const [assetHistory, setAssetHistory] = useState<{ asset: Asset, inspection: Inspection, location: Location }[] | null>(null);
   const [isLoadingHistory, setIsLoadingHistory] = useState(false);
+  const [sectorSignature, setSectorSignature] = useState<{ responsibleName: string, signatureBase64: string, signedAt: number } | null>(null);
 
   const allLocations = useLiveQuery(() => db.locations.toArray());
+  
+  // Fetch signature data when inspection changes
+  React.useEffect(() => {
+    const fetchSignature = async () => {
+      if (!id || !isOnline) return;
+      try {
+        const sigDoc = await getDocs(query(collection(firestore, 'sector_inspections'), where('inspectionId', '==', id)));
+        if (!sigDoc.empty) {
+          const data = sigDoc.docs[0].data();
+          setSectorSignature({
+            responsibleName: data.responsibleName,
+            signatureBase64: data.signatureBase64,
+            signedAt: data.signedAt
+          });
+        }
+      } catch (err) {
+        console.warn("Signature fetch failed:", err);
+      }
+    };
+    fetchSignature();
+  }, [id, isOnline]);
+
   const fileInputRef = useRef<HTMLInputElement>(null);
   const nameRef = useRef<HTMLInputElement>(null);
   const patrimonyRef = useRef<HTMLInputElement>(null);
@@ -607,9 +632,18 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
       autoTable(doc, {
         head: [['Item', 'Patrimônio', 'Estado', 'Obs']],
         body: tableData,
-        startY: 50,
+        startY: sectorSignature ? 90 : 60,
         theme: 'grid'
       });
+
+      // Add Sector Signature if available
+      if (sectorSignature) {
+        doc.setFontSize(10);
+        doc.text('RESPONSÁVEL PELO SETOR (ATÉSTADO DE CIÊNCIA):', 14, 65);
+        doc.setFontSize(11);
+        doc.text(sectorSignature.responsibleName.toUpperCase(), 14, 72);
+        doc.addImage(sectorSignature.signatureBase64, 'PNG', 14, 75, 40, 15);
+      }
 
       // Add QR Code to the bottom if exists
       if (inspection?.qrCodeData) {
@@ -864,6 +898,20 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
               <p className="text-slate-500 font-medium leading-relaxed">
                 Esta auditoria foi concluída pela comissão de vistoria. Agora, o Prefeito ou Responsável Legal deve homologar o documento para gerar o selo oficial de transparência.
               </p>
+              {sectorSignature && (
+                <div className="mt-4 p-4 bg-slate-50 rounded-2xl border border-slate-100 flex items-center gap-4">
+                  <div className="w-10 h-10 bg-white rounded-xl shadow-sm flex items-center justify-center text-indigo-600 border border-slate-100">
+                    <Signature className="w-5 h-5" />
+                  </div>
+                  <div className="flex flex-col">
+                    <span className="text-[10px] font-black uppercase text-slate-400 tracking-widest leading-none mb-1">Responsável Setorial</span>
+                    <span className="text-sm font-bold text-slate-700">{sectorSignature.responsibleName}</span>
+                  </div>
+                  <div className="ml-auto">
+                    <img src={sectorSignature.signatureBase64} alt="Assinatura" className="h-10 opacity-70 grayscale hover:grayscale-0 transition-all" />
+                  </div>
+                </div>
+              )}
            </div>
            <div className="flex items-center gap-2">
               <div className="px-4 py-2 bg-indigo-50 text-indigo-600 rounded-full text-[10px] font-black uppercase tracking-[0.2em] border border-indigo-100">
@@ -895,6 +943,20 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
                  <p className="text-lg text-slate-500 leading-relaxed font-medium max-w-xl">
                     Este ambiente foi <span className="text-emerald-600 font-bold">Blindado Digitalmente</span>. Ao escanear este QR Code, a sociedade civil e os auditores terão acesso imediato aos {assets?.length} itens tombados nesta sala.
                  </p>
+                 {sectorSignature && (
+                    <div className="mt-2 p-4 bg-emerald-50/50 rounded-2xl border border-emerald-100 flex items-center gap-4">
+                      <div className="w-10 h-10 bg-white rounded-xl shadow-sm flex items-center justify-center text-emerald-600">
+                        <Signature className="w-5 h-5" />
+                      </div>
+                      <div className="flex flex-col">
+                        <span className="text-[10px] font-black uppercase text-emerald-700/50 tracking-widest leading-none mb-1">Atestado por</span>
+                        <span className="text-sm font-bold text-slate-700">{sectorSignature.responsibleName}</span>
+                      </div>
+                      <div className="ml-auto bg-white/50 p-1 rounded-lg">
+                        <img src={sectorSignature.signatureBase64} alt="Assinatura" className="h-8" />
+                      </div>
+                    </div>
+                  )}
               </div>
               
               <div className="flex flex-wrap gap-4">
@@ -1258,27 +1320,21 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
                 <Button 
                   disabled={(assets?.length || 0) === 0}
                   className={cn(
-                    "h-24 text-xl font-display font-black uppercase tracking-[0.2em] shadow-[0_30px_60px_-15px_rgba(16,185,129,0.3)] rounded-[2rem] transition-all duration-700",
+                    "h-24 text-xl font-display font-black uppercase tracking-[0.2em] shadow-[0_30px_60px_-15px_rgba(79,70,229,0.3)] rounded-[2rem] transition-all duration-700",
                     (assets?.length || 0) === 0 
                       ? "bg-slate-100 text-slate-400 border-slate-200 grayscale shadow-none" 
-                      : isConfirmingConclude 
-                        ? "bg-amber-500 hover:bg-amber-600 shadow-amber-500/30 ring-8 ring-amber-500/10" 
-                        : "bg-emerald-600 hover:bg-emerald-700 shadow-emerald-600/30 hover:scale-[1.02]"
+                      : "bg-indigo-600 hover:bg-indigo-700 shadow-indigo-600/30 hover:scale-[1.02]"
                   )} 
-                  icon={isConfirmingConclude ? AlertCircle : CheckCircle2} 
-                  onClick={handleConclude}
-                  loading={isConcluding}
+                  icon={Signature} 
+                  onClick={() => setIsSignOffModalOpen(true)}
                 >
-                  {isConfirmingConclude ? "Confirmar Encerramento?" : "Finalizar Auditoria Local"}
+                  Encerrar Vistoria do Setor
                 </Button>
-                {isConfirmingConclude && (
-                  <button 
-                    onClick={() => setIsConfirmingConclude(false)}
-                    className="text-[10px] font-black text-slate-400 uppercase tracking-widest hover:text-rose-500 transition-colors py-2"
-                  >
-                    Voltar à Edição
-                  </button>
-                )}
+                <div className="bg-slate-50 p-4 rounded-xl border border-slate-100 mt-2">
+                  <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest leading-relaxed text-center">
+                    Ao encerrar, o responsável pelo setor assinará o Termo de Responsabilidade digitalmente.
+                  </p>
+                </div>
               </div>
             </div>
           ) : (
@@ -1443,6 +1499,23 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
             </div>
           </Card>
         </div>
+      )}
+
+      {/* ✍️ Modal de Assinatura e Encerramento Setorial */}
+      {isSignOffModalOpen && (
+        <SectorInspectionSignOffModal
+          isOpen={isSignOffModalOpen}
+          onClose={() => setIsSignOffModalOpen(false)}
+          inspection={inspection}
+          location={location}
+          assets={assets || []}
+          onComplete={async () => {
+             setIsSignOffModalOpen(false);
+             // Trigger internal status update
+             setIsConfirmingConclude(true); // Pre-set confirmation to skip the internal check if needed
+             await handleConclude();
+          }}
+        />
       )}
     </div>
   );

@@ -58,6 +58,22 @@
         "hash": { "type": "string" }
       },
       "required": ["id", "inspectionId", "name", "condition", "createdBy", "createdAt"]
+    },
+    "SectorConcludedInspection": {
+      "title": "Sector Concluded Inspection",
+      "description": "Signed responsibility term for a sector",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "locationName": { "type": "string" },
+        "inspectionId": { "type": "string" },
+        "assetIds": { "type": "array", "items": { "type": "string" } },
+        "responsibleName": { "type": "string" },
+        "signatureBase64": { "type": "string" },
+        "signedAt": { "type": "integer" },
+        "signedByUser": { "type": "string" }
+      },
+      "required": ["id", "locationName", "inspectionId", "assetIds", "responsibleName", "signatureBase64", "signedAt", "signedByUser"]
     }
   },
   "firestore": {
@@ -76,6 +92,10 @@
     "/assets/{assetId}": {
       "schema": "Asset",
       "description": "Assets registered across all inspections"
+    },
+    "/sector_inspections/{id}": {
+      "schema": "SectorConcludedInspection",
+      "description": "Concluded sector inspections with signatures"
     }
   }
 }
