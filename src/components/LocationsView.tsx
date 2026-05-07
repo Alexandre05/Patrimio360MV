@@ -26,9 +26,9 @@ export function LocationsView({ onSelectInspection }: { onSelectInspection: (id:
   const isManager = user?.role === 'administrador' || user?.role === 'responsavel' || user?.role === 'prefeito';
   const isCommittee = isManager || user?.role === 'vistoriador';
 
-  const locations = useLiveQuery(() => db.locations.toArray());
-  const inspections = useLiveQuery(() => db.inspections.toArray());
-  const assets = useLiveQuery(() => db.assets.toArray());
+  const locations = useLiveQuery(() => db.locations.filter(l => !l.deleted).toArray());
+  const inspections = useLiveQuery(() => db.inspections.filter(i => !i.deleted).toArray());
+  const assets = useLiveQuery(() => db.assets.filter(a => !a.deleted).toArray());
   const [viewMode, setViewMode] = useState<'list' | 'map'>('list');
   const [searchTerm, setSearchTerm] = useState('');
   const [displayLimit, setDisplayLimit] = useState(20);
@@ -87,9 +87,14 @@ export function LocationsView({ onSelectInspection }: { onSelectInspection: (id:
       } else {
         const confirmClear = window.confirm("🗑️ ATENÇÃO: Deseja apagar permanentemente a vistoria pendente para iniciar uma nova?");
         if (confirmClear) {
-           await db.assets.where('inspectionId').equals(existing.id).delete();
-           await db.inspections.delete(existing.id);
-           console.log("Vistoria pendente removida para novo teste");
+           const now = Date.now();
+           const assetsToClear = await db.assets.where('inspectionId').equals(existing.id).toArray();
+           for (const asset of assetsToClear) {
+             await db.assets.update(asset.id, { deleted: true, needsSync: true, updatedAt: now });
+           }
+           await db.inspections.update(existing.id, { deleted: true, needsSync: true, updatedAt: now });
+           pushLocalChanges();
+           console.log("Vistoria pendente marcada para exclusão");
         } else {
            return;
         }
@@ -166,13 +171,13 @@ export function LocationsView({ onSelectInspection }: { onSelectInspection: (id:
   };
 
   const handleDeleteLocation = async (locId: string, locName: string) => {
-    // 1. Encontrar todas as vistorias deste local
-    const inspectionIds = (await db.inspections.where('locationId').equals(locId).toArray()).map(i => i.id);
+    // 1. Encontrar todas as vistorias deste local (reais, ignorando deletadas)
+    const inspectionIds = (await db.inspections.where('locationId').equals(locId).filter(i => !i.deleted).toArray()).map(i => i.id);
     
-    // 2. Verificar se existe algum item em qualquer uma dessas vistorias
+    // 2. Verificar se existe algum item
     let assetCount = 0;
     if (inspectionIds.length > 0) {
-      assetCount = await db.assets.where('inspectionId').anyOf(inspectionIds).count();
+      assetCount = await db.assets.where('inspectionId').anyOf(inspectionIds).filter(a => !a.deleted).count();
     }
 
     if (assetCount > 0) {
@@ -185,23 +190,25 @@ export function LocationsView({ onSelectInspection }: { onSelectInspection: (id:
       return;
     }
 
-    // Excluir vistorias vazias primeiro
+    const now = Date.now();
+    // Soft delete vistorias vazias
     if (inspectionIds.length > 0) {
       for (const invId of inspectionIds) {
-        try { await deleteDoc(doc(firestore, 'inspections', invId)); } catch(e) {}
+        await db.inspections.update(invId, { deleted: true, needsSync: true, updatedAt: now });
       }
-      await db.inspections.bulkDelete(inspectionIds);
     }
-    // Excluir o local
-    try { await deleteDoc(doc(firestore, 'locations', locId)); } catch(e) {}
-    await db.locations.delete(locId);
+    
+    // Soft delete local
+    await db.locations.update(locId, { deleted: true, needsSync: true, updatedAt: now });
+    
     setDeleteConfirmId(null);
+    pushLocalChanges();
   };
 
   const handleDeleteInspection = async (e: MouseEvent, inspectionId: string) => {
     e.stopPropagation();
     try {
-      const assetsCount = await db.assets.where('inspectionId').equals(inspectionId).count();
+      const assetsCount = await db.assets.where('inspectionId').equals(inspectionId).filter(a => !a.deleted).count();
       
       if (assetsCount > 0) {
         alert("Esta vistoria possui itens e não pode ser excluída.");
@@ -209,9 +216,9 @@ export function LocationsView({ onSelectInspection }: { onSelectInspection: (id:
         return;
       }
 
-      try { await deleteDoc(doc(firestore, 'inspections', inspectionId)); } catch(e) {}
-      await db.inspections.delete(inspectionId);
+      await db.inspections.update(inspectionId, { deleted: true, needsSync: true, updatedAt: Date.now() });
       setDeleteInspectionConfirmId(null);
+      pushLocalChanges();
     } catch (err) {
       console.error("Erro ao excluir vistoria:", err);
       alert("Ocorreu um erro ao excluir a vistoria.");
@@ -219,20 +226,21 @@ export function LocationsView({ onSelectInspection }: { onSelectInspection: (id:
   };
 
   const handleDeleteAllEmptyInspections = async (locId: string) => {
-    const locInspections = inspections?.filter(i => i.locationId === locId) || [];
+    const locInspections = inspections?.filter(i => i.locationId === locId && !i.deleted) || [];
     let deletedCount = 0;
-    
+    const now = Date.now();
+
     for (const insp of locInspections) {
-      const assetsCount = await db.assets.where('inspectionId').equals(insp.id).count();
+      const assetsCount = await db.assets.where('inspectionId').equals(insp.id).filter(a => !a.deleted).count();
       if (assetsCount === 0) {
-        try { await deleteDoc(doc(firestore, 'inspections', insp.id)); } catch(e) {}
-        await db.inspections.delete(insp.id);
+        await db.inspections.update(insp.id, { deleted: true, needsSync: true, updatedAt: now });
         deletedCount++;
       }
     }
     
     if (deletedCount > 0) {
-      alert(`${deletedCount} vistoria(s) vazia(s) removida(s), incluindo homologadas.`);
+      pushLocalChanges();
+      alert(`${deletedCount} vistoria(s) vazia(s) marcadas para remoção.`);
     } else {
       alert("Nenhuma vistoria vazia encontrada para este local.");
     }

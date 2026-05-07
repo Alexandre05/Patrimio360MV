@@ -25,7 +25,7 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
   const isOnline = useOnlineStatus();
   const inspection = useLiveQuery(() => db.inspections.get(id), [id]);
   const location = useLiveQuery(() => inspection ? db.locations.get(inspection.locationId) : undefined, [inspection]);
-  const assets = useLiveQuery(() => db.assets.where('inspectionId').equals(id).toArray(), [id]);
+  const assets = useLiveQuery(() => db.assets.where('inspectionId').equals(id).filter(a => !a.deleted).toArray(), [id]);
   
   const [searchTermAssets, setSearchTermAssets] = useState('');
   const [displayLimit, setDisplayLimit] = useState(20);
@@ -290,21 +290,13 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
     }
 
     try {
-      const assetToRemove = await db.assets.get(assetId);
-      
-      // Cleanup photos from Storage if they are URLs
-      if (assetToRemove?.photos) {
-        const { deleteAssetPhoto } = await import('../lib/storageService');
-        for (const photoUrl of assetToRemove.photos) {
-          if (photoUrl.startsWith('http')) {
-            await deleteAssetPhoto(photoUrl);
-          }
-        }
-      }
-
-      await db.assets.delete(assetId);
-      try { await deleteDoc(doc(firestore, 'assets', assetId)); } catch(e) {}
+      await db.assets.update(assetId, { 
+        deleted: true, 
+        needsSync: true, 
+        updatedAt: Date.now() 
+      });
       setConfirmDeleteId(null);
+      pushLocalChanges();
     } catch (err: any) {
       console.error("Erro ao deletar item:", err);
       setError("Não foi possível excluir o item.");
@@ -545,12 +537,18 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
     setIsDeletingInspection(true);
     setError(null);
     try {
-      // 1. Apagar Itens primeiro
-      await db.assets.where('inspectionId').equals(id).delete();
-      // 2. Apagar Vistoria
-      await db.inspections.delete(id);
+      const now = Date.now();
+      // 1. Soft delete items
+      const assetsToSoftDelete = await db.assets.where('inspectionId').equals(id).toArray();
+      for (const asset of assetsToSoftDelete) {
+        await db.assets.update(asset.id, { deleted: true, needsSync: true, updatedAt: now });
+      }
+
+      // 2. Soft delete inspection
+      await db.inspections.update(id, { deleted: true, needsSync: true, updatedAt: now });
       
-      console.log("Vistoria excluída com sucesso:", id);
+      console.log("Vistoria marcada para exclusão:", id);
+      pushLocalChanges();
       onBack();
     } catch (err: any) {
       console.error("Erro ao excluir vistoria:", err);
@@ -778,9 +776,10 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
       if (assetsCount === 0) {
         const discard = window.confirm("🗑️ VISTORIA VAZIA: Deseja descartar esta vistoria antes de sair?\n\n(Se você clicar em OK, a vistoria será apagada. Se clicar em CANCELAR, ela ficará salva como rascunho)");
         if (discard) {
-          try { await deleteDoc(doc(firestore, 'inspections', id)); } catch(e) {}
-          await db.inspections.delete(id);
-          console.log("Vistoria vazia descartada ao voltar.");
+          const now = Date.now();
+          await db.inspections.update(id, { deleted: true, needsSync: true, updatedAt: now });
+          pushLocalChanges();
+          console.log("Vistoria vazia marcada para exclusão ao voltar.");
         }
       }
     }
