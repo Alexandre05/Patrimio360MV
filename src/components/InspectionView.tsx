@@ -19,6 +19,7 @@ import { SectorInspectionSignOffModal } from './SectorInspectionSignOffModal';
 export function InspectionView({ id, onBack }: { id: string, onBack: () => void }) {
   const { user } = useAuth();
   const { toast } = useToast();
+  const [previewPhoto, setPreviewPhoto] = useState<string | null>(null);
   const isManager = user?.role === 'administrador' || user?.role === 'responsavel' || user?.role === 'prefeito';
   const isCommittee = isManager || user?.role === 'vistoriador';
   const isOnline = useOnlineStatus();
@@ -27,6 +28,7 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
   const assets = useLiveQuery(() => db.assets.where('inspectionId').equals(id).toArray(), [id]);
   
   const [searchTermAssets, setSearchTermAssets] = useState('');
+  const [displayLimit, setDisplayLimit] = useState(20);
   const [isAdding, setIsAdding] = useState(false);
   const [isConcluding, setIsConcluding] = useState(false);
   const [isFinalizing, setIsFinalizing] = useState(false);
@@ -785,6 +787,15 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
     onBack();
   };
 
+  const filteredAssets = assets?.filter(asset => 
+    (asset.name || '').toLowerCase().includes(searchTermAssets.toLowerCase()) || 
+    (asset.patrimonyNumber || '').toLowerCase().includes(searchTermAssets.toLowerCase())
+  );
+
+  const displayedAssets = searchTermAssets 
+    ? filteredAssets 
+    : filteredAssets?.slice(0, displayLimit);
+
   return (
     <div className="flex flex-col gap-10 animate-in fade-in slide-in-from-right-4 duration-700 pb-24">
       {error && (
@@ -1183,10 +1194,10 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
                     {newItem.photos.length > 0 ? (
                       <div className="flex flex-wrap gap-6">
                         {newItem.photos.map((photo, index) => (
-                          <div key={index} className="relative w-32 h-32 rounded-[1.5rem] overflow-hidden border-2 border-slate-100 shadow-sm group">
-                             <img src={photo} alt="" className="w-full h-full object-cover" />
+                          <div key={index} className="relative w-32 h-32 rounded-[1.5rem] overflow-hidden border-2 border-slate-100 shadow-sm group cursor-pointer" onClick={() => setPreviewPhoto(photo)}>
+                             <img src={photo} alt="" className="w-full h-full object-cover hover:opacity-80 transition-all" />
                              <button 
-                                onClick={() => removePhoto(index)}
+                                onClick={(e) => { e.stopPropagation(); removePhoto(index); }}
                                 className="absolute top-2 right-2 bg-rose-600 text-white p-2 rounded-xl shadow-lg opacity-0 group-hover:opacity-100 transition-all transform translate-y-2 group-hover:translate-y-0"
                               >
                                 <Trash2 className="w-4 h-4" />
@@ -1231,10 +1242,7 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
         )}
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-          {assets?.filter(asset => 
-            (asset.name || '').toLowerCase().includes(searchTermAssets.toLowerCase()) || 
-            (asset.patrimonyNumber || '').toLowerCase().includes(searchTermAssets.toLowerCase())
-          ).map(asset => (
+          {displayedAssets?.map(asset => (
             <Card key={asset.id} className="flex flex-col gap-6 group hover:shadow-2xl hover:-translate-y-1 transition-all duration-500 rounded-[2rem] p-8 border-slate-100 bg-white">
               <div className="flex items-start justify-between">
                 <div className="flex flex-col gap-1 pr-12">
@@ -1270,8 +1278,8 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
                   <div className="flex -space-x-3 justify-end">
                     {(asset.photos && asset.photos.length > 0) ? (
                       asset.photos.map((photo, i) => (
-                        <div key={i} className="w-14 h-14 rounded-2xl bg-white border-2 border-slate-50 flex items-center justify-center overflow-hidden shadow-lg transform hover:scale-110 hover:z-30 transition-all cursor-pointer">
-                           <img src={photo} alt="" className="w-full h-full object-cover" />
+                        <div key={i} className="w-14 h-14 rounded-2xl bg-white border-2 border-slate-50 flex items-center justify-center overflow-hidden shadow-lg transform hover:scale-110 hover:z-30 transition-all cursor-pointer" onClick={() => setPreviewPhoto(photo)}>
+                           <img src={photo} alt="" className="w-full h-full object-cover hover:opacity-80 transition-all" />
                         </div>
                       ))
                     ) : (
@@ -1347,6 +1355,17 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
               )}
             </Card>
           ))}
+          {filteredAssets && filteredAssets.length > (displayedAssets?.length || 0) && !searchTermAssets && (
+             <div className="col-span-full pt-4">
+                <button 
+                  onClick={() => setDisplayLimit(prev => prev + 20)}
+                  className="w-full py-6 bg-slate-50 hover:bg-slate-100 text-slate-500 font-bold uppercase tracking-[0.2em] text-[10px] rounded-[2rem] border-2 border-dashed border-slate-200 transition-all flex flex-col items-center gap-2"
+                >
+                  Carregar mais itens
+                  <span className="text-[10px] opacity-40 font-black">({assets?.length} totais)</span>
+                </button>
+             </div>
+          )}
           {assets?.length === 0 && !isAdding && (
              <div className="col-span-full py-32 flex flex-col items-center justify-center text-slate-300 border-2 border-dashed border-slate-100 rounded-[3rem] bg-slate-50/20 group">
                <div className="w-24 h-24 bg-white rounded-[2rem] flex items-center justify-center shadow-xl shadow-slate-200/50 mb-8 transition-all duration-700 group-hover:scale-110 group-hover:rotate-6">
@@ -1572,6 +1591,22 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
              await handleConclude();
           }}
         />
+      )}
+
+      {/* Lightbox para Visualização de Fotos */}
+      {previewPhoto && (
+        <div className="fixed inset-0 z-[300] flex items-center justify-center p-4 md:p-10" onClick={() => setPreviewPhoto(null)}>
+          <div className="absolute inset-0 bg-slate-900/95 backdrop-blur-sm" />
+          <div className="relative z-10 w-full max-w-4xl flex items-center justify-center">
+            <button 
+              onClick={(e) => { e.stopPropagation(); setPreviewPhoto(null); }}
+              className="absolute -top-12 right-0 md:-right-12 p-2 bg-white/10 hover:bg-rose-500 text-white rounded-full transition-colors"
+            >
+              <X className="w-6 h-6" />
+            </button>
+            <img src={previewPhoto} alt="Visualização ampliada" className="max-w-full max-h-[85vh] object-contain rounded-xl shadow-2xl" onClick={e => e.stopPropagation()} />
+          </div>
+        </div>
       )}
     </div>
   );
