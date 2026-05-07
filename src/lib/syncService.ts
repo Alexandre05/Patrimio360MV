@@ -56,7 +56,7 @@ export async function pushLocalChanges() {
 
   try {
     // 1. Sync Locations
-    const unsyncedLocations = await dexie.locations.where('needsSync').equals(1 as any).toArray();
+    const unsyncedLocations = await dexie.locations.where('needsSync').equals(true as any).toArray();
     for (const loc of unsyncedLocations) {
       const locRef = doc(firestore, 'locations', loc.id);
       if (loc.deleted) {
@@ -71,7 +71,7 @@ export async function pushLocalChanges() {
     }
 
     // 2. Sync Inspections
-    const unsyncedInspections = await dexie.inspections.where('needsSync').equals(1 as any).toArray();
+    const unsyncedInspections = await dexie.inspections.where('needsSync').equals(true as any).toArray();
     for (const insp of unsyncedInspections) {
       const inspRef = doc(firestore, 'inspections', insp.id);
       if (insp.deleted) {
@@ -86,7 +86,7 @@ export async function pushLocalChanges() {
     }
 
     // 3. Sync Assets
-    const unsyncedAssets = await dexie.assets.where('needsSync').equals(1 as any).toArray();
+    const unsyncedAssets = await dexie.assets.where('needsSync').equals(true as any).toArray();
     for (const asset of unsyncedAssets) {
       const assetRef = doc(firestore, 'assets', asset.id);
 
