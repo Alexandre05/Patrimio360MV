@@ -56,7 +56,7 @@ export async function pushLocalChanges() {
 
   try {
     // 1. Sync Locations
-    const unsyncedLocations = await dexie.locations.where('needsSync').equals(true as any).toArray();
+    const unsyncedLocations = await dexie.locations.where('needsSync').equals(1).toArray();
     for (const loc of unsyncedLocations) {
       const locRef = doc(firestore, 'locations', loc.id);
       if (loc.deleted) {
@@ -66,12 +66,12 @@ export async function pushLocalChanges() {
         const { needsSync, ...data } = loc;
         data.updatedAt = Date.now();
         await setDoc(locRef, data);
-        await dexie.locations.update(loc.id, { needsSync: false, updatedAt: data.updatedAt });
+        await dexie.locations.update(loc.id, { needsSync: 0, updatedAt: data.updatedAt });
       }
     }
 
     // 2. Sync Inspections
-    const unsyncedInspections = await dexie.inspections.where('needsSync').equals(true as any).toArray();
+    const unsyncedInspections = await dexie.inspections.where('needsSync').equals(1).toArray();
     for (const insp of unsyncedInspections) {
       const inspRef = doc(firestore, 'inspections', insp.id);
       if (insp.deleted) {
@@ -81,12 +81,12 @@ export async function pushLocalChanges() {
         const { needsSync, ...data } = insp;
         data.updatedAt = Date.now();
         await setDoc(inspRef, data);
-        await dexie.inspections.update(insp.id, { needsSync: false, updatedAt: data.updatedAt });
+        await dexie.inspections.update(insp.id, { needsSync: 0, updatedAt: data.updatedAt });
       }
     }
 
     // 3. Sync Assets
-    const unsyncedAssets = await dexie.assets.where('needsSync').equals(true as any).toArray();
+    const unsyncedAssets = await dexie.assets.where('needsSync').equals(1).toArray();
     for (const asset of unsyncedAssets) {
       const assetRef = doc(firestore, 'assets', asset.id);
 
@@ -126,7 +126,7 @@ export async function pushLocalChanges() {
 
       if (data.isPublic === undefined) data.isPublic = true;
       await setDoc(assetRef, data);
-      await dexie.assets.update(asset.id, { needsSync: false, updatedAt: data.updatedAt });
+      await dexie.assets.update(asset.id, { needsSync: 0, updatedAt: data.updatedAt });
     }
   
     window.dispatchEvent(new CustomEvent('app-sync-end', { detail: { success: true } }));
@@ -153,7 +153,7 @@ export async function syncInspection(inspectionId: string) {
       const { ...data } = inspection;
       data.updatedAt = Date.now();
       await setDoc(inspectionRef, data);
-      await dexie.inspections.update(inspection.id, { updatedAt: data.updatedAt, needsSync: false });
+      await dexie.inspections.update(inspection.id, { updatedAt: data.updatedAt, needsSync: 0 });
     }
     window.dispatchEvent(new CustomEvent('app-sync-end', { detail: { success: true } }));
   } catch (error) {
@@ -176,7 +176,7 @@ export async function syncLocation(locationId: string) {
       const { ...data } = location;
       data.updatedAt = Date.now();
       await setDoc(locationRef, data);
-      await dexie.locations.update(location.id, { updatedAt: data.updatedAt, needsSync: false });
+      await dexie.locations.update(location.id, { updatedAt: data.updatedAt, needsSync: 0 });
     }
     window.dispatchEvent(new CustomEvent('app-sync-end', { detail: { success: true } }));
   } catch (error) {

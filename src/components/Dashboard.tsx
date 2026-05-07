@@ -114,7 +114,7 @@ export function Dashboard() {
   const unreadNotifications = useLiveQuery(() => user ? db.notifications.where('targetUserId').equals(user.userId).and(n => !n.read).count() : 0, [user]);
   const unsyncedCount = useLiveQuery(() => 
     db.assets.filter(a => 
-      a.needsSync === true || 
+      a.needsSync === 1 || 
       (a.photos && a.photos.some(p => typeof p === 'string' && p.startsWith('data:image')))
     ).count()
   ) || 0;

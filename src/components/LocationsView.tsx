@@ -90,9 +90,9 @@ export function LocationsView({ onSelectInspection }: { onSelectInspection: (id:
            const now = Date.now();
            const assetsToClear = await db.assets.where('inspectionId').equals(existing.id).toArray();
            for (const asset of assetsToClear) {
-             await db.assets.update(asset.id, { deleted: true, needsSync: true, updatedAt: now });
+             await db.assets.update(asset.id, { deleted: true, needsSync: 1, updatedAt: now });
            }
-           await db.inspections.update(existing.id, { deleted: true, needsSync: true, updatedAt: now });
+           await db.inspections.update(existing.id, { deleted: true, needsSync: 1, updatedAt: now });
            pushLocalChanges();
            console.log("Vistoria pendente marcada para exclusão");
         } else {
@@ -114,7 +114,8 @@ export function LocationsView({ onSelectInspection }: { onSelectInspection: (id:
       locationId,
       date: Date.now(),
       participants: [],
-      status: 'em_andamento'
+      status: 'em_andamento',
+      needsSync: 1
     });
     try { await syncInspection(id); } catch(e) { console.error(e) }
 
@@ -128,7 +129,7 @@ export function LocationsView({ onSelectInspection }: { onSelectInspection: (id:
           inspectionId: id, // Point to the new inspection
           createdBy: user?.userId || 'sistema',
           createdAt: Date.now(),
-          needsSync: true
+          needsSync: 1
         }));
         await db.assets.bulkAdd(clonedAssets);
         // Trigger background sync for these new assets
@@ -149,6 +150,7 @@ export function LocationsView({ onSelectInspection }: { onSelectInspection: (id:
       name: newLoc.name,
       description: newLoc.description,
       parentId: newLoc.parentId || undefined,
+      needsSync: 1,
       ...(lat && lng ? { latitude: lat, longitude: lng } : {})
     };
 
@@ -194,12 +196,12 @@ export function LocationsView({ onSelectInspection }: { onSelectInspection: (id:
     // Soft delete vistorias vazias
     if (inspectionIds.length > 0) {
       for (const invId of inspectionIds) {
-        await db.inspections.update(invId, { deleted: true, needsSync: true, updatedAt: now });
+        await db.inspections.update(invId, { deleted: true, needsSync: 1, updatedAt: now });
       }
     }
     
     // Soft delete local
-    await db.locations.update(locId, { deleted: true, needsSync: true, updatedAt: now });
+    await db.locations.update(locId, { deleted: true, needsSync: 1, updatedAt: now });
     
     setDeleteConfirmId(null);
     pushLocalChanges();
@@ -216,7 +218,7 @@ export function LocationsView({ onSelectInspection }: { onSelectInspection: (id:
         return;
       }
 
-      await db.inspections.update(inspectionId, { deleted: true, needsSync: true, updatedAt: Date.now() });
+      await db.inspections.update(inspectionId, { deleted: true, needsSync: 1, updatedAt: Date.now() });
       setDeleteInspectionConfirmId(null);
       pushLocalChanges();
     } catch (err) {
@@ -233,7 +235,7 @@ export function LocationsView({ onSelectInspection }: { onSelectInspection: (id:
     for (const insp of locInspections) {
       const assetsCount = await db.assets.where('inspectionId').equals(insp.id).filter(a => !a.deleted).count();
       if (assetsCount === 0) {
-        await db.inspections.update(insp.id, { deleted: true, needsSync: true, updatedAt: now });
+        await db.inspections.update(insp.id, { deleted: true, needsSync: 1, updatedAt: now });
         deletedCount++;
       }
     }

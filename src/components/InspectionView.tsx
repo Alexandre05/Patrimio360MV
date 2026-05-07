@@ -170,7 +170,7 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
           await db.assets.update(transferCandidate.id, {
             inspectionId: id,
             hash: hash,
-            needsSync: true,
+            needsSync: 1,
             // Optionally update with new details provided in the form
             condition: newItem.condition,
             observations: newItem.observations,
@@ -247,7 +247,7 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
         observations: newItem.observations,
         photos: newItem.photos,
         hash: hash,
-        needsSync: true,
+        needsSync: 1,
         quantity: newItem.quantity
       });
       toast("Registro atualizado!", "success", "Item Editado");
@@ -264,7 +264,7 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
         createdBy: user.userId,
         createdAt: Date.now(),
         hash: hash,
-        needsSync: true,
+        needsSync: 1,
         quantity: newItem.quantity
       });
       toast("Item adicionado à vistoria!", "success", "Novo Patrimônio");
@@ -292,7 +292,7 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
     try {
       await db.assets.update(assetId, { 
         deleted: true, 
-        needsSync: true, 
+        needsSync: 1, 
         updatedAt: Date.now() 
       });
       setConfirmDeleteId(null);
@@ -471,7 +471,7 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
       // Mark all assets as public for public view without O(N) get() in rules
       const assets = await db.assets.where('inspectionId').equals(id).toArray();
       for (const asset of assets) {
-        await db.assets.update(asset.id, { isPublic: true, needsSync: true });
+        await db.assets.update(asset.id, { isPublic: true, needsSync: 1 });
       }
       
       await syncInspection(id);
@@ -541,11 +541,11 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
       // 1. Soft delete items
       const assetsToSoftDelete = await db.assets.where('inspectionId').equals(id).toArray();
       for (const asset of assetsToSoftDelete) {
-        await db.assets.update(asset.id, { deleted: true, needsSync: true, updatedAt: now });
+        await db.assets.update(asset.id, { deleted: true, needsSync: 1, updatedAt: now });
       }
 
       // 2. Soft delete inspection
-      await db.inspections.update(id, { deleted: true, needsSync: true, updatedAt: now });
+      await db.inspections.update(id, { deleted: true, needsSync: 1, updatedAt: now });
       
       console.log("Vistoria marcada para exclusão:", id);
       pushLocalChanges();
@@ -599,7 +599,7 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
       await db.assets.update(transferAssetId, {
         inspectionId: targetInspection.id,
         hash: newHash,
-        needsSync: true
+        needsSync: 1
       });
 
       setSuccessMessage(`Item transferido para ${allLocations?.find(l => l.id === targetLocationId)?.name}`);
@@ -777,7 +777,7 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
         const discard = window.confirm("🗑️ VISTORIA VAZIA: Deseja descartar esta vistoria antes de sair?\n\n(Se você clicar em OK, a vistoria será apagada. Se clicar em CANCELAR, ela ficará salva como rascunho)");
         if (discard) {
           const now = Date.now();
-          await db.inspections.update(id, { deleted: true, needsSync: true, updatedAt: now });
+          await db.inspections.update(id, { deleted: true, needsSync: 1, updatedAt: now });
           pushLocalChanges();
           console.log("Vistoria vazia marcada para exclusão ao voltar.");
         }
