@@ -40,6 +40,9 @@ export function LocationsView({ onSelectInspection }: { onSelectInspection: (id:
   const [blockingError, setBlockingError] = useState<{id: string, message: string} | null>(null);
   const [newLoc, setNewLoc] = useState({ name: '', description: '', latitude: '', longitude: '', parentId: '' });
   const [editingLocationId, setEditingLocationId] = useState<string | null>(null);
+  const [activeParentId, setActiveParentId] = useState<string | null>(null);
+
+  const activeParentLocation = useLiveQuery(() => activeParentId ? db.locations.get(activeParentId) : undefined, [activeParentId]);
 
   const handleEditLocation = (loc: Location) => {
     setNewLoc({
@@ -62,10 +65,18 @@ export function LocationsView({ onSelectInspection }: { onSelectInspection: (id:
     return sorted[0].status;
   };
 
-  const allFilteredLocations = locations?.filter(loc => 
-    loc.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    loc.description.toLowerCase().includes(searchTerm.toLowerCase())
-  );
+  const allFilteredLocations = locations?.filter(loc => {
+    const matchesSearch = loc.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+                         loc.description.toLowerCase().includes(searchTerm.toLowerCase());
+    
+    if (searchTerm) return matchesSearch;
+    
+    // Se não há busca, filtra pelo pai ativo
+    if (activeParentId === null) {
+      return !loc.parentId; // Só raízes
+    }
+    return loc.parentId === activeParentId; // Filhos do pai ativo
+  });
 
   const displayedLocations = searchTerm 
     ? allFilteredLocations 
@@ -248,6 +259,18 @@ export function LocationsView({ onSelectInspection }: { onSelectInspection: (id:
     }
   };
 
+  const handleAddLocation = () => {
+    setNewLoc({ 
+      name: '', 
+      description: '', 
+      latitude: '', 
+      longitude: '', 
+      parentId: activeParentId || '' 
+    });
+    setEditingLocationId(null);
+    setIsAdding(true);
+  };
+
   return (
     <div className="flex flex-col gap-10 animate-in fade-in duration-700 pb-20 px-1">
       {showQRCodeFor && (
@@ -385,9 +408,23 @@ export function LocationsView({ onSelectInspection }: { onSelectInspection: (id:
       )}
 
       <div className="flex flex-col md:flex-row md:items-end justify-between gap-8 md:px-2">
-        <div className="flex flex-col gap-2">
-          <h2 className="text-4xl font-display font-extrabold text-slate-900 tracking-tight">Ambientes Auditorados</h2>
-          <p className="text-sm font-medium text-slate-400 uppercase tracking-[0.2em] max-w-md">Gerencie repartições, prédios e salas para vistorias patrimoniais.</p>
+        <div className="flex flex-col gap-4">
+          {activeParentId && (
+            <button 
+              onClick={() => setActiveParentId(null)}
+              className="flex items-center gap-2 text-[10px] font-black text-indigo-600 uppercase tracking-widest hover:translate-x-[-4px] transition-transform w-fit bg-indigo-50 px-4 py-2 rounded-xl border border-indigo-100"
+            >
+              ← Voltar para Todos Departamentos
+            </button>
+          )}
+          <div className="flex flex-col gap-2">
+            <h2 className="text-4xl font-display font-extrabold text-slate-900 tracking-tight">
+              {activeParentId ? activeParentLocation?.name : 'Ambientes Auditorados'}
+            </h2>
+            <p className="text-sm font-medium text-slate-400 uppercase tracking-[0.2em] max-w-md">
+              {activeParentId ? `Gerencie as salas e subsetores de ${activeParentLocation?.name}` : 'Gerencie repartições, prédios e salas para vistorias patrimoniais.'}
+            </p>
+          </div>
         </div>
         
         <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-4">
@@ -423,7 +460,7 @@ export function LocationsView({ onSelectInspection }: { onSelectInspection: (id:
               />
            </div>
            {!isAdding && isCommittee && (
-             <Button variant="accent" icon={Plus} onClick={() => setIsAdding(true)} className="rounded-2xl h-14 px-8 font-black uppercase tracking-widest text-[9px] shadow-xl shadow-indigo-600/20">
+             <Button variant="accent" icon={Plus} onClick={handleAddLocation} className="rounded-2xl h-14 px-8 font-black uppercase tracking-widest text-[9px] shadow-xl shadow-indigo-600/20">
                CADASTRAR UNIDADE
              </Button>
            )}
@@ -480,6 +517,7 @@ export function LocationsView({ onSelectInspection }: { onSelectInspection: (id:
                 label="Departamento Pai / Vínculo (Opcional)"
                 value={newLoc.parentId}
                 onChange={e => setNewLoc({...newLoc, parentId: e.target.value})}
+                disabled={!!activeParentId && !editingLocationId}
                 options={[
                   { value: '', label: 'Nenhum (Raiz)' },
                   ...(locations || [])
@@ -582,14 +620,35 @@ export function LocationsView({ onSelectInspection }: { onSelectInspection: (id:
               </div>
 
               <div className="pt-2 flex flex-col gap-4">
-                <Button 
-                  variant="secondary" 
-                  size="sm" 
-                  onClick={() => handleStartInspection(loc.id)}
-                  className="w-full h-16 rounded-2xl text-[10px] font-black uppercase tracking-[0.2em] group-hover:bg-slate-900 group-hover:text-white group-hover:shadow-xl group-hover:shadow-slate-900/20 transition-all duration-700 flex items-center justify-center gap-3"
-                >
-                  {status === 'em_andamento' ? 'CONTINUAR AUDITORIA' : status === 'concluida' ? 'REVISAR DOSSIÊ' : 'INICIAR AUDITORIA'} <ArrowRight className="w-5 h-5 group-hover:translate-x-2 transition-transform" />
-                </Button>
+                {!activeParentId ? (
+                  <Button 
+                    variant="accent" 
+                    size="sm" 
+                    onClick={() => setActiveParentId(loc.id)}
+                    className="w-full h-16 rounded-2xl text-[10px] font-black uppercase tracking-[0.2em] shadow-xl shadow-indigo-600/20 transition-all duration-700 flex items-center justify-center gap-3"
+                  >
+                    ABRIR DEPARTAMENTO / VER SALAS <ArrowRight className="w-5 h-5 translate-x-1" />
+                  </Button>
+                ) : (
+                  <Button 
+                    variant="secondary" 
+                    size="sm" 
+                    onClick={() => handleStartInspection(loc.id)}
+                    className="w-full h-16 rounded-2xl text-[10px] font-black uppercase tracking-[0.2em] group-hover:bg-slate-900 group-hover:text-white group-hover:shadow-xl group-hover:shadow-slate-900/20 transition-all duration-700 flex items-center justify-center gap-3"
+                  >
+                    {status === 'em_andamento' ? 'CONTINUAR AUDITORIA' : status === 'concluida' ? 'REVISAR DOSSIÊ' : 'INICIAR AUDITORIA'} <ArrowRight className="w-5 h-5 group-hover:translate-x-2 transition-transform" />
+                  </Button>
+                )}
+
+                {/* Botão Secundário para Auditoria do próprio Departamento Raiz */}
+                {!activeParentId && (
+                  <button 
+                    onClick={() => handleStartInspection(loc.id)}
+                    className="w-full py-4 text-[9px] font-black text-slate-400 hover:text-indigo-600 uppercase tracking-widest bg-slate-50 hover:bg-indigo-50 rounded-xl transition-all border border-transparent hover:border-indigo-100"
+                  >
+                    Auditar este Departamento
+                  </button>
+                )}
                 
                 <div className="flex flex-col gap-2">
                   <button 

@@ -123,24 +123,6 @@ export function Dashboard() {
 
   const [quotaExceeded, setQuotaExceeded] = useState(false);
 
-  const [isSyncing, setIsSyncing] = useState(false);
-  const [syncError, setSyncError] = useState(false);
-
-  useEffect(() => {
-    const handleStart = () => { setIsSyncing(true); setSyncError(false); };
-    const handleEnd = (e: any) => { 
-      setIsSyncing(false); 
-      if (!e.detail?.success) setSyncError(true);
-    };
-
-    window.addEventListener('app-sync-start', handleStart);
-    window.addEventListener('app-sync-end', handleEnd);
-    return () => {
-      window.removeEventListener('app-sync-start', handleStart);
-      window.removeEventListener('app-sync-end', handleEnd);
-    };
-  }, []);
-
   useEffect(() => {
     if (user) {
       setupSync();
@@ -464,8 +446,8 @@ export function Dashboard() {
               </div>
             </div>
 
-            {/* 📡 5. Status Offline/Sync */}
-            {!isOnline ? (
+            {/* 📡 5. Status Offline/Sync (Removed as per user request to avoid persistent messages) */}
+            {!isOnline && (
               <div className="bg-rose-50 border border-rose-100 rounded-[2.5rem] p-6 flex flex-col md:flex-row items-center gap-6 animate-in zoom-in-95 duration-500 shadow-xl shadow-rose-500/5">
                 <div className="w-20 h-20 bg-white rounded-3xl flex items-center justify-center shadow-lg shadow-rose-500/10 shrink-0">
                   <AlertCircle className="w-10 h-10 text-rose-500" />
@@ -474,31 +456,6 @@ export function Dashboard() {
                   <span className="text-lg font-black text-rose-900 tracking-tight uppercase leading-none">Conectividade Interrompida</span>
                   <span className="text-xs font-bold text-rose-600/70">O modo offline-first está mantendo seus dados salvos localmente. {unsyncedCount > 0 ? `Existem ${unsyncedCount} itens pendentes de sincronização.` : 'Tudo pronto para subir assim que a internet voltar.'}</span>
                 </div>
-              </div>
-            ) : (
-              <div className="flex flex-col items-center gap-3 py-6 bg-card rounded-[2.5rem] border border-border mt-4 group shadow-sm">
-                <div className="flex items-center gap-2">
-                  <div className={cn(
-                    "w-2 h-2 rounded-full shadow-[0_0_12px] animate-pulse",
-                    isSyncing ? "bg-emerald-500 shadow-emerald-500" : 
-                    syncError ? "bg-amber-500 shadow-amber-500" : 
-                    unsyncedCount > 0 ? "bg-blue-500 shadow-blue-500" : "bg-emerald-500 shadow-emerald-500"
-                  )}></div>
-                  <span className="text-[10px] font-black text-text-muted uppercase tracking-[0.2em] leading-none">
-                    {isSyncing ? `Sincronizando ${unsyncedCount} registros com a prefeitura...` :
-                     syncError && unsyncedCount > 0 ? `Sincronização pausada (${unsyncedCount} registros pendentes)` :
-                     unsyncedCount > 0 ? `Aguardando para sincronizar ${unsyncedCount} registros...` : 
-                     'Nuvem e Dispositivo Sincronizados (100%)'}
-                  </span>
-                </div>
-                {isSyncing && (
-                  <div className="w-64 h-1.5 bg-slate-200 rounded-full overflow-hidden shadow-inner translate-y-1">
-                    <div className="h-full bg-emerald-500 animate-progress origin-left rounded-full"></div>
-                  </div>
-                )}
-                {syncError && unsyncedCount > 0 && (
-                   <span className="text-[9px] font-bold text-amber-600 uppercase">Aguardando disponibilidade da rede ou cotas</span>
-                )}
               </div>
             )}
           </div>

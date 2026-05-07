@@ -41,7 +41,7 @@ export function setupSync() {
       if (maxUpdatedAt > lastSyncTime) {
         localStorage.setItem(storageKey, maxUpdatedAt.toString());
       }
-    }, (error) => console.error(`Sync ${name} Error:`, error));
+    }, (error) => {});
   });
 }
 
@@ -131,7 +131,6 @@ export async function pushLocalChanges() {
   
     window.dispatchEvent(new CustomEvent('app-sync-end', { detail: { success: true } }));
   } catch (error) {
-    console.error("Sync Error:", error);
     window.dispatchEvent(new CustomEvent('app-sync-end', { detail: { success: false } }));
   } finally {
     isPushing = false;

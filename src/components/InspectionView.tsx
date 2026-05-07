@@ -118,25 +118,7 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
     }
   };
 
-  const [isSyncing, setIsSyncing] = useState(false);
-  const [syncError, setSyncError] = useState(false);
-
-  React.useEffect(() => {
-    const handleStart = () => { setIsSyncing(true); setSyncError(false); };
-    const handleEnd = (e: any) => { 
-      setIsSyncing(false); 
-      if (!e.detail?.success) setSyncError(true);
-    };
-
-    window.addEventListener('app-sync-start', handleStart);
-    window.addEventListener('app-sync-end', handleEnd);
-    return () => {
-      window.removeEventListener('app-sync-start', handleStart);
-      window.removeEventListener('app-sync-end', handleEnd);
-    };
-  }, []);
-
-  const unsyncedAssetsCount = assets?.filter(a => a.needsSync).length || 0;
+  const unsyncedAssetsCount = assets?.filter(a => a.needsSync === 1).length || 0;
 
   const [newItem, setNewItem] = useState({
     name: '',
@@ -872,17 +854,7 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
           )}
           {isOnline && (
             <div className="flex flex-col items-end leading-none px-4 py-2 bg-white border border-slate-100 rounded-2xl shadow-sm">
-               <span className="text-[9px] font-black uppercase text-slate-400 tracking-widest">Nuvem Governamental</span>
-               <span className={cn(
-                 "text-[10px] font-bold uppercase",
-                 isSyncing ? "text-indigo-600 animate-pulse" : 
-                 syncError ? "text-amber-500" :
-                 unsyncedAssetsCount > 0 ? "text-indigo-400" : "text-emerald-600"
-               )}>
-                 {isSyncing ? "Sincronizando..." : 
-                  syncError ? "Pausado (Erro)" :
-                  unsyncedAssetsCount > 0 ? `${unsyncedAssetsCount} Pendentes` : "Sincronizado"}
-               </span>
+               <span className="text-[9px] font-black uppercase text-slate-400 tracking-widest text-emerald-600">Conectado</span>
             </div>
           )}
         </div>

@@ -5,63 +5,25 @@ import { useToast } from '../lib/ToastContext';
 import { motion, AnimatePresence } from 'motion/react';
 
 export function SyncToast() {
-  const [status, setStatus] = useState<'idle' | 'syncing' | 'success' | 'error'>('idle');
   const { toast } = useToast();
 
   useEffect(() => {
-    let timeout: any;
-    const handleStart = () => {
-      setStatus('syncing');
-      // Safety timeout: if sync takes more than 30s, force idle to clear UI
-      clearTimeout(timeout);
-      timeout = setTimeout(() => setStatus('idle'), 30000);
-    };
-    
     const handleEnd = (e: any) => {
-      clearTimeout(timeout);
       const isSuccess = e.detail?.success;
-      setStatus(isSuccess ? 'success' : 'error');
-      
       if (isSuccess) {
         toast('Dados sincronizados com sucesso!', 'success', 'Nuvem Atualizada');
       } else {
         toast('Erro ao sincronizar dados. Tente novamente.', 'error', 'Falha de Rede');
       }
-
-      setTimeout(() => setStatus('idle'), 3000);
     };
 
-    window.addEventListener('app-sync-start', handleStart);
     window.addEventListener('app-sync-end', handleEnd);
     return () => {
-      window.removeEventListener('app-sync-start', handleStart);
       window.removeEventListener('app-sync-end', handleEnd);
-      clearTimeout(timeout);
     };
-  }, []);
+  }, [toast]);
 
-  if (status === 'idle') return null;
-
-  return (
-    <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-[100] animate-in slide-in-from-bottom-5 fade-in duration-300">
-      <div className={cn(
-        "flex items-center gap-3 px-6 py-3 rounded-2xl border shadow-2xl backdrop-blur-md transition-all duration-500",
-        status === 'syncing' ? "bg-slate-900 border-slate-700 text-white" :
-        status === 'success' ? "bg-emerald-600 border-emerald-400 text-white shadow-emerald-500/20" :
-        "bg-rose-600 border-rose-400 text-white shadow-rose-500/20"
-      )}>
-        {status === 'syncing' && <CloudUpload className="w-5 h-5 animate-pulse" />}
-        {status === 'success' && <CheckCircle2 className="w-5 h-5 animate-in zoom-in" />}
-        {status === 'error' && <AlertCircle className="w-5 h-5 animate-in zoom-in" />}
-        
-        <span className="font-bold text-xs uppercase tracking-widest whitespace-nowrap">
-          {status === 'syncing' && "Sincronizando com a Nuvem..."}
-          {status === 'success' && "Nuvem Atualizada"}
-          {status === 'error' && "Falha na Sincronização"}
-        </span>
-      </div>
-    </div>
-  );
+  return null;
 }
 
 interface ErrorBoundaryProps {
