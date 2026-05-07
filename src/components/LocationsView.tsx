@@ -5,7 +5,7 @@ import { db, generateId, Inspection, Location } from '../lib/db';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { cn, formatDate } from '../lib/utils';
 import { useAuth } from '../lib/AuthContext';
-import { syncLocation, syncInspection, pushLocalChanges, forceFullSyncRecovery } from '../lib/syncService';
+import { syncLocation, syncInspection, pushLocalChanges, forceFullSyncRecovery, hardResetAndRescue } from '../lib/syncService';
 import { db as firestore, auth } from '../lib/firebase';
 import { QRCodePrintCard } from './QRCodePrintCard';
 import { doc, deleteDoc } from 'firebase/firestore';
@@ -433,6 +433,13 @@ export function LocationsView({ onSelectInspection }: { onSelectInspection: (id:
               >
                 <Database className="w-4 h-4" />
                 Forçar Sincronização (Recuperar Dados)
+              </button>
+              <button 
+                onClick={() => hardResetAndRescue()}
+                className="flex items-center gap-2 px-4 py-2 bg-rose-600 text-white rounded-xl hover:bg-rose-700 transition-all font-black text-[10px] uppercase tracking-widest shadow-lg shadow-rose-600/20"
+              >
+                <AlertCircle className="w-4 h-4" />
+                Sincronização Profunda (Geral)
               </button>
               <span className="text-[9px] font-bold text-amber-600 uppercase tracking-tighter opacity-60">Use para atualizar dados de ontem</span>
             </div>

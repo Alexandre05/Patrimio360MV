@@ -260,3 +260,24 @@ export async function forceFullSyncRecovery() {
   console.log("[Recovery] Cache de sincronização limpo. Recarregando página...");
   window.location.reload();
 }
+
+export async function hardResetAndRescue() {
+  const confirm = window.confirm("Isso fará o download de TUDO do Firebase novamente. Deseja continuar?");
+  if (!confirm) return;
+
+  // Envia qualquer coisa pendente por segurança
+  try {
+    await pushLocalChanges(); 
+  } catch (e) {
+    console.error("[Rescue] Erro ao sincronizar antes do reset:", e);
+  }
+
+  // Limpa o controle do Delta Sync
+  localStorage.clear();
+
+  // Destrói o banco local para forçar a recriação limpa baseada na nuvem
+  await dexie.delete();
+
+  // Recarrega o aplicativo
+  window.location.reload();
+}
