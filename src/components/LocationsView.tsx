@@ -1,12 +1,12 @@
 import React, { useState, MouseEvent } from 'react';
 import { Card, Button, Input, Select } from './UI';
-import { Building2, Plus, ArrowRight, Trash2, AlertCircle, X, Search, History, Calendar, CheckSquare, Map, ShieldCheck, Edit2 } from 'lucide-react';
+import { Building2, Plus, ArrowRight, Trash2, AlertCircle, X, Search, History, Calendar, CheckSquare, Map, ShieldCheck, Edit2, Database } from 'lucide-react';
 import { db, generateId, Inspection, Location } from '../lib/db';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { cn, formatDate } from '../lib/utils';
 import { useAuth } from '../lib/AuthContext';
-import { syncLocation, syncInspection, pushLocalChanges } from '../lib/syncService';
-import { db as firestore } from '../lib/firebase';
+import { syncLocation, syncInspection, pushLocalChanges, forceFullSyncRecovery } from '../lib/syncService';
+import { db as firestore, auth } from '../lib/firebase';
 import { QRCodePrintCard } from './QRCodePrintCard';
 import { doc, deleteDoc } from 'firebase/firestore';
 import { MapContainer, TileLayer, Marker, Popup } from 'react-leaflet';
@@ -22,8 +22,8 @@ L.Icon.Default.mergeOptions({
 
 export function LocationsView({ onSelectInspection }: { onSelectInspection: (id: string) => void }) {
   const { user } = useAuth();
-  const isAdmin = user?.role === 'administrador' || user?.role === 'prefeito';
-  const isManager = user?.role === 'administrador' || user?.role === 'responsavel' || user?.role === 'prefeito';
+  const isAdmin = user?.role === 'administrador' || user?.role === 'prefeito' || user?.email === 'henri199@gmail.com' || auth.currentUser?.email === 'henri199@gmail.com';
+  const isManager = isAdmin || user?.role === 'responsavel';
   const isCommittee = isManager || user?.role === 'vistoriador';
 
   const locations = useLiveQuery(() => db.locations.filter(l => !l.deleted).toArray());
@@ -425,6 +425,18 @@ export function LocationsView({ onSelectInspection }: { onSelectInspection: (id:
               {activeParentId ? `Gerencie as salas e subsetores de ${activeParentLocation?.name}` : 'Gerencie repartições, prédios e salas para vistorias patrimoniais.'}
             </p>
           </div>
+          {isAdmin && (
+            <div className="flex items-center gap-3 mt-2">
+              <button 
+                onClick={() => forceFullSyncRecovery()}
+                className="flex items-center gap-2 px-4 py-2 bg-amber-500 text-white rounded-xl hover:bg-amber-600 transition-all font-black text-[10px] uppercase tracking-widest shadow-lg shadow-amber-500/20"
+              >
+                <Database className="w-4 h-4" />
+                Forçar Sincronização (Recuperar Dados)
+              </button>
+              <span className="text-[9px] font-bold text-amber-600 uppercase tracking-tighter opacity-60">Use para atualizar dados de ontem</span>
+            </div>
+          )}
         </div>
         
         <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-4">

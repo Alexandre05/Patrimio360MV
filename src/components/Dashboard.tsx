@@ -25,7 +25,8 @@ import {
   Zap,
   Clock,
   Download,
-  Upload
+  Upload,
+  Database
 } from 'lucide-react';
 import { motion } from 'motion/react';
 import { db, Inspection, Location } from '../lib/db';
@@ -38,8 +39,8 @@ import { UsersView } from './UsersView';
 import { NotificationsView } from './NotificationsView';
 import { checkAndGenerateNotifications } from '../lib/NotificationService';
 import { cn } from '../lib/utils';
-import { setupSync, pushLocalChanges } from '../lib/syncService';
-import { db as firestore } from '../lib/firebase';
+import { setupSync, pushLocalChanges, forceFullSyncRecovery } from '../lib/syncService';
+import { db as firestore, auth } from '../lib/firebase';
 import { doc, deleteDoc, getDoc } from 'firebase/firestore';
 import { ScannerView } from './ScannerView';
 
@@ -115,11 +116,13 @@ export function Dashboard() {
   const unsyncedCount = useLiveQuery(() => 
     db.assets.filter(a => 
       a.needsSync === 1 || 
+      a.needsSync === true as any ||
       (a.photos && a.photos.some(p => typeof p === 'string' && p.startsWith('data:image')))
     ).count()
   ) || 0;
-  const isAdmin = user?.role === 'administrador' || user?.role === 'prefeito';
-  const isManager = user?.role === 'administrador' || user?.role === 'responsavel' || user?.role === 'prefeito';
+  const [syncing, setSyncing] = useState(false);
+  const isAdmin = user?.role === 'administrador' || user?.role === 'prefeito' || user?.email === 'henri199@gmail.com' || auth.currentUser?.email === 'henri199@gmail.com';
+  const isManager = isAdmin || user?.role === 'responsavel';
 
   const [quotaExceeded, setQuotaExceeded] = useState(false);
 
@@ -128,10 +131,13 @@ export function Dashboard() {
       setupSync();
       
       const syncAndNotify = async () => {
+        setSyncing(true);
         try {
           await pushLocalChanges();
         } catch (err: any) {
           if (err.message?.includes('LIMITE DE COTAS')) setQuotaExceeded(true);
+        } finally {
+          setTimeout(() => setSyncing(false), 2000);
         }
         
         try {
@@ -322,6 +328,12 @@ export function Dashboard() {
                     {isManager && (
                       <div className="flex items-center gap-4 ml-2">
                         <button onClick={async () => {
+                          const confirmCleanup = window.confirm("Isso irá remover vistorias sem itens e locais sem vistorias. Deseja prosseguir?");
+                          if (!confirmCleanup) return;
+
+                          // Tenta sincronizar antes de limpar
+                          try { await pushLocalChanges(); } catch (e) {}
+
                           const allInspections = await db.inspections.toArray();
                           const allLocations = await db.locations.toArray();
                           let clearedInps = 0;
@@ -362,6 +374,18 @@ export function Dashboard() {
                           }
                           else alert('Tudo em ordem.');
                         }} className="text-[10px] font-bold uppercase text-slate-400 hover:text-indigo-600 transition-colors">Higienizar</button>
+
+                        <button 
+                          onClick={() => {
+                            if (window.confirm("Isso irá limpar o cache local e baixar todos os dados da nuvem novamente. Deseja continuar?")) {
+                              forceFullSyncRecovery();
+                            }
+                          }}
+                          className="text-[10px] font-bold uppercase text-slate-400 hover:text-indigo-600 transition-colors flex items-center gap-1"
+                        >
+                          <Database className="w-3 h-3" />
+                          Sincronização Forçada
+                        </button>
                       </div>
                     )}
                   </div>
@@ -631,8 +655,10 @@ export function Dashboard() {
              </div>
 
              <div className="flex items-center gap-2 px-4 py-2 bg-card border border-border rounded-full shadow-sm">
-                <div className={cn("w-2 h-2 rounded-full", isOnline ? "bg-emerald-500 shadow-[0_0_8px_#10b981]" : "bg-rose-500")} />
-                <span className="text-[10px] font-black text-text-muted uppercase tracking-widest leading-none">{isOnline ? "Conectado" : "Offline"}</span>
+                <div className={cn("w-2 h-2 rounded-full", syncing ? "bg-indigo-500 animate-pulse" : (isOnline ? "bg-emerald-500 shadow-[0_0_8px_#10b981]" : "bg-rose-500"))} />
+                <span className="text-[10px] font-black text-text-muted uppercase tracking-widest leading-none">
+                  {syncing ? "Sincronizando..." : (isOnline ? "Conectado" : "Offline")}
+                </span>
              </div>
 
              <button onClick={() => setActiveTab('notifications')} className="relative w-12 h-12 flex items-center justify-center bg-card border border-border rounded-2xl text-text-muted hover:text-primary transition-all hover:bg-bg">
