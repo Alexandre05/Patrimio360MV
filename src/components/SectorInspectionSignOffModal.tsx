@@ -143,7 +143,7 @@ export function SectorInspectionSignOffModal({
     doc.save(`Termo_Responsabilidade_${location.name.replace(/\s+/g, '_')}_${inspection.id.slice(0, 8)}.pdf`);
   };
 
-  const handleSave = async () => {
+  const handleSave = () => {
     if (!responsibleName.trim()) {
       setError('Por favor, informe o nome do servidor responsável.');
       return;
@@ -158,7 +158,8 @@ export function SectorInspectionSignOffModal({
     setError(null);
 
     try {
-      const signatureBase64 = sigPad.current?.getTrimmedCanvas().toDataURL('image/png') || '';
+      // Capture heavy data first while UI is still active
+      const signatureBase64 = sigPad.current?.getCanvas().toDataURL('image/png') || '';
       const docId = `concluid_` + inspection.id;
       const now = Date.now();
 
@@ -173,16 +174,32 @@ export function SectorInspectionSignOffModal({
         signedByUser: user?.userId || 'unknown'
       };
 
-      await setDoc(doc(firestore, 'sector_inspections', docId), sectorData);
-      
+      // 1. Fire and forget Firestore (background sync handles it)
+      // Removed await to prevent infinite loading on slow/offline connections
+      setDoc(doc(firestore, 'sector_inspections', docId), sectorData)
+        .catch(err => {
+          console.error("Background sync error:", err);
+        });
+
+      // 2. Unblock UI immediately (Non-blocking flow)
       toast('Vistoria encerrada com sucesso!', 'success', 'Finalizado');
-      generatePDF(signatureBase64, now);
       onComplete();
+
+      // 3. Defer PDF generation (Heavy JS task) to avoid freezing main thread
+      setTimeout(() => {
+        try {
+          generatePDF(signatureBase64, now);
+        } catch (pdfErr) {
+          console.error("Background PDF generation failed:", pdfErr);
+        } finally {
+          setIsSaving(false);
+        }
+      }, 150);
+
     } catch (err: any) {
       console.error(err);
-      toast('Não foi possível salvar o encerramento.', 'error', 'Erro de Conexão');
-      setError('Falha ao salvar encerramento no servidor.');
-    } finally {
+      toast('Ocorreu um erro ao processar a assinatura.', 'error', 'Erro Crítico');
+      setError('Falha ao processar os dados da vistoria.');
       setIsSaving(false);
     }
   };
