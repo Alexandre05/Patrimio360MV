@@ -1,6 +1,6 @@
 import React, { useState, MouseEvent } from 'react';
 import { Card, Button, Input, Select } from './UI';
-import { Building2, Plus, ArrowRight, Trash2, AlertCircle, X, Search, History, Calendar, CheckSquare, Map, ShieldCheck, Edit2, Database } from 'lucide-react';
+import { Building2, Plus, ArrowRight, Trash2, AlertCircle, X, Search, History, Calendar, CheckSquare, Map, ShieldCheck, Edit2, Database, MapPin } from 'lucide-react';
 import { db, generateId, Inspection, Location } from '../lib/db';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { cn, formatDate } from '../lib/utils';
@@ -558,11 +558,31 @@ export function LocationsView({ onSelectInspection }: { onSelectInspection: (id:
 
         {displayedLocations?.map(loc => {
           const status = getLatestStatus(loc.id);
+          const isParent = !loc.parentId;
           return (
-            <Card key={loc.id} className="group p-10 rounded-[3rem] flex flex-col gap-8 border-none shadow-[0_8px_40px_-15px_rgba(0,0,0,0.03)] hover:shadow-[0_30px_80px_-20px_rgba(79,70,229,0.12)] hover:-translate-y-2 transition-all duration-700 bg-white relative overflow-hidden">
-              <div className="flex items-start justify-between">
-                <div className="w-20 h-16 bg-slate-50 group-hover:bg-indigo-600 rounded-[1.5rem] flex items-center justify-center transition-all duration-700 text-slate-400 group-hover:text-white shadow-sm border border-slate-100 group-hover:border-indigo-600 group-hover:shadow-indigo-600/20">
-                  <Building2 className="w-8 h-8" />
+            <Card key={loc.id} className={cn(
+              "group p-10 rounded-[3rem] flex flex-col gap-8 transition-all duration-700 relative overflow-hidden hover:-translate-y-2 shadow-[0_8px_40px_-15px_rgba(0,0,0,0.03)]",
+              isParent 
+                ? "bg-indigo-50/40 border-2 border-indigo-200 hover:border-indigo-400 hover:shadow-indigo-900/10" 
+                : "bg-white border-2 border-slate-100 hover:border-indigo-300 hover:shadow-slate-900/10"
+            )}>
+              {/* Parent badge indicator */}
+              {isParent && (
+                <div className="absolute top-0 right-0">
+                  <div className="bg-indigo-600 text-white text-[9px] font-black uppercase tracking-[0.2em] px-6 py-2 rounded-bl-3xl shadow-lg">
+                    Secretaria / Depto
+                  </div>
+                </div>
+              )}
+
+              <div className="flex items-start justify-between mt-2">
+                <div className={cn(
+                  "w-20 h-16 rounded-[1.5rem] flex items-center justify-center transition-all duration-700 border shadow-sm",
+                  isParent
+                    ? "bg-indigo-600 text-white border-indigo-500 shadow-indigo-200"
+                    : "bg-slate-50 text-slate-400 border-slate-100 group-hover:bg-indigo-50 group-hover:text-indigo-600 group-hover:border-indigo-100 group-hover:shadow-indigo-600/10"
+                )}>
+                  {isParent ? <Building2 className="w-8 h-8" /> : <MapPin className="w-7 h-7" />}
                 </div>
                 <div className="flex flex-col items-end gap-3">
                   {status && (
