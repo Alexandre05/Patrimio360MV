@@ -96,11 +96,14 @@ export function LocationsView({ onSelectInspection }: { onSelectInspection: (id:
     
     if (searchTerm) return matchesSearch;
     
-    // Se não há busca, filtra pelo pai ativo
-    if (activeParentId === null) {
-      return !loc.parentId; // Só raízes
+    // NAVEGAÇÃO POR NÍVEIS (DRILL-DOWN)
+    if (!activeParentId) {
+      // Se estamos na raiz, mostramos APENAS as Secretarias (Pais)
+      return !loc.parentId;
+    } else {
+      // Se estamos dentro de um local, mostramos APENAS os filhos diretos dele
+      return loc.parentId === activeParentId;
     }
-    return loc.parentId === activeParentId; // Filhos do pai ativo
   });
 
   const displayedLocations = searchTerm 
@@ -433,24 +436,66 @@ export function LocationsView({ onSelectInspection }: { onSelectInspection: (id:
       )}
 
       <div className="flex flex-col md:flex-row md:items-end justify-between gap-8 md:px-2">
-        <div className="flex flex-col gap-4">
-          {activeParentId && (
+        <div className="flex flex-col gap-5 w-full">
+          {/* Breadcrumbs e Botão Voltar */}
+          <div className="flex items-center gap-3">
             <button 
               onClick={() => setActiveParentId(null)}
-              className="flex items-center gap-2 text-[10px] font-black text-indigo-600 uppercase tracking-widest hover:translate-x-[-4px] transition-transform w-fit bg-indigo-50 px-4 py-2 rounded-xl border border-indigo-100"
+              className={cn(
+                "flex items-center gap-2 text-[10px] font-black uppercase tracking-widest transition-all px-4 py-2 rounded-xl border shadow-sm",
+                activeParentId 
+                  ? "bg-slate-900 text-white border-slate-900 hover:bg-slate-800" 
+                  : "bg-indigo-50 text-indigo-600 border-indigo-100 cursor-default"
+              )}
             >
-              ← Voltar para Todos Departamentos
+              <MapPin className="w-4 h-4" /> Prefeitura
             </button>
-          )}
-          <div className="flex flex-col gap-2">
-            <h2 className="text-4xl font-display font-extrabold text-slate-900 tracking-tight">
-              {activeParentId ? activeParentLocation?.name : 'Ambientes Auditorados'}
-            </h2>
-            <p className="text-sm font-medium text-slate-400 uppercase tracking-[0.2em] max-w-md">
-              {activeParentId ? `Gerencie as salas e subsetores de ${activeParentLocation?.name}` : 'Gerencie repartições, prédios e salas para vistorias patrimoniais.'}
-            </p>
+            {activeParentId && (
+              <div className="flex items-center gap-3 animate-in slide-in-from-left-4 duration-300">
+                <ArrowRight className="w-3 h-3 text-slate-300" />
+                <span className="bg-indigo-50 text-indigo-700 text-[10px] font-black uppercase tracking-widest px-4 py-2 rounded-xl border border-indigo-200 shadow-sm flex items-center gap-2">
+                  <Building2 className="w-4 h-4" /> {activeParentLocation?.name}
+                </span>
+              </div>
+            )}
           </div>
-          {isAdmin && (
+
+          {!activeParentId ? (
+            <div className="flex flex-col gap-2">
+              <h2 className="text-4xl font-display font-extrabold text-slate-900 tracking-tight">Secretarias & Departamentos</h2>
+              <p className="text-sm font-medium text-slate-400 uppercase tracking-[0.2em] max-w-md">Escolha um departamento para visualizar as salas e vistorias vinculadas.</p>
+            </div>
+          ) : (
+            <Card className="bg-indigo-600 text-white p-6 md:p-8 rounded-[2.5rem] border-none shadow-2xl shadow-indigo-600/20 flex flex-col md:flex-row md:items-center justify-between gap-6 animate-in zoom-in-95 duration-500">
+              <div className="flex flex-col gap-2">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 bg-white/20 rounded-xl flex items-center justify-center">
+                    <Building2 className="w-6 h-6 text-white" />
+                  </div>
+                  <h2 className="text-2xl font-display font-extrabold tracking-tight">{activeParentLocation?.name}</h2>
+                </div>
+                <p className="text-indigo-100/60 text-[10px] font-black uppercase tracking-widest ml-13">{activeParentLocation?.description || 'Repartição Pública Principal'}</p>
+              </div>
+              
+              <div className="flex items-center gap-4 shrink-0">
+                <div className="flex flex-col items-end gap-1">
+                   <span className="text-[10px] font-black uppercase opacity-60">Status Geral</span>
+                   <div className="bg-white/20 px-4 py-1.5 rounded-full border border-white/20 text-[10px] font-black uppercase tracking-widest">
+                     {getLatestStatus(activeParentLocation?.id || '')?.replace('_', ' ') || 'Pendente'}
+                   </div>
+                </div>
+                <Button 
+                  variant="accent" 
+                  onClick={() => handleStartInspection(activeParentId)}
+                  className="rounded-2xl h-14 px-8 bg-white text-indigo-600 hover:bg-indigo-50 border-none shadow-xl shadow-black/10 font-black uppercase tracking-widest text-[9px]"
+                >
+                  Auditar Secretaria <Plus className="w-4 h-4 ml-2" />
+                </Button>
+              </div>
+            </Card>
+          )}
+
+          {isAdmin && !activeParentId && (
             <div className="flex items-center gap-3 mt-2">
               <button 
                 onClick={() => forceFullSyncRecovery()}
@@ -712,28 +757,20 @@ export function LocationsView({ onSelectInspection }: { onSelectInspection: (id:
                     onClick={() => setActiveParentId(loc.id)}
                     className="w-full h-16 rounded-2xl text-[10px] font-black uppercase tracking-[0.2em] shadow-xl shadow-indigo-600/20 transition-all duration-700 flex items-center justify-center gap-3"
                   >
-                    ABRIR DEPARTAMENTO / VER SALAS <ArrowRight className="w-5 h-5 translate-x-1" />
+                    ABRIR DEPARTAMENTO <ArrowRight className="w-5 h-5 translate-x-1" />
                   </Button>
                 ) : (
                   <Button 
-                    variant="secondary" 
+                    variant="accent" 
                     size="sm" 
                     onClick={() => handleStartInspection(loc.id)}
-                    className="w-full h-16 rounded-2xl text-[10px] font-black uppercase tracking-[0.2em] group-hover:bg-slate-900 group-hover:text-white group-hover:shadow-xl group-hover:shadow-slate-900/20 transition-all duration-700 flex items-center justify-center gap-3"
+                    className="w-full h-16 rounded-2xl text-[10px] font-black uppercase tracking-[0.2em] shadow-xl shadow-indigo-600/20 transition-all duration-700 flex items-center justify-center gap-3"
                   >
-                    {status === 'em_andamento' ? 'CONTINUAR AUDITORIA' : status === 'concluida' ? 'REVISAR DOSSIÊ' : 'INICIAR AUDITORIA'} <ArrowRight className="w-5 h-5 group-hover:translate-x-2 transition-transform" />
+                    {status === 'em_andamento' ? 'CONTINUAR AUDITORIA' : status === 'concluida' ? 'REVISAR DOSSIÊ' : 'AUDITAR ESTA SALA'} <ArrowRight className="w-5 h-5 translate-x-2 transition-transform" />
                   </Button>
                 )}
 
-                {/* Botão Secundário para Auditoria do próprio Departamento Raiz */}
-                {!activeParentId && (
-                  <button 
-                    onClick={() => handleStartInspection(loc.id)}
-                    className="w-full py-4 text-[9px] font-black text-slate-400 hover:text-indigo-600 uppercase tracking-widest bg-slate-50 hover:bg-indigo-50 rounded-xl transition-all border border-transparent hover:border-indigo-100"
-                  >
-                    Auditar este Departamento
-                  </button>
-                )}
+                {/* Auditoria do Departamento agora no Header Card */}
                 
                 <div className="flex flex-col gap-2">
                   <button 
