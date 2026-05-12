@@ -14,6 +14,9 @@ export interface User {
   role: UserRole;
   status: UserStatus;
   cargo: string;
+  updatedAt?: number;
+  deleted?: boolean;
+  needsSync?: number;
 }
 
 export interface Notification {
@@ -34,6 +37,10 @@ export interface Location {
   internalCode?: string;
   latitude?: number;
   longitude?: number;
+  parentId?: string;
+  updatedAt?: number;
+  deleted?: boolean;
+  needsSync?: number;
 }
 
 export interface Inspection {
@@ -48,6 +55,9 @@ export interface Inspection {
   finalizedBy?: string;
   finalizedAt?: number;
   lastSync?: number;
+  updatedAt?: number;
+  deleted?: boolean;
+  needsSync?: number;
 }
 
 export interface Asset {
@@ -61,9 +71,11 @@ export interface Asset {
   createdBy: string;
   createdAt: number;
   hash: string; // name + patrimony + locationId
-  needsSync: boolean;
+  needsSync: number;
   isPublic?: boolean;
   quantity?: number;
+  updatedAt?: number;
+  deleted?: boolean;
 }
 
 export interface AppSettings {
@@ -82,11 +94,11 @@ export class PatrimonyDatabase extends Dexie {
 
   constructor() {
     super('PatrimonyDB');
-    this.version(6).stores({
-      users: 'userId, email, role',
-      locations: 'id, name, internalCode',
-      inspections: 'id, locationId, status, date',
-      assets: 'id, inspectionId, hash, needsSync, createdAt, patrimonyNumber',
+    this.version(8).stores({
+      users: 'userId, email, role, updatedAt, deleted, needsSync',
+      locations: 'id, name, internalCode, updatedAt, deleted, needsSync',
+      inspections: 'id, locationId, status, date, updatedAt, deleted, needsSync',
+      assets: 'id, inspectionId, hash, needsSync, createdAt, patrimonyNumber, updatedAt, deleted',
       notifications: 'id, type, date, read, targetUserId',
       settings: 'id'
     });

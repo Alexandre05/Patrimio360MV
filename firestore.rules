@@ -133,7 +133,10 @@ service cloud.firestore {
                data.signedByUser == request.auth.uid;
       }
 
-      allow get, list: if isSignedIn();
+      // Allow read if signed in OR if the inspection is finalized (public)
+      allow get, list: if isSignedIn() || 
+                         get(/databases/$(database)/documents/inspections/$(resource.data.inspectionId)).data.status == 'finalizada';
+      
       allow create: if isVerified() && isValidSectorInspection(incoming());
       allow update, delete: if isSystemAdmin();
     }

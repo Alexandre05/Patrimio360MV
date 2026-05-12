@@ -25,7 +25,12 @@ import {
   Zap,
   Clock,
   Download,
-  Upload
+  Upload,
+  Database,
+  GraduationCap,
+  ChevronLeft,
+  ChevronRight,
+  Cloud
 } from 'lucide-react';
 import { motion } from 'motion/react';
 import { db, Inspection, Location } from '../lib/db';
@@ -38,14 +43,16 @@ import { UsersView } from './UsersView';
 import { NotificationsView } from './NotificationsView';
 import { checkAndGenerateNotifications } from '../lib/NotificationService';
 import { cn } from '../lib/utils';
-import { setupSync, pushLocalChanges } from '../lib/syncService';
-import { db as firestore } from '../lib/firebase';
+import { setupSync, pushLocalChanges, forceFullSyncRecovery } from '../lib/syncService';
+import { db as firestore, auth } from '../lib/firebase';
 import { doc, deleteDoc, getDoc } from 'firebase/firestore';
 import { ScannerView } from './ScannerView';
+import { InventoryDashboard } from './InventoryDashboard';
+import { TrainingView } from './TrainingView';
 
 export function Dashboard() {
   const { user, signOut } = useAuth();
-  const [activeTab, setActiveTab] = useState<'home' | 'inspections' | 'locations' | 'reports' | 'users' | 'settings' | 'notifications' | 'scanner'>('home');
+  const [activeTab, setActiveTab] = useState<'home' | 'inspections' | 'locations' | 'reports' | 'users' | 'settings' | 'notifications' | 'scanner' | 'analytics' | 'training'>('home');
   const [selectedInspectionId, setSelectedInspectionId] = useState<string | null>(null);
 
   const handleScannerOpen = (inspectionId: string, locationId: string) => {
@@ -114,42 +121,29 @@ export function Dashboard() {
   const unreadNotifications = useLiveQuery(() => user ? db.notifications.where('targetUserId').equals(user.userId).and(n => !n.read).count() : 0, [user]);
   const unsyncedCount = useLiveQuery(() => 
     db.assets.filter(a => 
-      a.needsSync === true || 
+      a.needsSync === 1 || 
+      a.needsSync === true as any ||
       (a.photos && a.photos.some(p => typeof p === 'string' && p.startsWith('data:image')))
     ).count()
   ) || 0;
-  const isAdmin = user?.role === 'administrador' || user?.role === 'prefeito';
-  const isManager = user?.role === 'administrador' || user?.role === 'responsavel' || user?.role === 'prefeito';
+  const [syncing, setSyncing] = useState(false);
+  const isAdmin = user?.role === 'administrador' || user?.role === 'prefeito' || user?.email === 'henri199@gmail.com' || auth.currentUser?.email === 'henri199@gmail.com';
+  const isManager = isAdmin || user?.role === 'responsavel';
 
   const [quotaExceeded, setQuotaExceeded] = useState(false);
-
-  const [isSyncing, setIsSyncing] = useState(false);
-  const [syncError, setSyncError] = useState(false);
-
-  useEffect(() => {
-    const handleStart = () => { setIsSyncing(true); setSyncError(false); };
-    const handleEnd = (e: any) => { 
-      setIsSyncing(false); 
-      if (!e.detail?.success) setSyncError(true);
-    };
-
-    window.addEventListener('app-sync-start', handleStart);
-    window.addEventListener('app-sync-end', handleEnd);
-    return () => {
-      window.removeEventListener('app-sync-start', handleStart);
-      window.removeEventListener('app-sync-end', handleEnd);
-    };
-  }, []);
 
   useEffect(() => {
     if (user) {
       setupSync();
       
       const syncAndNotify = async () => {
+        setSyncing(true);
         try {
           await pushLocalChanges();
         } catch (err: any) {
           if (err.message?.includes('LIMITE DE COTAS')) setQuotaExceeded(true);
+        } finally {
+          setTimeout(() => setSyncing(false), 2000);
         }
         
         try {
@@ -175,9 +169,31 @@ export function Dashboard() {
     }} />;
   }
 
+  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(() => {
+    const saved = localStorage.getItem('sidebar_collapsed');
+    return saved ? JSON.parse(saved) : window.innerWidth < 1280;
+  });
+  const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
+
+  // Persistence and auto-collapse
+  useEffect(() => {
+    localStorage.setItem('sidebar_collapsed', JSON.stringify(isSidebarCollapsed));
+  }, [isSidebarCollapsed]);
+
+  useEffect(() => {
+    const handleResize = () => {
+      if (window.innerWidth < 1280) {
+        setIsSidebarCollapsed(true);
+      }
+    };
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, []);
+
   const handleTabChange = (tab: typeof activeTab) => {
     setActiveTab(tab);
     setSelectedInspectionId(null);
+    setIsMobileMenuOpen(false);
   };
 
   const handleResetSystem = async () => {
@@ -295,6 +311,10 @@ export function Dashboard() {
     }
 
     switch (activeTab) {
+      case 'training':
+        return <TrainingView />;
+      case 'analytics':
+        return <InventoryDashboard />;
       case 'scanner':
         return <ScannerView onOpenInspection={handleScannerOpen} />;
       case 'home':
@@ -340,6 +360,12 @@ export function Dashboard() {
                     {isManager && (
                       <div className="flex items-center gap-4 ml-2">
                         <button onClick={async () => {
+                          const confirmCleanup = window.confirm("Isso irá remover vistorias sem itens e locais sem vistorias. Deseja prosseguir?");
+                          if (!confirmCleanup) return;
+
+                          // Tenta sincronizar antes de limpar
+                          try { await pushLocalChanges(); } catch (e) {}
+
                           const allInspections = await db.inspections.toArray();
                           const allLocations = await db.locations.toArray();
                           let clearedInps = 0;
@@ -380,6 +406,18 @@ export function Dashboard() {
                           }
                           else alert('Tudo em ordem.');
                         }} className="text-[10px] font-bold uppercase text-slate-400 hover:text-indigo-600 transition-colors">Higienizar</button>
+
+                        <button 
+                          onClick={() => {
+                            if (window.confirm("Isso irá limpar o cache local e baixar todos os dados da nuvem novamente. Deseja continuar?")) {
+                              forceFullSyncRecovery();
+                            }
+                          }}
+                          className="text-[10px] font-bold uppercase text-slate-400 hover:text-indigo-600 transition-colors flex items-center gap-1"
+                        >
+                          <Database className="w-3 h-3" />
+                          Sincronização Forçada
+                        </button>
                       </div>
                     )}
                   </div>
@@ -464,8 +502,8 @@ export function Dashboard() {
               </div>
             </div>
 
-            {/* 📡 5. Status Offline/Sync */}
-            {!isOnline ? (
+            {/* 📡 5. Status Offline/Sync (Removed as per user request to avoid persistent messages) */}
+            {!isOnline && (
               <div className="bg-rose-50 border border-rose-100 rounded-[2.5rem] p-6 flex flex-col md:flex-row items-center gap-6 animate-in zoom-in-95 duration-500 shadow-xl shadow-rose-500/5">
                 <div className="w-20 h-20 bg-white rounded-3xl flex items-center justify-center shadow-lg shadow-rose-500/10 shrink-0">
                   <AlertCircle className="w-10 h-10 text-rose-500" />
@@ -474,31 +512,6 @@ export function Dashboard() {
                   <span className="text-lg font-black text-rose-900 tracking-tight uppercase leading-none">Conectividade Interrompida</span>
                   <span className="text-xs font-bold text-rose-600/70">O modo offline-first está mantendo seus dados salvos localmente. {unsyncedCount > 0 ? `Existem ${unsyncedCount} itens pendentes de sincronização.` : 'Tudo pronto para subir assim que a internet voltar.'}</span>
                 </div>
-              </div>
-            ) : (
-              <div className="flex flex-col items-center gap-3 py-6 bg-card rounded-[2.5rem] border border-border mt-4 group shadow-sm">
-                <div className="flex items-center gap-2">
-                  <div className={cn(
-                    "w-2 h-2 rounded-full shadow-[0_0_12px] animate-pulse",
-                    isSyncing ? "bg-emerald-500 shadow-emerald-500" : 
-                    syncError ? "bg-amber-500 shadow-amber-500" : 
-                    unsyncedCount > 0 ? "bg-blue-500 shadow-blue-500" : "bg-emerald-500 shadow-emerald-500"
-                  )}></div>
-                  <span className="text-[10px] font-black text-text-muted uppercase tracking-[0.2em] leading-none">
-                    {isSyncing ? `Sincronizando ${unsyncedCount} registros com a prefeitura...` :
-                     syncError && unsyncedCount > 0 ? `Sincronização pausada (${unsyncedCount} registros pendentes)` :
-                     unsyncedCount > 0 ? `Aguardando para sincronizar ${unsyncedCount} registros...` : 
-                     'Nuvem e Dispositivo Sincronizados (100%)'}
-                  </span>
-                </div>
-                {isSyncing && (
-                  <div className="w-64 h-1.5 bg-slate-200 rounded-full overflow-hidden shadow-inner translate-y-1">
-                    <div className="h-full bg-emerald-500 animate-progress origin-left rounded-full"></div>
-                  </div>
-                )}
-                {syncError && unsyncedCount > 0 && (
-                   <span className="text-[9px] font-bold text-amber-600 uppercase">Aguardando disponibilidade da rede ou cotas</span>
-                )}
               </div>
             )}
           </div>
@@ -540,7 +553,13 @@ export function Dashboard() {
     <div className="flex flex-col lg:flex-row min-h-screen bg-bg">
       {/* 📱 Mobile Header */}
       <div className="lg:hidden flex items-center justify-between p-4 bg-card border-b border-border sticky top-0 z-50">
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-3">
+           <button 
+             onClick={() => setIsMobileMenuOpen(true)}
+             className="w-10 h-10 flex items-center justify-center bg-slate-50 text-slate-400 rounded-xl border border-slate-100"
+           >
+              <LayoutGrid className="w-5 h-5" />
+           </button>
            {selectedInspectionId ? (
              <button onClick={() => setSelectedInspectionId(null)} className="flex items-center gap-2 text-slate-900 font-black">
                 <ArrowLeft className="w-5 h-5 text-slate-400" /> 
@@ -566,47 +585,107 @@ export function Dashboard() {
         </div>
       </div>
 
-      {/* 🖥️ Desktop Sidebar */}
-      <aside className="hidden lg:flex flex-col w-80 bg-white border-r border-slate-100 p-8 sticky top-0 h-screen transition-all">
-        <div className="flex items-center gap-3 mb-12 pl-2">
-           <div className="w-11 h-11 bg-indigo-600 rounded-xl flex items-center justify-center shadow-xl shadow-indigo-500/20">
-              <ShieldCheck className="w-6 h-6 text-white" />
-           </div>
-           <div className="flex flex-col leading-none">
-              <span className="font-display font-extrabold text-2xl tracking-tighter text-slate-900">PATRI<span className="text-indigo-600">360</span></span>
-              <span className="text-[10px] font-bold text-slate-400 uppercase tracking-[0.2em] leading-none mt-1">Manoel Viana</span>
-           </div>
-        </div>
+      {/* 🎭 Mobile Overlay */}
+      {isMobileMenuOpen && (
+        <div 
+          className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[60] lg:hidden animate-in fade-in duration-300"
+          onClick={() => setIsMobileMenuOpen(false)}
+        />
+      )}
 
-        <nav className="flex flex-col gap-1.5 flex-1">
-          <NavItem active={activeTab === 'home' && !selectedInspectionId} label="Dashboard" icon={LayoutGrid} onClick={() => handleTabChange('home')} />
-          <NavItem active={activeTab === 'scanner'} label="Scanner QR" icon={Search} onClick={() => handleTabChange('scanner')} />
-          <NavItem active={activeTab === 'notifications'} label="Alertas" icon={Bell} onClick={() => handleTabChange('notifications')} badge={unreadNotifications || 0} />
-          <div className="h-4" />
-          <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest px-4 mb-2">Gestão Patrimonial</span>
-          <NavItem active={activeTab === 'inspections'} label="Dossiês" icon={ClipboardList} onClick={() => handleTabChange('inspections')} />
-          <NavItem active={activeTab === 'locations'} label="Setores" icon={Building2} onClick={() => handleTabChange('locations')} />
-          {isManager && <NavItem active={activeTab === 'reports'} label="Relatórios" icon={BarChart3} onClick={() => handleTabChange('reports')} />}
-          {isAdmin && (
-            <NavItem active={activeTab === 'users'} label="Equipe" icon={Users} onClick={() => handleTabChange('users')} />
-          )}
-        </nav>
-
-        <div className="mt-auto pt-8 border-t border-slate-100">
-          <div className="p-4 bg-slate-50 rounded-2xl flex items-center gap-3 border border-slate-100 mb-4 transition-all hover:bg-slate-100 cursor-default">
-             <div className="w-10 h-10 bg-white rounded-xl flex items-center justify-center shadow-sm text-indigo-600 font-bold text-sm border border-slate-200">
-                {user?.name.charAt(0)}
+      {/* 🖥️ Integrated Responsive Sidebar */}
+      <aside className={cn(
+        "fixed lg:sticky inset-y-0 left-0 flex flex-col bg-white border-r border-slate-100 transition-all duration-500 ease-in-out z-[70] h-screen top-0",
+        isMobileMenuOpen ? "translate-x-0 w-80 px-8" : "-translate-x-full lg:translate-x-0",
+        !isMobileMenuOpen && isSidebarCollapsed ? "lg:w-24 lg:px-4" : !isMobileMenuOpen ? "lg:w-80 lg:px-8" : ""
+      )}>
+        <div className="h-32 flex items-center justify-between">
+          <div className={cn("flex items-center gap-3 transition-all duration-500 overflow-hidden", isSidebarCollapsed ? "w-0 opacity-0" : "w-auto opacity-100 pl-2")}>
+             <div className="w-11 h-11 bg-indigo-600 rounded-xl flex items-center justify-center shadow-xl shadow-indigo-500/20 shrink-0">
+                <ShieldCheck className="w-6 h-6 text-white" />
              </div>
-             <div className="flex flex-col overflow-hidden">
-                <span className="text-sm font-bold text-slate-900 truncate">{user?.name}</span>
-                <span className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">{user?.role}</span>
+             <div className="flex flex-col leading-none whitespace-nowrap">
+                <span className="font-display font-extrabold text-2xl tracking-tighter text-slate-900">PATRI<span className="text-indigo-600">360</span></span>
+                <span className="text-[10px] font-bold text-slate-400 uppercase tracking-[0.2em] mt-1">Manoel Viana</span>
              </div>
           </div>
           <button 
-            onClick={signOut}
-            className="flex items-center gap-3 w-full px-4 py-3 rounded-xl text-slate-500 hover:text-rose-600 hover:bg-rose-50 font-bold text-sm transition-all group outline-none"
+            onClick={() => setIsSidebarCollapsed(!isSidebarCollapsed)}
+            className={cn(
+              "p-2.5 rounded-xl bg-slate-50 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 transition-all border border-slate-100 shadow-sm shrink-0",
+              isSidebarCollapsed ? "mx-auto" : ""
+            )}
+            title={isSidebarCollapsed ? "Expandir Menu" : "Recolher Menu"}
           >
-            <LogOut className="w-5 h-5 transition-transform group-hover:-translate-x-1" /> Sair
+            {isSidebarCollapsed ? <ChevronRight className="w-4 h-4" /> : <ChevronLeft className="w-4 h-4" />}
+          </button>
+        </div>
+
+        <nav className="flex flex-col gap-1.5 flex-1">
+          <NavItem collapsed={isSidebarCollapsed} active={activeTab === 'home' && !selectedInspectionId} label="Dashboard" icon={LayoutGrid} onClick={() => handleTabChange('home')} />
+          <NavItem collapsed={isSidebarCollapsed} active={activeTab === 'training'} label="Treinamento" icon={GraduationCap} onClick={() => handleTabChange('training')} />
+          <NavItem collapsed={isSidebarCollapsed} active={activeTab === 'analytics'} label="Estatísticas" icon={BarChart3} onClick={() => handleTabChange('analytics')} />
+          <NavItem collapsed={isSidebarCollapsed} active={activeTab === 'scanner'} label="Scanner QR" icon={Search} onClick={() => handleTabChange('scanner')} />
+          <NavItem collapsed={isSidebarCollapsed} active={activeTab === 'notifications'} label="Alertas" icon={Bell} onClick={() => handleTabChange('notifications')} badge={isSidebarCollapsed ? (unreadNotifications ? '•' : 0) : unreadNotifications || 0} />
+          
+          {unsyncedCount > 0 && (
+            <div className={cn(
+              "mt-2 px-6 py-3 bg-amber-50 rounded-2xl border border-amber-100 flex items-center gap-3 animate-in fade-in duration-500",
+              isSidebarCollapsed && "px-0 justify-center w-14 mx-auto"
+            )}>
+              <Cloud className={cn("w-4 h-4 text-amber-600", syncing && "animate-bounce")} />
+              {!isSidebarCollapsed && (
+                <div className="flex flex-col leading-none">
+                  <span className="text-[9px] font-black text-amber-900 uppercase">{unsyncedCount} PENDENTES</span>
+                  <span className="text-[7px] font-bold text-amber-500 uppercase tracking-widest mt-0.5">Sincronizando...</span>
+                </div>
+              )}
+            </div>
+          )}
+
+          <div className={cn("h-4 transition-all", isSidebarCollapsed ? "h-6" : "h-4")} />
+          {!isSidebarCollapsed && <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest px-4 mb-2 animate-in fade-in duration-700">Gestão Patrimonial</span>}
+          
+          <NavItem collapsed={isSidebarCollapsed} active={activeTab === 'inspections'} label="Dossiês" icon={ClipboardList} onClick={() => handleTabChange('inspections')} />
+          <NavItem collapsed={isSidebarCollapsed} active={activeTab === 'locations'} label="Setores" icon={Building2} onClick={() => handleTabChange('locations')} />
+          
+          {isManager && <NavItem collapsed={isSidebarCollapsed} active={activeTab === 'reports'} label="Relatórios" icon={BarChart3} onClick={() => handleTabChange('reports')} />}
+          
+          {isAdmin && (
+            <>
+              {!isSidebarCollapsed && <div className="h-4" />}
+              {!isSidebarCollapsed && <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest px-4 mb-2 animate-in fade-in duration-700">Equipe</span>}
+              <NavItem collapsed={isSidebarCollapsed} active={activeTab === 'users'} label="Agentes" icon={Users} onClick={() => handleTabChange('users')} />
+            </>
+          )}
+        </nav>
+
+        <div className="mt-auto pt-8 border-t border-slate-100 pb-8">
+          {!isSidebarCollapsed ? (
+            <div className="p-4 bg-slate-50 rounded-2xl flex items-center gap-3 border border-slate-100 mb-4 transition-all hover:bg-slate-100 cursor-default animate-in slide-in-from-bottom-2">
+               <div className="w-10 h-10 bg-white rounded-xl flex items-center justify-center shadow-sm text-indigo-600 font-bold text-sm border border-slate-200 shrink-0">
+                  {user?.name.charAt(0)}
+               </div>
+               <div className="flex flex-col overflow-hidden">
+                  <span className="text-sm font-bold text-slate-900 truncate">{user?.name}</span>
+                  <span className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">{user?.role}</span>
+               </div>
+            </div>
+          ) : (
+            <div className="w-12 h-12 mx-auto bg-slate-50 rounded-xl flex items-center justify-center mb-4 border border-slate-100 text-indigo-600 font-bold text-sm">
+               {user?.name.charAt(0)}
+            </div>
+          )}
+          <button 
+            onClick={signOut}
+            className={cn(
+              "flex items-center gap-3 rounded-xl text-slate-500 hover:text-rose-600 hover:bg-rose-50 font-bold text-sm transition-all group outline-none",
+              isSidebarCollapsed ? "justify-center px-0 w-12 mx-auto h-12" : "w-full px-4 py-3"
+            )}
+            title={isSidebarCollapsed ? "Encerrar Sessão" : undefined}
+          >
+            <LogOut className="w-5 h-5 shrink-0" />
+            {!isSidebarCollapsed && "Sair"}
           </button>
         </div>
       </aside>
@@ -615,10 +694,10 @@ export function Dashboard() {
       <main className="flex-1 flex flex-col min-w-0">
         {/* 🗺️ Universal Header with Breadcrumbs */}
         <header className={cn(
-          "flex items-center justify-between px-6 lg:px-12 py-6 lg:py-8 bg-bg/80 backdrop-blur-xl sticky top-0 z-30 transition-all",
+          "flex items-center justify-between px-6 lg:px-10 py-6 lg:py-7 bg-bg/80 backdrop-blur-xl sticky top-0 z-30 transition-all",
           selectedInspectionId ? "pb-4" : ""
         )}>
-          <div className="flex items-center gap-4 lg:gap-6 w-full lg:w-auto">
+          <div className="flex items-center gap-3 lg:gap-5 min-w-0 flex-1">
             {(activeTab !== 'home' || selectedInspectionId) && (
               <button 
                 onClick={() => handleTabChange('home')}
@@ -643,7 +722,7 @@ export function Dashboard() {
                       onClick={() => setSelectedInspectionId(null)}
                       className={cn("text-[9px] lg:text-[10px] font-black uppercase tracking-widest cursor-pointer transition-colors shrink-0", selectedInspectionId ? "text-slate-400 hover:text-blue-600" : "text-blue-600")}
                     >
-                      {activeTab === 'locations' ? 'Ambientes' : activeTab === 'inspections' ? 'Vistorias' : activeTab === 'reports' ? 'Auditoria' : activeTab === 'users' ? 'Equipe' : activeTab === 'settings' ? 'Global' : activeTab === 'notifications' ? 'Alertas' : activeTab}
+                      {activeTab === 'locations' ? 'Ambientes' : activeTab === 'inspections' ? 'Vistorias' : activeTab === 'reports' ? 'Auditoria' : activeTab === 'users' ? 'Equipe' : activeTab === 'settings' ? 'Global' : activeTab === 'notifications' ? 'Alertas' : activeTab === 'training' ? 'Treinamento' : activeTab}
                     </span>
                   </>
                 )}
@@ -657,7 +736,7 @@ export function Dashboard() {
                 )}
               </div>
               <h2 className="text-xl lg:text-3xl font-black text-primary tracking-tighter leading-none truncate">
-                {selectedInspectionId ? "Auditoria de Ambiente" : activeTab === 'home' ? `Olá, ${user?.name.split(' ')[0]}` : activeTab === 'locations' ? 'Registro de Ambientes' : activeTab === 'inspections' ? 'Dossiê de Vistorias' : activeTab === 'reports' ? 'Painel de Transparência' : activeTab === 'users' ? 'Gestão de Agentes' : activeTab === 'settings' ? 'Configurações de Instância' : activeTab === 'notifications' ? 'Centro de Controle' : activeTab}
+                {selectedInspectionId ? "Auditoria de Ambiente" : activeTab === 'home' ? `Olá, ${user?.name.split(' ')[0]}` : activeTab === 'locations' ? 'Registro de Ambientes' : activeTab === 'inspections' ? 'Dossiê de Vistorias' : activeTab === 'reports' ? 'Painel de Transparência' : activeTab === 'users' ? 'Gestão de Agentes' : activeTab === 'settings' ? 'Configurações de Instância' : activeTab === 'notifications' ? 'Centro de Controle' : activeTab === 'training' ? 'Centro de Treinamento' : activeTab}
               </h2>
             </div>
           </div>
@@ -674,8 +753,10 @@ export function Dashboard() {
              </div>
 
              <div className="flex items-center gap-2 px-4 py-2 bg-card border border-border rounded-full shadow-sm">
-                <div className={cn("w-2 h-2 rounded-full", isOnline ? "bg-emerald-500 shadow-[0_0_8px_#10b981]" : "bg-rose-500")} />
-                <span className="text-[10px] font-black text-text-muted uppercase tracking-widest leading-none">{isOnline ? "Conectado" : "Offline"}</span>
+                <div className={cn("w-2 h-2 rounded-full", syncing ? "bg-indigo-500 animate-pulse" : (isOnline ? "bg-emerald-500 shadow-[0_0_8px_#10b981]" : "bg-rose-500"))} />
+                <span className="text-[10px] font-black text-text-muted uppercase tracking-widest leading-none">
+                  {syncing ? "Sincronizando..." : (isOnline ? "Conectado" : "Offline")}
+                </span>
              </div>
 
              <button onClick={() => setActiveTab('notifications')} className="relative w-12 h-12 flex items-center justify-center bg-card border border-border rounded-2xl text-text-muted hover:text-primary transition-all hover:bg-bg">
@@ -704,7 +785,7 @@ export function Dashboard() {
       {/* 🤳 Mobile Bottom Tab Bar */}
       <nav className="fixed bottom-0 left-0 right-0 lg:hidden bg-card/90 backdrop-blur-xl border-t border-border flex items-center justify-around p-4 pb-6 z-50">
         <MobileNavItem active={activeTab === 'home' && !selectedInspectionId} icon={LayoutGrid} onClick={() => handleTabChange('home')} />
-        <MobileNavItem active={activeTab === 'inspections'} icon={ClipboardList} onClick={() => handleTabChange('inspections')} />
+        <MobileNavItem active={activeTab === 'training'} icon={GraduationCap} onClick={() => handleTabChange('training')} />
         <div className="relative -top-6">
            <motion.button 
              whileTap={{ scale: 0.9 }}
@@ -843,23 +924,26 @@ function RecentInspectionRow({ inspection, locationName, onClick }: { inspection
   );
 }
 
-function NavItem({ active, label, icon: Icon, onClick, badge }: { active: boolean, icon: any, label: string, onClick: () => void, badge?: number }) {
+function NavItem({ active, label, icon: Icon, onClick, badge, collapsed }: { active: boolean, icon: any, label: string, onClick: () => void, badge?: any, collapsed?: boolean }) {
   return (
     <button 
       onClick={onClick}
+      title={collapsed ? label : undefined}
       className={cn(
-        "flex items-center gap-4 px-6 py-4 rounded-xl font-bold text-sm transition-all group relative",
-        active ? "bg-slate-900 text-white shadow-xl shadow-slate-200" : "text-slate-500 hover:bg-slate-50 hover:text-slate-900"
+        "flex items-center gap-4 py-4 rounded-2xl font-black text-[10px] uppercase tracking-widest transition-all group relative overflow-hidden",
+        collapsed ? "justify-center px-0 w-14 mx-auto" : "px-6 w-full",
+        active ? "bg-slate-900 text-white shadow-2xl shadow-slate-200" : "text-slate-500 hover:bg-slate-50 hover:text-slate-900"
       )}
     >
-      <Icon className={cn("w-5 h-5 transition-transform duration-300", active ? "scale-110" : "group-hover:scale-110")} />
-      <span className="flex-1 text-left tracking-tight">{label}</span>
-      {badge !== undefined && badge > 0 ? (
+      <Icon className={cn("w-5 h-5 shrink-0 transition-transform duration-500", active ? "scale-110" : "group-hover:scale-110")} />
+      {!collapsed && <span className="flex-1 text-left truncate animate-in fade-in duration-500">{label}</span>}
+      {badge !== undefined && (typeof badge === 'number' ? badge > 0 : badge) ? (
         <span className={cn(
-          "px-2 py-0.5 rounded-lg text-[9px] font-black flex items-center justify-center border",
-          active ? "bg-indigo-600 border-indigo-500 text-white" : "bg-indigo-50 border-indigo-100 text-indigo-600"
+          "rounded-full text-[8px] font-black flex items-center justify-center border transition-all",
+          collapsed ? "absolute top-2 right-2 w-2 h-2 p-0" : "px-2 py-0.5 min-w-[18px]",
+          active ? "bg-indigo-500 border-indigo-400 text-white" : "bg-indigo-100 border-indigo-200 text-indigo-700"
         )}>
-          {badge}
+          {!collapsed && badge}
         </span>
       ) : null}
     </button>

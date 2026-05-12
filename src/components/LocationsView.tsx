@@ -1,12 +1,12 @@
 import React, { useState, MouseEvent } from 'react';
-import { Card, Button, Input } from './UI';
-import { Building2, Plus, ArrowRight, Trash2, AlertCircle, X, Search, History, Calendar, CheckSquare, Map, ShieldCheck } from 'lucide-react';
-import { db, generateId, Inspection } from '../lib/db';
+import { Card, Button, Input, Select } from './UI';
+import { Building2, Plus, ArrowRight, Trash2, AlertCircle, X, Search, History, Calendar, CheckSquare, Map, ShieldCheck, Edit2, Database, MapPin } from 'lucide-react';
+import { db, generateId, Inspection, Location } from '../lib/db';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { cn, formatDate } from '../lib/utils';
 import { useAuth } from '../lib/AuthContext';
-import { syncLocation, syncInspection, pushLocalChanges } from '../lib/syncService';
-import { db as firestore } from '../lib/firebase';
+import { syncLocation, syncInspection, pushLocalChanges, forceFullSyncRecovery, hardResetAndRescue } from '../lib/syncService';
+import { db as firestore, auth } from '../lib/firebase';
 import { QRCodePrintCard } from './QRCodePrintCard';
 import { doc, deleteDoc } from 'firebase/firestore';
 import { MapContainer, TileLayer, Marker, Popup } from 'react-leaflet';
@@ -22,22 +22,39 @@ L.Icon.Default.mergeOptions({
 
 export function LocationsView({ onSelectInspection }: { onSelectInspection: (id: string) => void }) {
   const { user } = useAuth();
-  const isAdmin = user?.role === 'administrador' || user?.role === 'prefeito';
-  const isManager = user?.role === 'administrador' || user?.role === 'responsavel' || user?.role === 'prefeito';
+  const isAdmin = user?.role === 'administrador' || user?.role === 'prefeito' || user?.email === 'henri199@gmail.com' || auth.currentUser?.email === 'henri199@gmail.com';
+  const isManager = isAdmin || user?.role === 'responsavel';
   const isCommittee = isManager || user?.role === 'vistoriador';
 
-  const locations = useLiveQuery(() => db.locations.toArray());
-  const inspections = useLiveQuery(() => db.inspections.toArray());
-  const assets = useLiveQuery(() => db.assets.toArray());
+  const locations = useLiveQuery(() => db.locations.filter(l => !l.deleted).toArray());
+  const inspections = useLiveQuery(() => db.inspections.filter(i => !i.deleted).toArray());
+  const assets = useLiveQuery(() => db.assets.filter(a => !a.deleted).toArray());
   const [viewMode, setViewMode] = useState<'list' | 'map'>('list');
   const [searchTerm, setSearchTerm] = useState('');
+  const [displayLimit, setDisplayLimit] = useState(20);
   const [isAdding, setIsAdding] = useState(false);
   const [showHistoryFor, setShowHistoryFor] = useState<string | null>(null);
   const [showQRCodeFor, setShowQRCodeFor] = useState<{id: string, name: string} | null>(null);
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
   const [deleteInspectionConfirmId, setDeleteInspectionConfirmId] = useState<string | null>(null);
   const [blockingError, setBlockingError] = useState<{id: string, message: string} | null>(null);
-  const [newLoc, setNewLoc] = useState({ name: '', description: '', latitude: '', longitude: '' });
+  const [newLoc, setNewLoc] = useState({ name: '', description: '', latitude: '', longitude: '', parentId: '' });
+  const [editingLocationId, setEditingLocationId] = useState<string | null>(null);
+  const [activeParentId, setActiveParentId] = useState<string | null>(null);
+
+  const activeParentLocation = useLiveQuery(() => activeParentId ? db.locations.get(activeParentId) : undefined, [activeParentId]);
+
+  const handleEditLocation = (loc: Location) => {
+    setNewLoc({
+      name: loc.name,
+      description: loc.description,
+      latitude: loc.latitude?.toString() || '',
+      longitude: loc.longitude?.toString() || '',
+      parentId: loc.parentId || ''
+    });
+    setEditingLocationId(loc.id);
+    setIsAdding(true);
+  };
 
   const getLatestStatus = (locId: string) => {
     const locInspections = inspections?.filter(i => i.locationId === locId);
@@ -48,10 +65,50 @@ export function LocationsView({ onSelectInspection }: { onSelectInspection: (id:
     return sorted[0].status;
   };
 
-  const filteredLocations = locations?.filter(loc => 
-    loc.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    loc.description.toLowerCase().includes(searchTerm.toLowerCase())
-  );
+  const getDepartmentStats = (parentId: string) => {
+    const children = locations?.filter(l => l.parentId === parentId) || [];
+    // Inclui o próprio pai e todos os filhos
+    const relevantLocIds = [parentId, ...children.map(c => c.id)];
+
+    let emAndamento = 0;
+    let concluidas = 0;
+    let finalizadas = 0;
+
+    relevantLocIds.forEach(id => {
+      const s = getLatestStatus(id);
+      if (s === 'em_andamento') emAndamento++;
+      else if (s === 'concluida') concluidas++;
+      else if (s === 'finalizada') finalizadas++;
+    });
+
+    return {
+      childrenCount: children.length,
+      emAndamento,
+      concluidas,
+      finalizadas,
+      hasAny: emAndamento > 0 || concluidas > 0 || finalizadas > 0
+    };
+  };
+
+  const allFilteredLocations = locations?.filter(loc => {
+    const matchesSearch = loc.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+                         loc.description.toLowerCase().includes(searchTerm.toLowerCase());
+    
+    if (searchTerm) return matchesSearch;
+    
+    // NAVEGAÇÃO POR NÍVEIS (DRILL-DOWN)
+    if (!activeParentId) {
+      // Se estamos na raiz, mostramos APENAS as Secretarias (Pais)
+      return !loc.parentId;
+    } else {
+      // Se estamos dentro de um local, mostramos APENAS os filhos diretos dele
+      return loc.parentId === activeParentId;
+    }
+  });
+
+  const displayedLocations = searchTerm 
+    ? allFilteredLocations 
+    : allFilteredLocations?.slice(0, displayLimit);
 
   const handleStartInspection = async (locationId: string) => {
     // 1. Procurar vistoria pendente (qualquer uma que não esteja finalizada)
@@ -69,9 +126,14 @@ export function LocationsView({ onSelectInspection }: { onSelectInspection: (id:
       } else {
         const confirmClear = window.confirm("🗑️ ATENÇÃO: Deseja apagar permanentemente a vistoria pendente para iniciar uma nova?");
         if (confirmClear) {
-           await db.assets.where('inspectionId').equals(existing.id).delete();
-           await db.inspections.delete(existing.id);
-           console.log("Vistoria pendente removida para novo teste");
+           const now = Date.now();
+           const assetsToClear = await db.assets.where('inspectionId').equals(existing.id).toArray();
+           for (const asset of assetsToClear) {
+             await db.assets.update(asset.id, { deleted: true, needsSync: 1, updatedAt: now });
+           }
+           await db.inspections.update(existing.id, { deleted: true, needsSync: 1, updatedAt: now });
+           pushLocalChanges();
+           console.log("Vistoria pendente marcada para exclusão");
         } else {
            return;
         }
@@ -91,7 +153,8 @@ export function LocationsView({ onSelectInspection }: { onSelectInspection: (id:
       locationId,
       date: Date.now(),
       participants: [],
-      status: 'em_andamento'
+      status: 'em_andamento',
+      needsSync: 1
     });
     try { await syncInspection(id); } catch(e) { console.error(e) }
 
@@ -105,7 +168,7 @@ export function LocationsView({ onSelectInspection }: { onSelectInspection: (id:
           inspectionId: id, // Point to the new inspection
           createdBy: user?.userId || 'sistema',
           createdAt: Date.now(),
-          needsSync: true
+          needsSync: 1
         }));
         await db.assets.bulkAdd(clonedAssets);
         // Trigger background sync for these new assets
@@ -116,31 +179,46 @@ export function LocationsView({ onSelectInspection }: { onSelectInspection: (id:
     onSelectInspection(id);
   };
 
-  const handleAddLocation = async () => {
+  const handleSaveLocation = async () => {
     if (!newLoc.name.trim()) return;
-    const locId = generateId();
+    
     const lat = newLoc.latitude ? parseFloat(newLoc.latitude) : undefined;
     const lng = newLoc.longitude ? parseFloat(newLoc.longitude) : undefined;
     
-    await db.locations.add({
-      id: locId,
+    const locationData = {
       name: newLoc.name,
       description: newLoc.description,
+      parentId: newLoc.parentId || undefined,
+      needsSync: 1,
       ...(lat && lng ? { latitude: lat, longitude: lng } : {})
-    });
-    try { await syncLocation(locId); } catch(e) { console.error("Sync error", e) }
-    setNewLoc({ name: '', description: '', latitude: '', longitude: '' });
+    };
+
+    if (editingLocationId) {
+      await db.locations.update(editingLocationId, locationData);
+      try { await syncLocation(editingLocationId); } catch(e) { console.error("Sync error", e) }
+    } else {
+      const locId = generateId();
+      await db.locations.add({
+        id: locId,
+        ...locationData
+      });
+      try { await syncLocation(locId); } catch(e) { console.error("Sync error", e) }
+    }
+    
+    pushLocalChanges();
+    setNewLoc({ name: '', description: '', latitude: '', longitude: '', parentId: '' });
+    setEditingLocationId(null);
     setIsAdding(false);
   };
 
   const handleDeleteLocation = async (locId: string, locName: string) => {
-    // 1. Encontrar todas as vistorias deste local
-    const inspectionIds = (await db.inspections.where('locationId').equals(locId).toArray()).map(i => i.id);
+    // 1. Encontrar todas as vistorias deste local (reais, ignorando deletadas)
+    const inspectionIds = (await db.inspections.where('locationId').equals(locId).filter(i => !i.deleted).toArray()).map(i => i.id);
     
-    // 2. Verificar se existe algum item em qualquer uma dessas vistorias
+    // 2. Verificar se existe algum item
     let assetCount = 0;
     if (inspectionIds.length > 0) {
-      assetCount = await db.assets.where('inspectionId').anyOf(inspectionIds).count();
+      assetCount = await db.assets.where('inspectionId').anyOf(inspectionIds).filter(a => !a.deleted).count();
     }
 
     if (assetCount > 0) {
@@ -153,23 +231,25 @@ export function LocationsView({ onSelectInspection }: { onSelectInspection: (id:
       return;
     }
 
-    // Excluir vistorias vazias primeiro
+    const now = Date.now();
+    // Soft delete vistorias vazias
     if (inspectionIds.length > 0) {
       for (const invId of inspectionIds) {
-        try { await deleteDoc(doc(firestore, 'inspections', invId)); } catch(e) {}
+        await db.inspections.update(invId, { deleted: true, needsSync: 1, updatedAt: now });
       }
-      await db.inspections.bulkDelete(inspectionIds);
     }
-    // Excluir o local
-    try { await deleteDoc(doc(firestore, 'locations', locId)); } catch(e) {}
-    await db.locations.delete(locId);
+    
+    // Soft delete local
+    await db.locations.update(locId, { deleted: true, needsSync: 1, updatedAt: now });
+    
     setDeleteConfirmId(null);
+    pushLocalChanges();
   };
 
   const handleDeleteInspection = async (e: MouseEvent, inspectionId: string) => {
     e.stopPropagation();
     try {
-      const assetsCount = await db.assets.where('inspectionId').equals(inspectionId).count();
+      const assetsCount = await db.assets.where('inspectionId').equals(inspectionId).filter(a => !a.deleted).count();
       
       if (assetsCount > 0) {
         alert("Esta vistoria possui itens e não pode ser excluída.");
@@ -177,9 +257,9 @@ export function LocationsView({ onSelectInspection }: { onSelectInspection: (id:
         return;
       }
 
-      try { await deleteDoc(doc(firestore, 'inspections', inspectionId)); } catch(e) {}
-      await db.inspections.delete(inspectionId);
+      await db.inspections.update(inspectionId, { deleted: true, needsSync: 1, updatedAt: Date.now() });
       setDeleteInspectionConfirmId(null);
+      pushLocalChanges();
     } catch (err) {
       console.error("Erro ao excluir vistoria:", err);
       alert("Ocorreu um erro ao excluir a vistoria.");
@@ -187,23 +267,36 @@ export function LocationsView({ onSelectInspection }: { onSelectInspection: (id:
   };
 
   const handleDeleteAllEmptyInspections = async (locId: string) => {
-    const locInspections = inspections?.filter(i => i.locationId === locId) || [];
+    const locInspections = inspections?.filter(i => i.locationId === locId && !i.deleted) || [];
     let deletedCount = 0;
-    
+    const now = Date.now();
+
     for (const insp of locInspections) {
-      const assetsCount = await db.assets.where('inspectionId').equals(insp.id).count();
+      const assetsCount = await db.assets.where('inspectionId').equals(insp.id).filter(a => !a.deleted).count();
       if (assetsCount === 0) {
-        try { await deleteDoc(doc(firestore, 'inspections', insp.id)); } catch(e) {}
-        await db.inspections.delete(insp.id);
+        await db.inspections.update(insp.id, { deleted: true, needsSync: 1, updatedAt: now });
         deletedCount++;
       }
     }
     
     if (deletedCount > 0) {
-      alert(`${deletedCount} vistoria(s) vazia(s) removida(s), incluindo homologadas.`);
+      pushLocalChanges();
+      alert(`${deletedCount} vistoria(s) vazia(s) marcadas para remoção.`);
     } else {
       alert("Nenhuma vistoria vazia encontrada para este local.");
     }
+  };
+
+  const handleAddLocation = () => {
+    setNewLoc({ 
+      name: '', 
+      description: '', 
+      latitude: '', 
+      longitude: '', 
+      parentId: activeParentId || '' 
+    });
+    setEditingLocationId(null);
+    setIsAdding(true);
   };
 
   return (
@@ -343,9 +436,84 @@ export function LocationsView({ onSelectInspection }: { onSelectInspection: (id:
       )}
 
       <div className="flex flex-col md:flex-row md:items-end justify-between gap-8 md:px-2">
-        <div className="flex flex-col gap-2">
-          <h2 className="text-4xl font-display font-extrabold text-slate-900 tracking-tight">Ambientes Auditorados</h2>
-          <p className="text-sm font-medium text-slate-400 uppercase tracking-[0.2em] max-w-md">Gerencie repartições, prédios e salas para vistorias patrimoniais.</p>
+        <div className="flex flex-col gap-5 w-full">
+          {/* Breadcrumbs e Botão Voltar */}
+          <div className="flex items-center gap-3">
+            <button 
+              onClick={() => setActiveParentId(null)}
+              className={cn(
+                "flex items-center gap-2 text-[10px] font-black uppercase tracking-widest transition-all px-4 py-2 rounded-xl border shadow-sm",
+                activeParentId 
+                  ? "bg-slate-900 text-white border-slate-900 hover:bg-slate-800" 
+                  : "bg-indigo-50 text-indigo-600 border-indigo-100 cursor-default"
+              )}
+            >
+              <MapPin className="w-4 h-4" /> Prefeitura
+            </button>
+            {activeParentId && (
+              <div className="flex items-center gap-3 animate-in slide-in-from-left-4 duration-300">
+                <ArrowRight className="w-3 h-3 text-slate-300" />
+                <span className="bg-indigo-50 text-indigo-700 text-[10px] font-black uppercase tracking-widest px-4 py-2 rounded-xl border border-indigo-200 shadow-sm flex items-center gap-2">
+                  <Building2 className="w-4 h-4" /> {activeParentLocation?.name}
+                </span>
+              </div>
+            )}
+          </div>
+
+          {!activeParentId ? (
+            <div className="flex flex-col gap-2">
+              <h2 className="text-4xl font-display font-extrabold text-slate-900 tracking-tight">Secretarias & Departamentos</h2>
+              <p className="text-sm font-medium text-slate-400 uppercase tracking-[0.2em] max-w-md">Escolha um departamento para visualizar as salas e vistorias vinculadas.</p>
+            </div>
+          ) : (
+            <Card className="bg-indigo-600 text-white p-6 md:p-8 rounded-[2.5rem] border-none shadow-2xl shadow-indigo-600/20 flex flex-col md:flex-row md:items-center justify-between gap-6 animate-in zoom-in-95 duration-500">
+              <div className="flex flex-col gap-2">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 bg-white/20 rounded-xl flex items-center justify-center">
+                    <Building2 className="w-6 h-6 text-white" />
+                  </div>
+                  <h2 className="text-2xl font-display font-extrabold tracking-tight">{activeParentLocation?.name}</h2>
+                </div>
+                <p className="text-indigo-100/60 text-[10px] font-black uppercase tracking-widest ml-13">{activeParentLocation?.description || 'Repartição Pública Principal'}</p>
+              </div>
+              
+              <div className="flex items-center gap-4 shrink-0">
+                <div className="flex flex-col items-end gap-1">
+                   <span className="text-[10px] font-black uppercase opacity-60">Status Geral</span>
+                   <div className="bg-white/20 px-4 py-1.5 rounded-full border border-white/20 text-[10px] font-black uppercase tracking-widest">
+                     {getLatestStatus(activeParentLocation?.id || '')?.replace('_', ' ') || 'Pendente'}
+                   </div>
+                </div>
+                <Button 
+                  variant="accent" 
+                  onClick={() => handleStartInspection(activeParentId)}
+                  className="rounded-2xl h-14 px-8 bg-white text-indigo-600 hover:bg-indigo-50 border-none shadow-xl shadow-black/10 font-black uppercase tracking-widest text-[9px]"
+                >
+                  Auditar Secretaria <Plus className="w-4 h-4 ml-2" />
+                </Button>
+              </div>
+            </Card>
+          )}
+
+          {isAdmin && !activeParentId && (
+            <div className="flex items-center gap-3 mt-2">
+              <button 
+                onClick={() => forceFullSyncRecovery()}
+                className="flex items-center gap-2 px-4 py-2 bg-amber-500 text-white rounded-xl hover:bg-amber-600 transition-all font-black text-[10px] uppercase tracking-widest shadow-lg shadow-amber-500/20"
+              >
+                <Database className="w-4 h-4" />
+                Forçar Sincronização (Recuperar Dados)
+              </button>
+              <button 
+                onClick={() => hardResetAndRescue()}
+                className="flex items-center gap-2 px-4 py-2 bg-rose-600 text-white rounded-xl hover:bg-rose-700 transition-all font-black text-[10px] uppercase tracking-widest shadow-lg shadow-rose-600/20"
+              >
+                <AlertCircle className="w-4 h-4" />
+                Sincronização Profunda (Geral)
+              </button>
+              <span className="text-[9px] font-bold text-amber-600 uppercase tracking-tighter opacity-60">Use para atualizar dados de ontem</span>
+            </div>
+          )}
         </div>
         
         <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-4">
@@ -381,7 +549,7 @@ export function LocationsView({ onSelectInspection }: { onSelectInspection: (id:
               />
            </div>
            {!isAdding && isCommittee && (
-             <Button variant="accent" icon={Plus} onClick={() => setIsAdding(true)} className="rounded-2xl h-14 px-8 font-black uppercase tracking-widest text-[9px] shadow-xl shadow-indigo-600/20">
+             <Button variant="accent" icon={Plus} onClick={handleAddLocation} className="rounded-2xl h-14 px-8 font-black uppercase tracking-widest text-[9px] shadow-xl shadow-indigo-600/20">
                CADASTRAR UNIDADE
              </Button>
            )}
@@ -395,7 +563,7 @@ export function LocationsView({ onSelectInspection }: { onSelectInspection: (id:
               attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
               url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
             />
-            {filteredLocations?.filter(loc => loc.latitude && loc.longitude).map(loc => (
+            {allFilteredLocations?.filter(loc => loc.latitude && loc.longitude).map(loc => (
                 <Marker key={loc.id} position={[loc.latitude!, loc.longitude!]}>
                   <Popup className="custom-popup">
                     <div className="flex flex-col gap-3 p-4 min-w-[240px]">
@@ -423,37 +591,73 @@ export function LocationsView({ onSelectInspection }: { onSelectInspection: (id:
           <Card className="p-10 border-none shadow-[0_40px_100px_-20px_rgba(79,70,229,0.15)] ring-1 ring-indigo-100 animate-in zoom-in-95 duration-500 rounded-[3rem] flex flex-col gap-8 relative z-10 bg-white">
             <div className="flex items-center justify-between">
                <div className="flex flex-col">
-                  <h3 className="font-display font-extrabold text-2xl text-slate-900 tracking-tight">Novo Ambiente</h3>
+                  <h3 className="font-display font-extrabold text-2xl text-slate-900 tracking-tight">{editingLocationId ? 'Editar Ambiente' : 'Novo Ambiente'}</h3>
                   <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mt-1">Identificação da unidade</p>
                </div>
-               <button onClick={() => setIsAdding(false)} className="p-3 hover:bg-slate-50 rounded-2xl transition-colors text-slate-400 border border-transparent hover:border-slate-100">
+               <button onClick={() => { setIsAdding(false); setEditingLocationId(null); setNewLoc({ name: '', description: '', latitude: '', longitude: '', parentId: '' }); }} className="p-3 hover:bg-slate-50 rounded-2xl transition-colors text-slate-400 border border-transparent hover:border-slate-100">
                   <X className="w-6 h-6" />
                </button>
             </div>
             <div className="flex flex-col gap-5">
               <Input label="Nome da Unidade" placeholder="Ex: Secretaria de Saúde" value={newLoc.name} onChange={e => setNewLoc({...newLoc, name: e.target.value})} />
               <Input label="Endereço / Descrição" placeholder="Rua Central, nº 123" value={newLoc.description} onChange={e => setNewLoc({...newLoc, description: e.target.value})} />
+              
+              <Select 
+                label="Departamento Pai / Vínculo (Opcional)"
+                value={newLoc.parentId}
+                onChange={e => setNewLoc({...newLoc, parentId: e.target.value})}
+                disabled={!!activeParentId && !editingLocationId}
+                options={[
+                  { value: '', label: 'Nenhum (Raiz)' },
+                  ...(locations || [])
+                    .filter(l => l.id !== editingLocationId)
+                    .map(l => ({ value: l.id, label: l.name }))
+                ]}
+              />
+
               <div className="flex gap-4">
                 <Input label="Latitude (Opcional)" placeholder="-29.5878" type="number" step="any" value={newLoc.latitude} onChange={e => setNewLoc({...newLoc, latitude: e.target.value})} />
                 <Input label="Longitude (Opcional)" placeholder="-55.4828" type="number" step="any" value={newLoc.longitude} onChange={e => setNewLoc({...newLoc, longitude: e.target.value})} />
               </div>
             </div>
-            <Button onClick={handleAddLocation} icon={ShieldCheck} className="h-16 font-black tracking-[0.2em] text-sm rounded-2xl shadow-xl shadow-indigo-600/20" variant="accent">
-               SALVAR UNIDADE
+            <Button onClick={handleSaveLocation} icon={ShieldCheck} className="h-16 font-black tracking-[0.2em] text-sm rounded-2xl shadow-xl shadow-indigo-600/20" variant="accent">
+               {editingLocationId ? 'ATUALIZAR UNIDADE' : 'SALVAR UNIDADE'}
             </Button>
           </Card>
         )}
 
-        {filteredLocations?.map(loc => {
+        {displayedLocations?.map(loc => {
           const status = getLatestStatus(loc.id);
+          const isParent = !loc.parentId;
+          const stats = isParent ? getDepartmentStats(loc.id) : null;
           return (
-            <Card key={loc.id} className="group p-10 rounded-[3rem] flex flex-col gap-8 border-none shadow-[0_8px_40px_-15px_rgba(0,0,0,0.03)] hover:shadow-[0_30px_80px_-20px_rgba(79,70,229,0.12)] hover:-translate-y-2 transition-all duration-700 bg-white relative overflow-hidden">
-              <div className="flex items-start justify-between">
-                <div className="w-20 h-16 bg-slate-50 group-hover:bg-indigo-600 rounded-[1.5rem] flex items-center justify-center transition-all duration-700 text-slate-400 group-hover:text-white shadow-sm border border-slate-100 group-hover:border-indigo-600 group-hover:shadow-indigo-600/20">
-                  <Building2 className="w-8 h-8" />
+            <Card key={loc.id} className={cn(
+              "group p-10 rounded-[3rem] flex flex-col gap-8 transition-all duration-700 relative overflow-hidden hover:-translate-y-2 shadow-[0_8px_40px_-15px_rgba(0,0,0,0.03)]",
+              isParent 
+                ? "bg-indigo-50/40 border-2 border-indigo-200 hover:border-indigo-400 hover:shadow-indigo-900/10" 
+                : "bg-white border-2 border-slate-100 hover:border-indigo-300 hover:shadow-slate-900/10"
+            )}>
+              {/* Parent badge indicator */}
+              {isParent && (
+                <div className="absolute top-0 right-0">
+                  <div className="bg-indigo-600 text-white text-[9px] font-black uppercase tracking-[0.2em] px-6 py-2 rounded-bl-3xl shadow-lg">
+                    Secretaria / Depto
+                  </div>
+                </div>
+              )}
+
+              <div className="flex items-start justify-between mt-2">
+                <div className={cn(
+                  "w-20 h-16 rounded-[1.5rem] flex items-center justify-center transition-all duration-700 border shadow-sm",
+                  isParent
+                    ? "bg-indigo-600 text-white border-indigo-500 shadow-indigo-200"
+                    : "bg-slate-50 text-slate-400 border-slate-100 group-hover:bg-indigo-50 group-hover:text-indigo-600 group-hover:border-indigo-100 group-hover:shadow-indigo-600/10"
+                )}>
+                  {isParent ? <Building2 className="w-8 h-8" /> : <MapPin className="w-7 h-7" />}
                 </div>
                 <div className="flex flex-col items-end gap-3">
-                  {status && (
+                  {/* Para Salas (Filhos): Mostra o status normal */}
+                  {!isParent && status && (
                     <div className={cn(
                       "text-[9px] font-black uppercase tracking-[0.15em] px-4 py-1.5 rounded-full border shadow-sm transition-all",
                       status === 'em_andamento' ? "bg-indigo-50 text-indigo-600 border-indigo-100 ring-4 ring-indigo-500/5" :
@@ -461,6 +665,25 @@ export function LocationsView({ onSelectInspection }: { onSelectInspection: (id:
                       "bg-emerald-50 text-emerald-600 border-emerald-100 ring-4 ring-emerald-500/5"
                     )}>
                       {status.replace('_', ' ')}
+                    </div>
+                  )}
+
+                  {/* Para Departamentos (Pais): Mostra o progresso consolidado de todas as salas */}
+                  {isParent && stats?.hasAny && (
+                    <div className="flex flex-col items-end gap-1.5">
+                      <span className="text-[8px] font-black text-slate-400 uppercase tracking-widest">Painel do Departamento</span>
+                      <div className="flex flex-wrap items-center justify-end gap-2">
+                        {stats.emAndamento > 0 && <span className="text-[9px] px-2 py-1 rounded-lg bg-indigo-50 text-indigo-600 border border-indigo-100 font-bold shadow-sm">{stats.emAndamento} Em Aberto</span>}
+                        {stats.concluidas > 0 && <span className="text-[9px] px-2 py-1 rounded-lg bg-amber-50 text-amber-600 border border-amber-100 font-bold shadow-sm">{stats.concluidas} Concluídas</span>}
+                        {stats.finalizadas > 0 && <span className="text-[9px] px-2 py-1 rounded-lg bg-emerald-50 text-emerald-600 border border-emerald-100 font-bold shadow-sm">{stats.finalizadas} Homologadas</span>}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Se o Pai tiver salas mas nenhuma vistoria iniciada */}
+                  {isParent && !stats?.hasAny && stats && stats.childrenCount > 0 && (
+                    <div className="text-[9px] px-3 py-1.5 rounded-full border border-slate-200 bg-slate-50 text-slate-400 font-black uppercase tracking-widest shadow-sm">
+                      {stats.childrenCount} Ambientes Internos
                     </div>
                   )}
                   {isCommittee && (
@@ -486,15 +709,26 @@ export function LocationsView({ onSelectInspection }: { onSelectInspection: (id:
                            <span className="text-[9px] font-black text-rose-600 uppercase tracking-widest">Local com Itens</span>
                         </div>
                       ) : (
-                        <button 
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            setDeleteConfirmId(loc.id);
-                          }}
-                          className="opacity-0 group-hover:opacity-100 p-3 text-slate-300 hover:text-rose-500 hover:bg-rose-50 rounded-2xl transition-all duration-300"
-                        >
-                          <Trash2 className="w-5 h-5" />
-                        </button>
+                        <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-all duration-300">
+                          <button 
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleEditLocation(loc);
+                            }}
+                            className="p-3 text-slate-300 hover:text-indigo-600 hover:bg-slate-50 rounded-2xl transition-all"
+                          >
+                            <Edit2 className="w-5 h-5" />
+                          </button>
+                          <button 
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setDeleteConfirmId(loc.id);
+                            }}
+                            className="p-3 text-slate-300 hover:text-rose-500 hover:bg-rose-50 rounded-2xl transition-all"
+                          >
+                            <Trash2 className="w-5 h-5" />
+                          </button>
+                        </div>
                       )}
                     </div>
                   )}
@@ -502,19 +736,41 @@ export function LocationsView({ onSelectInspection }: { onSelectInspection: (id:
               </div>
               
               <div className="flex flex-col gap-2">
-                <h4 className="text-2xl font-display font-extrabold text-slate-900 tracking-tight leading-tight group-hover:text-indigo-600 transition-colors uppercase">{loc.name}</h4>
+                <div className="flex items-center gap-2">
+                  <h4 className="text-2xl font-display font-extrabold text-slate-900 tracking-tight leading-tight group-hover:text-indigo-600 transition-colors uppercase line-clamp-1">{loc.name}</h4>
+                </div>
+                {loc.parentId && (
+                  <div className="flex items-center gap-2">
+                    <span className="text-[9px] font-black text-indigo-400 uppercase tracking-widest bg-indigo-50/50 px-3 py-1 rounded-full border border-indigo-100/50">
+                      Vinculado a: {locations?.find(l => l.id === loc.parentId)?.name || '...'}
+                    </span>
+                  </div>
+                )}
                 <p className="text-sm font-medium text-slate-400 uppercase tracking-widest line-clamp-1">{loc.description}</p>
               </div>
 
               <div className="pt-2 flex flex-col gap-4">
-                <Button 
-                  variant="secondary" 
-                  size="sm" 
-                  onClick={() => handleStartInspection(loc.id)}
-                  className="w-full h-16 rounded-2xl text-[10px] font-black uppercase tracking-[0.2em] group-hover:bg-slate-900 group-hover:text-white group-hover:shadow-xl group-hover:shadow-slate-900/20 transition-all duration-700 flex items-center justify-center gap-3"
-                >
-                  {status === 'em_andamento' ? 'CONTINUAR AUDITORIA' : status === 'concluida' ? 'REVISAR DOSSIÊ' : 'INICIAR AUDITORIA'} <ArrowRight className="w-5 h-5 group-hover:translate-x-2 transition-transform" />
-                </Button>
+                {!activeParentId ? (
+                  <Button 
+                    variant="accent" 
+                    size="sm" 
+                    onClick={() => setActiveParentId(loc.id)}
+                    className="w-full h-16 rounded-2xl text-[10px] font-black uppercase tracking-[0.2em] shadow-xl shadow-indigo-600/20 transition-all duration-700 flex items-center justify-center gap-3"
+                  >
+                    ABRIR DEPARTAMENTO <ArrowRight className="w-5 h-5 translate-x-1" />
+                  </Button>
+                ) : (
+                  <Button 
+                    variant="accent" 
+                    size="sm" 
+                    onClick={() => handleStartInspection(loc.id)}
+                    className="w-full h-16 rounded-2xl text-[10px] font-black uppercase tracking-[0.2em] shadow-xl shadow-indigo-600/20 transition-all duration-700 flex items-center justify-center gap-3"
+                  >
+                    {status === 'em_andamento' ? 'CONTINUAR AUDITORIA' : status === 'concluida' ? 'REVISAR DOSSIÊ' : 'AUDITAR ESTA SALA'} <ArrowRight className="w-5 h-5 translate-x-2 transition-transform" />
+                  </Button>
+                )}
+
+                {/* Auditoria do Departamento agora no Header Card */}
                 
                 <div className="flex flex-col gap-2">
                   <button 
@@ -538,7 +794,19 @@ export function LocationsView({ onSelectInspection }: { onSelectInspection: (id:
           );
         })}
 
-        {!isAdding && filteredLocations?.length === 0 && (
+        {allFilteredLocations && allFilteredLocations.length > (displayedLocations?.length || 0) && !searchTerm && (
+           <div className="col-span-full pt-4">
+              <button 
+                onClick={() => setDisplayLimit(prev => prev + 20)}
+                className="w-full py-6 bg-slate-50 hover:bg-slate-100 text-slate-500 font-bold uppercase tracking-[0.2em] text-[10px] rounded-[3rem] border-2 border-dashed border-slate-200 transition-all flex flex-col items-center gap-2"
+              >
+                Carregar mais ambientes
+                <span className="text-[10px] opacity-40 font-black">({locations?.length} totais)</span>
+              </button>
+           </div>
+        )}
+
+        {!isAdding && allFilteredLocations?.length === 0 && (
           <div className="col-span-full py-32 flex flex-col items-center justify-center text-slate-300 border-2 border-dashed border-slate-100 rounded-[3rem] bg-slate-50/20 group">
              <Map className="w-16 h-16 opacity-20 mb-6 group-hover:scale-110 transition-transform duration-500" />
              <div className="text-center">

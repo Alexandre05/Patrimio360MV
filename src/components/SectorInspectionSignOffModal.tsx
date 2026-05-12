@@ -10,15 +10,18 @@ import {
   CheckCircle, 
   FileText, 
   AlertCircle,
+  ShieldCheck,
   Clock,
   MapPin,
-  ClipboardList
+  ClipboardList,
+  Zap,
+  History
 } from 'lucide-react';
 import { Card, Button, Input, Alert } from './UI';
 import { db as firestore, handleFirestoreError } from '../lib/firebase';
 import { doc, setDoc } from 'firebase/firestore';
 import { Asset, Location, Inspection } from '../lib/db';
-import { formatDate } from '../lib/utils';
+import { formatDate, cn } from '../lib/utils';
 import { useAuth } from '../lib/AuthContext';
 import { useToast } from '../lib/ToastContext';
 
@@ -45,11 +48,33 @@ export function SectorInspectionSignOffModal({
   const [responsibleName, setResponsibleName] = useState('');
   const [isSaving, setIsSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [isCanvasEmpty, setIsCanvasEmpty] = useState(true);
+
+  // Resize canvas when modal opens
+  React.useEffect(() => {
+    if (isOpen) {
+      const timer = setTimeout(() => {
+        if (sigPad.current) {
+          const canvas = sigPad.current.getCanvas();
+          if (canvas) {
+            // Force adjustment of canvas coordinates to visual size
+            const ratio = Math.max(window.devicePixelRatio || 1, 1);
+            canvas.width = canvas.offsetWidth * ratio;
+            canvas.height = canvas.offsetHeight * ratio;
+            canvas.getContext('2d')?.scale(ratio, ratio);
+            sigPad.current.clear();
+          }
+        }
+      }, 350); // Wait for modal animation
+      return () => clearTimeout(timer);
+    }
+  }, [isOpen]);
 
   if (!isOpen) return null;
 
   const clearSignature = () => {
     sigPad.current?.clear();
+    setIsCanvasEmpty(true);
   };
 
   const generatePDF = (signatureDataUrl: string, signedAt: number) => {
@@ -118,13 +143,13 @@ export function SectorInspectionSignOffModal({
     doc.save(`Termo_Responsabilidade_${location.name.replace(/\s+/g, '_')}_${inspection.id.slice(0, 8)}.pdf`);
   };
 
-  const handleSave = async () => {
+  const handleSave = () => {
     if (!responsibleName.trim()) {
       setError('Por favor, informe o nome do servidor responsável.');
       return;
     }
 
-    if (sigPad.current?.isEmpty()) {
+    if (isCanvasEmpty || sigPad.current?.isEmpty()) {
       setError('A assinatura é obrigatória para encerrar a vistoria.');
       return;
     }
@@ -133,7 +158,8 @@ export function SectorInspectionSignOffModal({
     setError(null);
 
     try {
-      const signatureBase64 = sigPad.current?.getTrimmedCanvas().toDataURL('image/png') || '';
+      // Capture heavy data first while UI is still active
+      const signatureBase64 = sigPad.current?.getCanvas().toDataURL('image/png') || '';
       const docId = `concluid_` + inspection.id;
       const now = Date.now();
 
@@ -148,126 +174,214 @@ export function SectorInspectionSignOffModal({
         signedByUser: user?.userId || 'unknown'
       };
 
-      await setDoc(doc(firestore, 'sector_inspections', docId), sectorData);
-      
+      // 1. Fire and forget Firestore (background sync handles it)
+      // Removed await to prevent infinite loading on slow/offline connections
+      setDoc(doc(firestore, 'sector_inspections', docId), sectorData)
+        .catch(err => {
+          console.error("Background sync error:", err);
+        });
+
+      // 2. Unblock UI immediately (Non-blocking flow)
       toast('Vistoria encerrada com sucesso!', 'success', 'Finalizado');
-      generatePDF(signatureBase64, now);
       onComplete();
+
+      // 3. Defer PDF generation (Heavy JS task) to avoid freezing main thread
+      setTimeout(() => {
+        try {
+          generatePDF(signatureBase64, now);
+        } catch (pdfErr) {
+          console.error("Background PDF generation failed:", pdfErr);
+        } finally {
+          setIsSaving(false);
+        }
+      }, 150);
+
     } catch (err: any) {
       console.error(err);
-      toast('Não foi possível salvar o encerramento.', 'error', 'Erro de Conexão');
-      setError('Falha ao salvar encerramento no servidor.');
-    } finally {
+      toast('Ocorreu um erro ao processar a assinatura.', 'error', 'Erro Crítico');
+      setError('Falha ao processar os dados da vistoria.');
       setIsSaving(false);
     }
   };
 
   return (
-    <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-900/40 backdrop-blur-sm p-4 animate-in fade-in duration-300">
-      <Card className="w-full max-w-2xl max-h-[90vh] overflow-y-auto shadow-2xl border-indigo-100 flex flex-col gap-0 p-0 overflow-hidden relative translate-y-0 scale-100 transition-all">
+    <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-900/60 backdrop-blur-md p-0 md:p-6 animate-in fade-in duration-300">
+      <Card className="w-full md:max-w-4xl h-full md:h-auto md:max-h-[95vh] shadow-[0_40px_100px_-20px_rgba(0,0,0,0.4)] border-none flex flex-col gap-0 p-0 overflow-hidden relative rounded-none md:rounded-[3rem] bg-white">
         
-        {/* Header */}
-        <div className="p-6 bg-slate-50 border-b border-slate-100 sticky top-0 z-10 flex items-center justify-between">
+        {/* Header - Fixed */}
+        <div className="px-8 py-6 bg-slate-50 border-b border-slate-100 flex items-center justify-between shrink-0">
           <div className="flex items-center gap-4">
-            <div className="w-12 h-12 bg-indigo-600 rounded-2xl flex items-center justify-center text-white shadow-lg shadow-indigo-600/20">
-              <FileText className="w-6 h-6" />
+            <div className="w-14 h-14 bg-indigo-600 rounded-[1.5rem] flex items-center justify-center text-white shadow-xl shadow-indigo-600/20">
+              <FileText className="w-7 h-7" />
             </div>
             <div>
-              <h3 className="text-xl font-display font-black text-slate-900 leading-tight">Encerramento do Setor</h3>
-              <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">{location.name}</p>
+              <h3 className="text-2xl font-display font-black text-slate-900 leading-tight">Encerramento do Setor</h3>
+              <p className="text-[11px] font-bold text-slate-400 uppercase tracking-[0.2em]">{location.name}</p>
             </div>
           </div>
-          <button onClick={onClose} className="p-2 hover:bg-slate-200 rounded-xl transition-all text-slate-400">
-            <X className="w-6 h-6" />
+          <button 
+            onClick={onClose} 
+            className="w-12 h-12 flex items-center justify-center hover:bg-slate-200 rounded-2xl transition-all text-slate-400"
+          >
+            <X className="w-7 h-7" />
           </button>
         </div>
 
-        <div className="p-8 flex flex-col gap-8">
-          {/* Summary Stats */}
-          <div className="grid grid-cols-2 gap-4">
-            <div className="bg-indigo-50/50 p-4 rounded-2xl border border-indigo-100/50">
-              <div className="flex items-center gap-3 text-indigo-600 mb-1">
-                <ClipboardList className="w-4 h-4" />
-                <span className="text-[10px] font-black uppercase tracking-widest leading-none">Bens Vistoriados</span>
+        {/* Content - Scrollable */}
+        <div className="flex-1 overflow-y-auto px-8 py-10 flex flex-col gap-10">
+          
+          {/* Item Verification List */}
+          <div className="flex flex-col gap-6">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 bg-indigo-100 rounded-xl flex items-center justify-center text-indigo-600">
+                  <ClipboardList className="w-5 h-5" />
+                </div>
+                <div>
+                  <h4 className="text-sm font-black text-slate-900 uppercase tracking-widest">Conferência de Itens</h4>
+                  <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mt-0.5">Verifique os bens antes de assinar</p>
+                </div>
               </div>
-              <p className="text-2xl font-display font-black text-slate-900">{assets.length}</p>
+              <span className="px-4 py-1.5 bg-slate-100 text-slate-600 rounded-full text-[10px] font-black uppercase tracking-widest">
+                {assets.length} ITENS
+              </span>
             </div>
-            <div className="bg-slate-50 p-4 rounded-2xl border border-slate-100">
-              <div className="flex items-center gap-3 text-slate-400 mb-1">
-                <Clock className="w-4 h-4" />
-                <span className="text-[10px] font-black uppercase tracking-widest leading-none">Início da Vistoria</span>
+
+            <div className="grid grid-cols-1 gap-3 max-h-[300px] overflow-y-auto pr-2 custom-scrollbar">
+              {assets.map((asset) => (
+                <div key={asset.id} className="flex items-center justify-between p-4 bg-slate-50 rounded-2xl border border-slate-100 group hover:border-indigo-200 hover:bg-white transition-all duration-300">
+                  <div className="flex items-center gap-4">
+                    <div className="w-10 h-10 bg-white rounded-xl flex items-center justify-center text-slate-400 shadow-sm border border-slate-100 group-hover:text-indigo-600 transition-colors">
+                      <Zap className="w-5 h-5" />
+                    </div>
+                    <div className="flex flex-col">
+                      <span className="text-sm font-bold text-slate-900 leading-tight">{asset.name}</span>
+                      <span className="text-[10px] font-black text-slate-400 mt-1 uppercase tracking-wider">Pat: {asset.patrimonyNumber}</span>
+                    </div>
+                  </div>
+                  <div className={cn(
+                    "px-3 py-1 rounded-lg text-[9px] font-black uppercase tracking-widest",
+                    asset.condition === 'novo' ? 'bg-emerald-100 text-emerald-700' :
+                    asset.condition === 'bom' ? 'bg-blue-100 text-blue-700' :
+                    asset.condition === 'regular' ? 'bg-amber-100 text-amber-700' :
+                    asset.condition === 'ruim' ? 'bg-orange-100 text-orange-700' :
+                    'bg-rose-100 text-rose-700'
+                  )}>
+                    {asset.condition}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* Summary Stats */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div className="bg-indigo-50/50 p-6 rounded-[2rem] border border-indigo-100/50 flex items-center gap-5">
+              <div className="w-12 h-12 bg-white rounded-2xl flex items-center justify-center text-indigo-600 shadow-sm border border-indigo-100">
+                <ClipboardList className="w-6 h-6" />
               </div>
-              <p className="text-sm font-bold text-slate-700">{formatDate(inspection.date)}</p>
+              <div>
+                <p className="text-2xl font-display font-black text-slate-900 leading-none">{assets.length}</p>
+                <span className="text-[10px] font-black uppercase tracking-widest text-indigo-500 mt-1 block">Bens Vistoriados</span>
+              </div>
+            </div>
+            <div className="bg-slate-50 p-6 rounded-[2rem] border border-slate-100 flex items-center gap-5">
+              <div className="w-12 h-12 bg-white rounded-2xl flex items-center justify-center text-slate-400 shadow-sm border border-slate-100">
+                <Clock className="w-6 h-6" />
+              </div>
+              <div>
+                <p className="text-lg font-bold text-slate-700 leading-none">{formatDate(inspection.date)}</p>
+                <span className="text-[10px] font-black uppercase tracking-widest text-slate-400 mt-1 block">Início da Vistoria</span>
+              </div>
             </div>
           </div>
 
           {/* Form */}
-          <div className="flex flex-col gap-6">
-            <div className="space-y-2">
-              <label className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] ml-1">
+          <div className="flex flex-col gap-8">
+            <div className="space-y-3">
+              <label className="text-[11px] font-black text-slate-500 uppercase tracking-[0.2em] ml-1">
                 Servidor Responsável pela Sala
               </label>
               <div className="relative">
-                <User className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-300" />
+                <User className="absolute left-5 top-1/2 -translate-y-1/2 w-6 h-6 text-slate-300" />
                 <Input 
                   value={responsibleName}
                   onChange={(e) => setResponsibleName(e.target.value)}
                   placeholder="Nome completo do servidor"
-                  className="pl-12 h-14 text-sm font-bold placeholder:text-slate-300 bg-white"
+                  className="pl-14 h-16 text-base font-bold placeholder:text-slate-300 bg-slate-50/50 border-slate-200 rounded-2xl focus:bg-white transition-all shadow-sm"
                 />
               </div>
             </div>
 
             <div className="space-y-4">
               <div className="flex items-center justify-between ml-1">
-                <label className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em]">
-                  Assinatura Digital (Toque ou Mouse)
+                <label className="text-[11px] font-black text-slate-500 uppercase tracking-[0.2em]">
+                  Assinatura Digital do Servidor
                 </label>
-                <button 
-                  onClick={clearSignature}
-                  className="flex items-center gap-1.5 text-rose-500 hover:text-rose-600 font-black text-[9px] uppercase tracking-widest transition-colors"
-                >
-                  <Trash2 className="w-3.5 h-3.5" /> Limpar
-                </button>
+                {!isCanvasEmpty && (
+                  <button 
+                    onClick={clearSignature}
+                    className="flex items-center gap-2 text-rose-500 hover:text-rose-600 font-black text-[10px] uppercase tracking-widest transition-all bg-rose-50 px-4 py-2 rounded-xl border border-rose-100 shadow-sm"
+                  >
+                    <Trash2 className="w-4 h-4" /> Limpar Escrita
+                  </button>
+                )}
               </div>
               
-              <div className="border-2 border-dashed border-slate-200 rounded-[2rem] bg-slate-50 relative group overflow-hidden touch-none h-48">
+              <div className={cn(
+                "border-4 border-dashed rounded-[2.5rem] bg-white relative group overflow-hidden touch-none h-72 transition-all duration-500",
+                isCanvasEmpty ? "border-slate-100 bg-slate-50/30" : "border-indigo-600 ring-[12px] ring-indigo-50"
+              )}>
                 <SignatureCanvas
                   ref={sigPad}
-                  penColor="#1e293b" // slate-800
+                  penColor="#1e293b"
+                  onBegin={() => setIsCanvasEmpty(false)}
+                  velocityFilterWeight={0.7}
                   canvasProps={{
                     className: "w-full h-full cursor-crosshair",
-                    style: { width: '100%', height: '100%' }
+                    style: { width: '100%', height: '100%', touchAction: 'none' }
                   }}
                 />
-                {!sigPad.current || sigPad.current.isEmpty() ? (
-                  <div className="absolute inset-0 flex items-center justify-center pointer-events-none opacity-20">
-                    <Signature className="w-12 h-12" />
+                {isCanvasEmpty && (
+                  <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none text-slate-200">
+                    <div className="w-20 h-20 bg-white rounded-3xl flex items-center justify-center shadow-xl border border-slate-100 mb-4 animate-bounce duration-[2000ms]">
+                      <Signature className="w-10 h-10" />
+                    </div>
+                    <span className="text-xs font-black uppercase tracking-[0.3em] text-slate-400">Assine com o dedo ou mouse</span>
                   </div>
-                ) : null}
+                )}
               </div>
             </div>
           </div>
 
           {error && (
-            <Alert variant="error" title="Atenção">
-              {error}
+            <Alert variant="error" className="rounded-3xl p-6 border-rose-100 bg-rose-50/50">
+              <div className="flex items-start gap-4">
+                <AlertCircle className="w-6 h-6 text-rose-500 shrink-0 mt-0.5" />
+                <div className="flex flex-col gap-1">
+                  <p className="font-bold text-rose-900 text-sm">Atenção Necessária</p>
+                  <p className="text-xs text-rose-700/80 font-medium leading-relaxed">{error}</p>
+                </div>
+              </div>
             </Alert>
           )}
 
-          <div className="bg-indigo-50/30 p-5 rounded-2xl border border-indigo-100/30">
-            <p className="text-[10px] leading-relaxed text-indigo-600/80 font-bold text-center">
-              Ao assinar este documento digitalmente, o servidor confirma a conferência física de todos os itens listados e assume o compromisso administrativo pela custódia dos mesmos.
-            </p>
+          <div className="bg-slate-900 p-8 rounded-[2rem] flex flex-col items-center gap-4 text-center">
+             <div className="w-10 h-10 bg-indigo-500 rounded-full flex items-center justify-center text-white shadow-lg shadow-indigo-500/20">
+                <ShieldCheck className="w-5 h-5" />
+             </div>
+             <p className="text-[11px] leading-relaxed text-slate-400 font-bold max-w-sm uppercase tracking-widest">
+               Este documento possui validade administrativa. Ao assinar, você declara estar ciente do estado físico dos bens patrimoniais registrados.
+             </p>
           </div>
         </div>
 
-        {/* Footer Actions */}
-        <div className="p-6 bg-slate-50 border-t border-slate-100 flex gap-4">
+        {/* Footer Actions - Fixed */}
+        <div className="px-8 py-8 bg-slate-50 border-t border-slate-100 flex flex-col sm:flex-row gap-4 shrink-0">
           <Button 
             variant="outline" 
             onClick={onClose} 
-            className="flex-1 h-14 border-slate-200 text-slate-500 font-black text-[11px] uppercase tracking-widest rounded-2xl"
+            className="flex-1 h-16 border-slate-200 text-slate-500 font-black text-xs uppercase tracking-[0.2em] rounded-2xl hover:bg-slate-100 transition-all"
           >
             Cancelar
           </Button>
@@ -275,9 +389,9 @@ export function SectorInspectionSignOffModal({
             onClick={handleSave}
             loading={isSaving}
             icon={CheckCircle}
-            className="flex-[2] h-14 bg-indigo-600 text-white font-black text-[11px] uppercase tracking-widest rounded-2xl shadow-xl shadow-indigo-600/20"
+            className="flex-[2] h-16 bg-indigo-600 hover:bg-indigo-700 text-white font-black text-xs uppercase tracking-[0.2em] rounded-2xl shadow-[0_20px_40px_-10px_rgba(79,70,229,0.4)] transition-all transform active:scale-95"
           >
-            Encerrar e Gerar PDF
+            Confirmar e Assinar Termo
           </Button>
         </div>
       </Card>

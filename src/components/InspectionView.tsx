@@ -12,21 +12,24 @@ import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import { compressImage } from '../lib/image';
 import { pushLocalChanges, syncInspection } from '../lib/syncService';
-import { db as firestore } from '../lib/firebase';
+import { db as firestore, auth } from '../lib/firebase';
 import { doc, deleteDoc, collection, query, where, getDocs } from 'firebase/firestore';
 import { SectorInspectionSignOffModal } from './SectorInspectionSignOffModal';
 
 export function InspectionView({ id, onBack }: { id: string, onBack: () => void }) {
   const { user } = useAuth();
   const { toast } = useToast();
-  const isManager = user?.role === 'administrador' || user?.role === 'responsavel' || user?.role === 'prefeito';
+  const [previewPhoto, setPreviewPhoto] = useState<string | null>(null);
+  const isAdmin = user?.role === 'administrador' || user?.role === 'prefeito' || user?.email === 'henri199@gmail.com' || auth.currentUser?.email === 'henri199@gmail.com';
+  const isManager = isAdmin || user?.role === 'responsavel';
   const isCommittee = isManager || user?.role === 'vistoriador';
   const isOnline = useOnlineStatus();
   const inspection = useLiveQuery(() => db.inspections.get(id), [id]);
   const location = useLiveQuery(() => inspection ? db.locations.get(inspection.locationId) : undefined, [inspection]);
-  const assets = useLiveQuery(() => db.assets.where('inspectionId').equals(id).toArray(), [id]);
+  const assets = useLiveQuery(() => db.assets.where('inspectionId').equals(id).filter(a => !a.deleted).toArray(), [id]);
   
   const [searchTermAssets, setSearchTermAssets] = useState('');
+  const [displayLimit, setDisplayLimit] = useState(20);
   const [isAdding, setIsAdding] = useState(false);
   const [isConcluding, setIsConcluding] = useState(false);
   const [isFinalizing, setIsFinalizing] = useState(false);
@@ -38,6 +41,8 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
   const [isConfirmingDeleteInspection, setIsConfirmingDeleteInspection] = useState(false);
   const [isSignOffModalOpen, setIsSignOffModalOpen] = useState(false);
   const [transferAssetId, setTransferAssetId] = useState<string | null>(null);
+  const [isBatchMode, setIsBatchMode] = useState(false);
+  const [selectedAssetIds, setSelectedAssetIds] = useState<string[]>([]);
   const [isTransferring, setIsTransferring] = useState(false);
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -50,10 +55,18 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
 
   const allLocations = useLiveQuery(() => db.locations.toArray());
   
-  // Fetch signature data when inspection changes
+  // Fetch signature data quando a vistoria mudar ou for homologada
   React.useEffect(() => {
     const fetchSignature = async () => {
       if (!id || !isOnline) return;
+
+      // Verificação proativa de permissão para evitar avisos no console
+      const isPublic = inspection?.status === 'finalizada';
+      const isAuthenticated = !!auth.currentUser;
+
+      // Se não for pública e não estiver autenticado, nem tenta
+      if (!isPublic && !isAuthenticated) return;
+
       try {
         const sigDoc = await getDocs(query(collection(firestore, 'sector_inspections'), where('inspectionId', '==', id)));
         if (!sigDoc.empty) {
@@ -64,12 +77,17 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
             signedAt: data.signedAt
           });
         }
-      } catch (err) {
-        console.warn("Signature fetch failed:", err);
+      } catch (err: any) {
+        // Trata erro de permissão com mensagem amigável em vez de warn agressivo
+        if (err.message?.includes('permissions')) {
+          console.info("Assinatura restrita: Aguardando homologação do dossiê.");
+        } else {
+          console.warn("Falha ao recuperar assinatura:", err);
+        }
       }
     };
     fetchSignature();
-  }, [id, isOnline]);
+  }, [id, isOnline, inspection?.status]);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const nameRef = useRef<HTMLInputElement>(null);
@@ -116,25 +134,7 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
     }
   };
 
-  const [isSyncing, setIsSyncing] = useState(false);
-  const [syncError, setSyncError] = useState(false);
-
-  React.useEffect(() => {
-    const handleStart = () => { setIsSyncing(true); setSyncError(false); };
-    const handleEnd = (e: any) => { 
-      setIsSyncing(false); 
-      if (!e.detail?.success) setSyncError(true);
-    };
-
-    window.addEventListener('app-sync-start', handleStart);
-    window.addEventListener('app-sync-end', handleEnd);
-    return () => {
-      window.removeEventListener('app-sync-start', handleStart);
-      window.removeEventListener('app-sync-end', handleEnd);
-    };
-  }, []);
-
-  const unsyncedAssetsCount = assets?.filter(a => a.needsSync).length || 0;
+  const unsyncedAssetsCount = assets?.filter(a => a.needsSync === 1 || a.needsSync === true as any).length || 0;
 
   const [newItem, setNewItem] = useState({
     name: '',
@@ -168,7 +168,7 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
           await db.assets.update(transferCandidate.id, {
             inspectionId: id,
             hash: hash,
-            needsSync: true,
+            needsSync: 1,
             // Optionally update with new details provided in the form
             condition: newItem.condition,
             observations: newItem.observations,
@@ -245,7 +245,7 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
         observations: newItem.observations,
         photos: newItem.photos,
         hash: hash,
-        needsSync: true,
+        needsSync: 1,
         quantity: newItem.quantity
       });
       toast("Registro atualizado!", "success", "Item Editado");
@@ -262,7 +262,7 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
         createdBy: user.userId,
         createdAt: Date.now(),
         hash: hash,
-        needsSync: true,
+        needsSync: 1,
         quantity: newItem.quantity
       });
       toast("Item adicionado à vistoria!", "success", "Novo Patrimônio");
@@ -288,21 +288,13 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
     }
 
     try {
-      const assetToRemove = await db.assets.get(assetId);
-      
-      // Cleanup photos from Storage if they are URLs
-      if (assetToRemove?.photos) {
-        const { deleteAssetPhoto } = await import('../lib/storageService');
-        for (const photoUrl of assetToRemove.photos) {
-          if (photoUrl.startsWith('http')) {
-            await deleteAssetPhoto(photoUrl);
-          }
-        }
-      }
-
-      await db.assets.delete(assetId);
-      try { await deleteDoc(doc(firestore, 'assets', assetId)); } catch(e) {}
+      await db.assets.update(assetId, { 
+        deleted: true, 
+        needsSync: 1, 
+        updatedAt: Date.now() 
+      });
       setConfirmDeleteId(null);
+      pushLocalChanges();
     } catch (err: any) {
       console.error("Erro ao deletar item:", err);
       setError("Não foi possível excluir o item.");
@@ -389,11 +381,11 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
     }));
   };
 
-  const handleConclude = async () => {
+  const handleConclude = async (force: boolean = false) => {
     if (!id || isConcluding) return;
     
-    // First click: ask for confirmation in-UI
-    if (!isConfirmingConclude) {
+    // First click: ask for confirmation in-UI (unless forced by signature modal)
+    if (!isConfirmingConclude && !force) {
       setIsConfirmingConclude(true);
       return;
     }
@@ -477,7 +469,7 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
       // Mark all assets as public for public view without O(N) get() in rules
       const assets = await db.assets.where('inspectionId').equals(id).toArray();
       for (const asset of assets) {
-        await db.assets.update(asset.id, { isPublic: true, needsSync: true });
+        await db.assets.update(asset.id, { isPublic: true, needsSync: 1 });
       }
       
       await syncInspection(id);
@@ -543,12 +535,18 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
     setIsDeletingInspection(true);
     setError(null);
     try {
-      // 1. Apagar Itens primeiro
-      await db.assets.where('inspectionId').equals(id).delete();
-      // 2. Apagar Vistoria
-      await db.inspections.delete(id);
+      const now = Date.now();
+      // 1. Soft delete items
+      const assetsToSoftDelete = await db.assets.where('inspectionId').equals(id).toArray();
+      for (const asset of assetsToSoftDelete) {
+        await db.assets.update(asset.id, { deleted: true, needsSync: 1, updatedAt: now });
+      }
+
+      // 2. Soft delete inspection
+      await db.inspections.update(id, { deleted: true, needsSync: 1, updatedAt: now });
       
-      console.log("Vistoria excluída com sucesso:", id);
+      console.log("Vistoria marcada para exclusão:", id);
+      pushLocalChanges();
       onBack();
     } catch (err: any) {
       console.error("Erro ao excluir vistoria:", err);
@@ -563,8 +561,17 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
     if (!transferAssetId || isTransferring || !user) return;
     setIsTransferring(true);
     try {
-      const asset = await db.assets.get(transferAssetId);
-      if (!asset) throw new Error("Item não encontrado");
+      let idsToTransfer: string[] = [];
+      
+      if (transferAssetId === 'batch') {
+        idsToTransfer = selectedAssetIds;
+      } else if (transferAssetId === 'all') {
+        idsToTransfer = assets?.map(a => a.id) || [];
+      } else {
+        idsToTransfer = [transferAssetId];
+      }
+      
+      if (idsToTransfer.length === 0) throw new Error("Nenhum item para transferir");
 
       // 1. Procurar ou criar vistoria ativa no destino
       let targetInspection = await db.inspections
@@ -587,23 +594,32 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
 
       if (!targetInspection) throw new Error("Falha ao preparar destino");
 
-      // 2. Atualizar o item
-      const newHash = generateAssetHash(asset.name, asset.patrimonyNumber, targetLocationId);
-      
-      // Verificar se já existe no destino
-      const existingInTarget = await db.assets.where('hash').equals(newHash).first();
-      if (existingInTarget) {
-        throw new Error("Já existe um item idêntico no local de destino");
+      // 2. Transferir itens
+      for (const assetId of idsToTransfer) {
+        const asset = await db.assets.get(assetId);
+        if (!asset) continue;
+
+        const newHash = generateAssetHash(asset.name, asset.patrimonyNumber, targetLocationId);
+        
+        // Verificar se já existe no destino
+        const existingInTarget = await db.assets.where('hash').equals(newHash).first();
+        if (existingInTarget) {
+          console.warn(`Item ${asset.name} já existe no destino, pulando...`);
+          continue;
+        }
+
+        await db.assets.update(assetId, {
+          inspectionId: targetInspection.id,
+          hash: newHash,
+          needsSync: 1,
+          updatedAt: Date.now()
+        });
       }
 
-      await db.assets.update(transferAssetId, {
-        inspectionId: targetInspection.id,
-        hash: newHash,
-        needsSync: true
-      });
-
-      setSuccessMessage(`Item transferido para ${allLocations?.find(l => l.id === targetLocationId)?.name}`);
+      setSuccessMessage(`${idsToTransfer.length} item(ns) transferido(s) para ${allLocations?.find(l => l.id === targetLocationId)?.name}`);
       setTransferAssetId(null);
+      setIsBatchMode(false);
+      setSelectedAssetIds([]);
     } catch (err: any) {
       console.error("Erro na transferência:", err);
       setError(err.message || "Erro ao transferir item");
@@ -776,14 +792,24 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
       if (assetsCount === 0) {
         const discard = window.confirm("🗑️ VISTORIA VAZIA: Deseja descartar esta vistoria antes de sair?\n\n(Se você clicar em OK, a vistoria será apagada. Se clicar em CANCELAR, ela ficará salva como rascunho)");
         if (discard) {
-          try { await deleteDoc(doc(firestore, 'inspections', id)); } catch(e) {}
-          await db.inspections.delete(id);
-          console.log("Vistoria vazia descartada ao voltar.");
+          const now = Date.now();
+          await db.inspections.update(id, { deleted: true, needsSync: 1, updatedAt: now });
+          pushLocalChanges();
+          console.log("Vistoria vazia marcada para exclusão ao voltar.");
         }
       }
     }
     onBack();
   };
+
+  const filteredAssets = assets?.filter(asset => 
+    (asset.name || '').toLowerCase().includes(searchTermAssets.toLowerCase()) || 
+    (asset.patrimonyNumber || '').toLowerCase().includes(searchTermAssets.toLowerCase())
+  );
+
+  const displayedAssets = searchTermAssets 
+    ? filteredAssets 
+    : filteredAssets?.slice(0, displayLimit);
 
   return (
     <div className="flex flex-col gap-10 animate-in fade-in slide-in-from-right-4 duration-700 pb-24">
@@ -862,17 +888,7 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
           )}
           {isOnline && (
             <div className="flex flex-col items-end leading-none px-4 py-2 bg-white border border-slate-100 rounded-2xl shadow-sm">
-               <span className="text-[9px] font-black uppercase text-slate-400 tracking-widest">Nuvem Governamental</span>
-               <span className={cn(
-                 "text-[10px] font-bold uppercase",
-                 isSyncing ? "text-indigo-600 animate-pulse" : 
-                 syncError ? "text-amber-500" :
-                 unsyncedAssetsCount > 0 ? "text-indigo-400" : "text-emerald-600"
-               )}>
-                 {isSyncing ? "Sincronizando..." : 
-                  syncError ? "Pausado (Erro)" :
-                  unsyncedAssetsCount > 0 ? `${unsyncedAssetsCount} Pendentes` : "Sincronizado"}
-               </span>
+               <span className="text-[9px] font-black uppercase text-slate-400 tracking-widest text-emerald-600">Conectado</span>
             </div>
           )}
         </div>
@@ -1044,12 +1060,63 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
               />
             </div>
             {!isLocked && (
-              <Button variant="accent" size="sm" icon={Plus} onClick={() => setIsAdding(true)} className="rounded-xl px-8 h-11 shadow-xl shadow-blue-600/10">
-                ADICIONAR ITEM
-              </Button>
+                <div className="flex items-center gap-2">
+                {isCommittee && (
+                  <>
+                    <Button 
+                      variant="outline" 
+                      size="sm" 
+                      icon={Zap}
+                      onClick={() => setTransferAssetId('all')}
+                      className="rounded-xl px-4 h-11 border-amber-100 text-amber-600 bg-amber-50 hover:bg-amber-100 transition-all font-black text-[10px] uppercase tracking-widest"
+                    >
+                      Mover Tudo
+                    </Button>
+                    <Button 
+                      variant="outline" 
+                      size="sm" 
+                      icon={isBatchMode ? X : Copy}
+                      onClick={() => {
+                        setIsBatchMode(!isBatchMode);
+                        setSelectedAssetIds([]);
+                      }}
+                      className={cn(
+                        "rounded-xl px-4 h-11 transition-all",
+                        isBatchMode ? "border-rose-200 text-rose-500 bg-rose-50" : "border-slate-100 text-slate-400"
+                      )}
+                    >
+                      {isBatchMode ? 'Mover Vários' : 'Selecionar'}
+                    </Button>
+                  </>
+                )}
+                <Button variant="accent" size="sm" icon={Plus} onClick={() => setIsAdding(true)} className="rounded-xl px-8 h-11 shadow-xl shadow-blue-600/10">
+                  ADICIONAR ITEM
+                </Button>
+              </div>
             )}
           </div>
         </div>
+
+        {isBatchMode && selectedAssetIds.length > 0 && (
+          <div className="bg-amber-600 p-6 rounded-[2rem] flex items-center justify-between shadow-xl shadow-amber-600/20 animate-in slide-in-from-top-4">
+            <div className="flex items-center gap-4 text-white">
+               <div className="w-12 h-12 bg-white/20 rounded-2xl flex items-center justify-center">
+                  <Zap className="w-6 h-6" />
+               </div>
+               <div className="flex flex-col">
+                  <span className="text-lg font-black tracking-tight leading-none">Transferência em Massa</span>
+                  <span className="text-[10px] font-bold opacity-80 uppercase tracking-widest mt-1">{selectedAssetIds.length} Itens Selecionados</span>
+               </div>
+            </div>
+            <Button 
+              variant="accent" 
+              className="bg-white text-amber-600 hover:bg-slate-50 font-black uppercase text-[10px] px-8 h-12 rounded-xl"
+              onClick={() => setTransferAssetId('batch')}
+            >
+              Escolher Destino
+            </Button>
+          </div>
+        )}
 
         {isAdding && (
           <div className="fixed inset-0 z-[200] flex flex-col bg-slate-900/40 backdrop-blur-sm md:p-6 md:justify-center md:items-center animate-in fade-in duration-300">
@@ -1183,10 +1250,10 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
                     {newItem.photos.length > 0 ? (
                       <div className="flex flex-wrap gap-6">
                         {newItem.photos.map((photo, index) => (
-                          <div key={index} className="relative w-32 h-32 rounded-[1.5rem] overflow-hidden border-2 border-slate-100 shadow-sm group">
-                             <img src={photo} alt="" className="w-full h-full object-cover" />
+                          <div key={index} className="relative w-32 h-32 rounded-[1.5rem] overflow-hidden border-2 border-slate-100 shadow-sm group cursor-pointer" onClick={() => setPreviewPhoto(photo)}>
+                             <img src={photo} alt="" className="w-full h-full object-cover hover:opacity-80 transition-all" />
                              <button 
-                                onClick={() => removePhoto(index)}
+                                onClick={(e) => { e.stopPropagation(); removePhoto(index); }}
                                 className="absolute top-2 right-2 bg-rose-600 text-white p-2 rounded-xl shadow-lg opacity-0 group-hover:opacity-100 transition-all transform translate-y-2 group-hover:translate-y-0"
                               >
                                 <Trash2 className="w-4 h-4" />
@@ -1231,12 +1298,28 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
         )}
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-          {assets?.filter(asset => 
-            (asset.name || '').toLowerCase().includes(searchTermAssets.toLowerCase()) || 
-            (asset.patrimonyNumber || '').toLowerCase().includes(searchTermAssets.toLowerCase())
-          ).map(asset => (
-            <Card key={asset.id} className="flex flex-col gap-6 group hover:shadow-2xl hover:-translate-y-1 transition-all duration-500 rounded-[2rem] p-8 border-slate-100 bg-white">
-              <div className="flex items-start justify-between">
+          {displayedAssets?.map(asset => (
+            <Card key={asset.id} className={cn(
+              "flex flex-col gap-6 group hover:shadow-2xl hover:-translate-y-1 transition-all duration-500 rounded-[2rem] p-8 border-slate-100 bg-white relative",
+              isBatchMode && selectedAssetIds.includes(asset.id) && "ring-4 ring-amber-500 border-amber-200"
+            )}>
+              {isBatchMode && (
+                <div className="absolute top-6 left-6 z-10">
+                  <input 
+                    type="checkbox" 
+                    className="w-8 h-8 rounded-lg text-amber-600 focus:ring-amber-500 border-slate-300 transition-all cursor-pointer shadow-sm"
+                    checked={selectedAssetIds.includes(asset.id)}
+                    onChange={(e) => {
+                      if (e.target.checked) {
+                        setSelectedAssetIds(prev => [...prev, asset.id]);
+                      } else {
+                        setSelectedAssetIds(prev => prev.filter(id => id !== asset.id));
+                      }
+                    }}
+                  />
+                </div>
+              )}
+              <div className={cn("flex items-start justify-between", isBatchMode && "pl-10")}>
                 <div className="flex flex-col gap-1 pr-12">
                   <h4 className="font-display font-extrabold text-xl text-slate-900 group-hover:text-indigo-600 transition-colors tracking-tight leading-tight">{asset.name}</h4>
                   <div className="flex flex-wrap items-center gap-3 mt-2">
@@ -1270,8 +1353,8 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
                   <div className="flex -space-x-3 justify-end">
                     {(asset.photos && asset.photos.length > 0) ? (
                       asset.photos.map((photo, i) => (
-                        <div key={i} className="w-14 h-14 rounded-2xl bg-white border-2 border-slate-50 flex items-center justify-center overflow-hidden shadow-lg transform hover:scale-110 hover:z-30 transition-all cursor-pointer">
-                           <img src={photo} alt="" className="w-full h-full object-cover" />
+                        <div key={i} className="w-14 h-14 rounded-2xl bg-white border-2 border-slate-50 flex items-center justify-center overflow-hidden shadow-lg transform hover:scale-110 hover:z-30 transition-all cursor-pointer" onClick={() => setPreviewPhoto(photo)}>
+                           <img src={photo} alt="" className="w-full h-full object-cover hover:opacity-80 transition-all" />
                         </div>
                       ))
                     ) : (
@@ -1282,35 +1365,43 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
                   </div>
                   
                   <div className="flex items-center justify-end gap-2">
-                    <button 
-                      onClick={() => loadHistory(asset)}
-                      className="p-3 bg-white text-slate-400 hover:text-indigo-600 rounded-2xl border border-slate-100 hover:border-indigo-100 shadow-sm transition-all"
-                      title="Histórico"
-                    >
-                      <History className="w-5 h-5" />
-                    </button>
-                    {!isLocked && (
+                    {isBatchMode ? (
+                      <div className="h-11 flex items-center">
+                        <span className="text-[10px] font-black text-slate-300 uppercase tracking-widest">Em Seleção</span>
+                      </div>
+                    ) : (
                       <>
                         <button 
-                          onClick={() => handleEditAsset(asset)}
-                          className="p-3 bg-white text-slate-400 hover:text-blue-600 rounded-2xl border border-slate-100 hover:border-blue-100 shadow-sm transition-all"
+                          onClick={() => loadHistory(asset)}
+                          className="p-3 bg-white text-slate-400 hover:text-indigo-600 rounded-2xl border border-slate-100 hover:border-indigo-100 shadow-sm transition-all"
+                          title="Histórico"
                         >
-                          <Edit2 className="w-5 h-5" />
+                          <History className="w-5 h-5" />
                         </button>
-                        <button 
-                          onClick={() => setConfirmDeleteId(asset.id)}
-                          className="p-3 bg-white text-slate-400 hover:text-rose-600 rounded-2xl border border-slate-100 hover:border-rose-100 shadow-sm transition-all"
-                        >
-                          <Trash2 className="w-5 h-5" />
-                        </button>
-                        {isCommittee && (
-                          <button 
-                            onClick={() => setTransferAssetId(asset.id)}
-                            className="p-3 bg-white text-slate-400 hover:text-amber-600 rounded-2xl border border-slate-100 hover:border-amber-100 shadow-sm transition-all"
-                            title="Mover"
-                          >
-                            <Zap className="w-5 h-5" />
-                          </button>
+                        {!isLocked && (
+                          <>
+                            <button 
+                              onClick={() => handleEditAsset(asset)}
+                              className="p-3 bg-white text-slate-400 hover:text-blue-600 rounded-2xl border border-slate-100 hover:border-blue-100 shadow-sm transition-all"
+                            >
+                              <Edit2 className="w-5 h-5" />
+                            </button>
+                            <button 
+                              onClick={() => setConfirmDeleteId(asset.id)}
+                              className="p-3 bg-white text-slate-400 hover:text-rose-600 rounded-2xl border border-slate-100 hover:border-rose-100 shadow-sm transition-all"
+                            >
+                              <Trash2 className="w-5 h-5" />
+                            </button>
+                            {isCommittee && (
+                              <button 
+                                onClick={() => setTransferAssetId(asset.id)}
+                                className="p-3 bg-white text-slate-400 hover:text-amber-600 rounded-2xl border border-slate-100 hover:border-amber-100 shadow-sm transition-all"
+                                title="Mover"
+                              >
+                                <Zap className="w-5 h-5" />
+                              </button>
+                            )}
+                          </>
                         )}
                       </>
                     )}
@@ -1347,6 +1438,17 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
               )}
             </Card>
           ))}
+          {filteredAssets && filteredAssets.length > (displayedAssets?.length || 0) && !searchTermAssets && (
+             <div className="col-span-full pt-4">
+                <button 
+                  onClick={() => setDisplayLimit(prev => prev + 20)}
+                  className="w-full py-6 bg-slate-50 hover:bg-slate-100 text-slate-500 font-bold uppercase tracking-[0.2em] text-[10px] rounded-[2rem] border-2 border-dashed border-slate-200 transition-all flex flex-col items-center gap-2"
+                >
+                  Carregar mais itens
+                  <span className="text-[10px] opacity-40 font-black">({assets?.length} totais)</span>
+                </button>
+             </div>
+          )}
           {assets?.length === 0 && !isAdding && (
              <div className="col-span-full py-32 flex flex-col items-center justify-center text-slate-300 border-2 border-dashed border-slate-100 rounded-[3rem] bg-slate-50/20 group">
                <div className="w-24 h-24 bg-white rounded-[2rem] flex items-center justify-center shadow-xl shadow-slate-200/50 mb-8 transition-all duration-700 group-hover:scale-110 group-hover:rotate-6">
@@ -1362,95 +1464,102 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
       </div>
 
       {/* Footer Controls */}
-      {!isFinalized && (
-        <div className="mt-16 flex flex-col gap-6 max-w-xl mx-auto w-full">
-          {inspection.status === 'em_andamento' ? (
-            <div className="flex flex-col gap-4">
-              {(assets?.length || 0) === 0 && (
-                <div className="bg-amber-50 border border-amber-100 p-6 rounded-[1.5rem] flex items-center gap-4 text-amber-700 animate-in slide-in-from-bottom-4 duration-500 shadow-xl shadow-amber-900/5">
-                   <AlertCircle className="w-6 h-6 shrink-0" />
-                   <p className="text-xs font-bold uppercase tracking-widest leading-relaxed">Adicione ao menos um item válido para habilitar a conclusão da vistoria.</p>
-                </div>
-              )}
-              <div className="flex flex-col gap-3">
-                <Button 
-                  disabled={(assets?.length || 0) === 0}
-                  className={cn(
-                    "h-24 text-xl font-display font-black uppercase tracking-[0.2em] shadow-[0_30px_60px_-15px_rgba(79,70,229,0.3)] rounded-[2rem] transition-all duration-700",
-                    (assets?.length || 0) === 0 
-                      ? "bg-slate-100 text-slate-400 border-slate-200 grayscale shadow-none" 
-                      : "bg-indigo-600 hover:bg-indigo-700 shadow-indigo-600/30 hover:scale-[1.02]"
-                  )} 
-                  icon={Signature} 
-                  onClick={() => setIsSignOffModalOpen(true)}
-                >
-                  Encerrar Vistoria do Setor
-                </Button>
-                <div className="bg-slate-50 p-4 rounded-xl border border-slate-100 mt-2">
-                  <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest leading-relaxed text-center">
-                    Ao encerrar, o responsável pelo setor assinará o Termo de Responsabilidade digitalmente.
-                  </p>
-                </div>
-              </div>
-            </div>
-          ) : (
-            <div className="flex flex-col gap-6">
-              {(user?.role === 'prefeito' || user?.role === 'responsavel' || user?.role === 'administrador') && (
+      <div className="mt-16 flex flex-col gap-6 max-w-xl mx-auto w-full">
+        {!isFinalized && (
+          <>
+            {inspection.status === 'em_andamento' ? (
+              <div className="flex flex-col gap-4">
+                {(assets?.length || 0) === 0 && (
+                  <div className="bg-amber-50 border border-amber-100 p-6 rounded-[1.5rem] flex items-center gap-4 text-amber-700 animate-in slide-in-from-bottom-4 duration-500 shadow-xl shadow-amber-900/5">
+                     <AlertCircle className="w-6 h-6 shrink-0" />
+                     <p className="text-xs font-bold uppercase tracking-widest leading-relaxed">Adicione ao menos um item válido para habilitar a conclusão da vistoria.</p>
+                  </div>
+                )}
                 <div className="flex flex-col gap-3">
                   <Button 
+                    disabled={(assets?.length || 0) === 0}
                     className={cn(
-                      "h-24 text-xl font-display font-black uppercase tracking-[0.2em] shadow-[10px_30px_80px_-20px_rgba(99,102,241,0.4)] rounded-[2rem] transition-all duration-700 animate-pulse",
-                      isConfirmingFinalize
-                        ? "bg-emerald-600 hover:bg-emerald-700 shadow-emerald-500/20 animate-none ring-8 ring-emerald-500/10"
-                        : "bg-slate-900 border-none hover:scale-[1.02]"
+                      "h-24 text-xl font-display font-black uppercase tracking-[0.2em] shadow-[0_30px_60px_-15px_rgba(79,70,229,0.3)] rounded-[2rem] transition-all duration-700",
+                      (assets?.length || 0) === 0 
+                        ? "bg-slate-100 text-slate-400 border-slate-200 grayscale shadow-none" 
+                        : "bg-indigo-600 hover:bg-indigo-700 shadow-indigo-600/30 hover:scale-[1.02]"
                     )} 
-                    icon={isConfirmingFinalize ? ShieldCheck : Save} 
-                    onClick={handleFinalize}
-                    loading={isFinalizing}
+                    icon={Signature} 
+                    onClick={() => setIsSignOffModalOpen(true)}
                   >
-                    {isConfirmingFinalize ? "Protocolar Homologação?" : "Homologar Dossiê"}
+                    Encerrar Vistoria do Setor
                   </Button>
-                  {isConfirmingFinalize && (
-                    <button 
-                      onClick={() => setIsConfirmingFinalize(false)}
-                      className="text-[10px] font-black text-slate-400 uppercase tracking-widest hover:text-rose-500 transition-colors py-2"
-                    >
-                      Manter apenas Concluída
-                    </button>
-                  )}
+                  <div className="bg-slate-50 p-4 rounded-xl border border-slate-100 mt-2">
+                    <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest leading-relaxed text-center">
+                      Ao encerrar, o responsável pelo setor assinará o Termo de Responsabilidade digitalmente.
+                    </p>
+                  </div>
                 </div>
-              )}
-              <div className="flex flex-col gap-3">
-                {isManager && (
-                  <Button 
-                    variant="outline"
-                    className={cn(
-                      "h-16 font-bold uppercase tracking-widest rounded-2xl transition-all duration-500 bg-white border-2",
-                      isConfirmingReopen ? "bg-rose-50 border-rose-600 text-rose-600 ring-4 ring-rose-500/5 text-[10px]" : "border-slate-100 text-slate-900 text-[10px]"
-                    )} 
-                    icon={isConfirmingReopen ? AlertCircle : History} 
-                    onClick={handleReopen}
-                    loading={isReopening}
-                  >
-                    {isConfirmingReopen ? "Reabrir para Novas Vistorias?" : "Reabrir Edição do Inventário"}
-                  </Button>
-                )}
-                {isConfirmingReopen && (
-                  <button 
-                    onClick={() => setIsConfirmingReopen(false)}
-                    className="text-[10px] font-black text-slate-400 uppercase tracking-widest hover:text-slate-900 transition-colors py-1"
-                  >
-                    Cancelar
-                  </button>
+              </div>
+            ) : (
+              <div className="flex flex-col gap-6">
+                {(user?.role === 'prefeito' || user?.role === 'responsavel' || user?.role === 'administrador') && (
+                  <div className="flex flex-col gap-3">
+                    <Button 
+                      className={cn(
+                        "h-24 text-xl font-display font-black uppercase tracking-[0.2em] shadow-[10px_30px_80px_-20px_rgba(99,102,241,0.4)] rounded-[2rem] transition-all duration-700 animate-pulse",
+                        isConfirmingFinalize
+                          ? "bg-emerald-600 hover:bg-emerald-700 shadow-emerald-500/20 animate-none ring-8 ring-emerald-500/10"
+                          : "bg-slate-900 border-none hover:scale-[1.02]"
+                      )} 
+                      icon={isConfirmingFinalize ? ShieldCheck : Save} 
+                      onClick={handleFinalize}
+                      loading={isFinalizing}
+                    >
+                      {isConfirmingFinalize ? "Protocolar Homologação?" : "Homologar Dossiê"}
+                    </Button>
+                    {isConfirmingFinalize && (
+                      <button 
+                        onClick={() => setIsConfirmingFinalize(false)}
+                        className="text-[10px] font-black text-slate-400 uppercase tracking-widest hover:text-rose-500 transition-colors py-2"
+                      >
+                        Manter apenas Concluída
+                      </button>
+                    )}
+                  </div>
                 )}
               </div>
-            </div>
-          )}
+            )}
+          </>
+        )}
+
+        {/* Action: Reopen - Available for managers in Concluded or Finalized states */}
+        {(isConcluded || isFinalized) && isManager && (
+          <div className="flex flex-col gap-3">
+            <Button 
+              variant="outline"
+              className={cn(
+                "h-16 font-bold uppercase tracking-widest rounded-2xl transition-all duration-500 bg-white border-2",
+                isConfirmingReopen ? "bg-rose-50 border-rose-600 text-rose-600 ring-4 ring-rose-500/5 text-[10px]" : "border-slate-100 text-slate-900 text-[10px]"
+              )} 
+              icon={isConfirmingReopen ? AlertCircle : History} 
+              onClick={handleReopen}
+              loading={isReopening}
+            >
+              {isConfirmingReopen ? "Reabrir para Novas Vistorias?" : "Reabrir Edição do Inventário"}
+            </Button>
+            {isConfirmingReopen && (
+              <button 
+                onClick={() => setIsConfirmingReopen(false)}
+                className="text-[10px] font-black text-slate-400 uppercase tracking-widest hover:text-slate-900 transition-colors py-1"
+              >
+                Cancelar
+              </button>
+            )}
+          </div>
+        )}
+
+        {!isFinalized && (
           <p className="text-[10px] font-bold text-center text-slate-400 uppercase tracking-widest px-12 leading-relaxed opacity-60">
             O encerramento imobiliza os registros locais. A homologação autentica o dossiê perante o controle interno municipal.
           </p>
-        </div>
-      )}
+        )}
+      </div>
 
       {/* 🚀 Modal de Transferência */}
       {transferAssetId && (
@@ -1567,11 +1676,26 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
           assets={assets || []}
           onComplete={async () => {
              setIsSignOffModalOpen(false);
-             // Trigger internal status update
-             setIsConfirmingConclude(true); // Pre-set confirmation to skip the internal check if needed
-             await handleConclude();
+             // Trigger internal status update immediately skipping confirmation
+             await handleConclude(true);
           }}
         />
+      )}
+
+      {/* Lightbox para Visualização de Fotos */}
+      {previewPhoto && (
+        <div className="fixed inset-0 z-[300] flex items-center justify-center p-4 md:p-10" onClick={() => setPreviewPhoto(null)}>
+          <div className="absolute inset-0 bg-slate-900/95 backdrop-blur-sm" />
+          <div className="relative z-10 w-full max-w-4xl flex items-center justify-center">
+            <button 
+              onClick={(e) => { e.stopPropagation(); setPreviewPhoto(null); }}
+              className="absolute -top-12 right-0 md:-right-12 p-2 bg-white/10 hover:bg-rose-500 text-white rounded-full transition-colors"
+            >
+              <X className="w-6 h-6" />
+            </button>
+            <img src={previewPhoto} alt="Visualização ampliada" className="max-w-full max-h-[85vh] object-contain rounded-xl shadow-2xl" onClick={e => e.stopPropagation()} />
+          </div>
+        </div>
       )}
     </div>
   );
