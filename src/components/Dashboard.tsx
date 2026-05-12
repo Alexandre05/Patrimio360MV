@@ -26,7 +26,8 @@ import {
   Clock,
   Download,
   Upload,
-  Database
+  Database,
+  GraduationCap
 } from 'lucide-react';
 import { motion } from 'motion/react';
 import { db, Inspection, Location } from '../lib/db';
@@ -44,10 +45,11 @@ import { db as firestore, auth } from '../lib/firebase';
 import { doc, deleteDoc, getDoc } from 'firebase/firestore';
 import { ScannerView } from './ScannerView';
 import { InventoryDashboard } from './InventoryDashboard';
+import { TrainingView } from './TrainingView';
 
 export function Dashboard() {
   const { user, signOut } = useAuth();
-  const [activeTab, setActiveTab] = useState<'home' | 'inspections' | 'locations' | 'reports' | 'users' | 'settings' | 'notifications' | 'scanner' | 'analytics'>('home');
+  const [activeTab, setActiveTab] = useState<'home' | 'inspections' | 'locations' | 'reports' | 'users' | 'settings' | 'notifications' | 'scanner' | 'analytics' | 'training'>('home');
   const [selectedInspectionId, setSelectedInspectionId] = useState<string | null>(null);
 
   const handleScannerOpen = (inspectionId: string, locationId: string) => {
@@ -284,6 +286,8 @@ export function Dashboard() {
     }
 
     switch (activeTab) {
+      case 'training':
+        return <TrainingView />;
       case 'analytics':
         return <InventoryDashboard />;
       case 'scanner':
@@ -564,6 +568,7 @@ export function Dashboard() {
 
         <nav className="flex flex-col gap-1.5 flex-1">
           <NavItem active={activeTab === 'home' && !selectedInspectionId} label="Dashboard" icon={LayoutGrid} onClick={() => handleTabChange('home')} />
+          <NavItem active={activeTab === 'training'} label="Treinamento" icon={GraduationCap} onClick={() => handleTabChange('training')} />
           <NavItem active={activeTab === 'analytics'} label="Estatísticas" icon={BarChart3} onClick={() => handleTabChange('analytics')} />
           <NavItem active={activeTab === 'scanner'} label="Scanner QR" icon={Search} onClick={() => handleTabChange('scanner')} />
           <NavItem active={activeTab === 'notifications'} label="Alertas" icon={Bell} onClick={() => handleTabChange('notifications')} badge={unreadNotifications || 0} />
@@ -628,7 +633,7 @@ export function Dashboard() {
                       onClick={() => setSelectedInspectionId(null)}
                       className={cn("text-[9px] lg:text-[10px] font-black uppercase tracking-widest cursor-pointer transition-colors shrink-0", selectedInspectionId ? "text-slate-400 hover:text-blue-600" : "text-blue-600")}
                     >
-                      {activeTab === 'locations' ? 'Ambientes' : activeTab === 'inspections' ? 'Vistorias' : activeTab === 'reports' ? 'Auditoria' : activeTab === 'users' ? 'Equipe' : activeTab === 'settings' ? 'Global' : activeTab === 'notifications' ? 'Alertas' : activeTab}
+                      {activeTab === 'locations' ? 'Ambientes' : activeTab === 'inspections' ? 'Vistorias' : activeTab === 'reports' ? 'Auditoria' : activeTab === 'users' ? 'Equipe' : activeTab === 'settings' ? 'Global' : activeTab === 'notifications' ? 'Alertas' : activeTab === 'training' ? 'Treinamento' : activeTab}
                     </span>
                   </>
                 )}
@@ -642,7 +647,7 @@ export function Dashboard() {
                 )}
               </div>
               <h2 className="text-xl lg:text-3xl font-black text-primary tracking-tighter leading-none truncate">
-                {selectedInspectionId ? "Auditoria de Ambiente" : activeTab === 'home' ? `Olá, ${user?.name.split(' ')[0]}` : activeTab === 'locations' ? 'Registro de Ambientes' : activeTab === 'inspections' ? 'Dossiê de Vistorias' : activeTab === 'reports' ? 'Painel de Transparência' : activeTab === 'users' ? 'Gestão de Agentes' : activeTab === 'settings' ? 'Configurações de Instância' : activeTab === 'notifications' ? 'Centro de Controle' : activeTab}
+                {selectedInspectionId ? "Auditoria de Ambiente" : activeTab === 'home' ? `Olá, ${user?.name.split(' ')[0]}` : activeTab === 'locations' ? 'Registro de Ambientes' : activeTab === 'inspections' ? 'Dossiê de Vistorias' : activeTab === 'reports' ? 'Painel de Transparência' : activeTab === 'users' ? 'Gestão de Agentes' : activeTab === 'settings' ? 'Configurações de Instância' : activeTab === 'notifications' ? 'Centro de Controle' : activeTab === 'training' ? 'Centro de Treinamento' : activeTab}
               </h2>
             </div>
           </div>
@@ -691,7 +696,7 @@ export function Dashboard() {
       {/* 🤳 Mobile Bottom Tab Bar */}
       <nav className="fixed bottom-0 left-0 right-0 lg:hidden bg-card/90 backdrop-blur-xl border-t border-border flex items-center justify-around p-4 pb-6 z-50">
         <MobileNavItem active={activeTab === 'home' && !selectedInspectionId} icon={LayoutGrid} onClick={() => handleTabChange('home')} />
-        <MobileNavItem active={activeTab === 'analytics'} icon={BarChart3} onClick={() => handleTabChange('analytics')} />
+        <MobileNavItem active={activeTab === 'training'} icon={GraduationCap} onClick={() => handleTabChange('training')} />
         <div className="relative -top-6">
            <motion.button 
              whileTap={{ scale: 0.9 }}

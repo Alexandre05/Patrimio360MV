@@ -134,34 +134,36 @@ export async function pushLocalChanges() {
       const { needsSync, ...data } = asset;
       data.updatedAt = Date.now();
       
-      if (data.photos && data.photos.length > 0) {
-        let photoUpdateNeeded = false;
-        const processedPhotos = await Promise.all(
-          data.photos.map(async (photo, index) => {
-            if (typeof photo === 'string' && photo.startsWith('data:image')) {
-              try {
-                const storagePath = `assets/${asset.id}/photo_${index}_${Date.now()}.jpg`;
-                const downloadURL = await uploadAssetPhoto(photo, storagePath);
-                photoUpdateNeeded = true;
-                return downloadURL;
-              } catch (err) {
-                console.error(`Upload error:`, err);
-                return photo;
-              }
+      // Interceptação para Storage (Evita estouro de 1MB no Firestore)
+      const processedPhotos: string[] = [];
+      if (asset.photos) {
+        for (let index = 0; index < asset.photos.length; index++) {
+          const photo = asset.photos[index];
+          if (typeof photo === 'string' && photo.startsWith('data:image')) {
+            try {
+              const url = await uploadAssetPhoto(photo, `assets/${asset.id}/photo_${Date.now()}_${index}.jpg`);
+              processedPhotos.push(url);
+            } catch (err) {
+              console.error(`[Sync] Falha no upload da foto ${index} do item ${asset.id}:`, err);
+              processedPhotos.push(photo); // Fallback para manter o dado se o upload falhar
             }
-            return photo;
-          })
-        );
-        
-        if (photoUpdateNeeded) {
-          data.photos = processedPhotos;
-          await dexie.assets.update(asset.id, { photos: processedPhotos });
+          } else {
+            processedPhotos.push(photo); // Já é um link de Storage
+          }
         }
       }
 
+      data.photos = processedPhotos;
       if (data.isPublic === undefined) data.isPublic = true;
+      
       await setDoc(assetRef, data);
-      await dexie.assets.update(asset.id, { needsSync: 0, updatedAt: data.updatedAt });
+
+      // Otimização do Banco Local (Dexie): Salva as URLs leves no lugar do Base64 pesado
+      await dexie.assets.update(asset.id, { 
+        needsSync: 0, 
+        updatedAt: data.updatedAt, 
+        photos: processedPhotos 
+      });
     }
   
     window.dispatchEvent(new CustomEvent('app-sync-end', { detail: { success: true } }));
