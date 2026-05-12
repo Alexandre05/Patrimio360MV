@@ -65,6 +65,31 @@ export function LocationsView({ onSelectInspection }: { onSelectInspection: (id:
     return sorted[0].status;
   };
 
+  const getDepartmentStats = (parentId: string) => {
+    const children = locations?.filter(l => l.parentId === parentId) || [];
+    // Inclui o próprio pai e todos os filhos
+    const relevantLocIds = [parentId, ...children.map(c => c.id)];
+
+    let emAndamento = 0;
+    let concluidas = 0;
+    let finalizadas = 0;
+
+    relevantLocIds.forEach(id => {
+      const s = getLatestStatus(id);
+      if (s === 'em_andamento') emAndamento++;
+      else if (s === 'concluida') concluidas++;
+      else if (s === 'finalizada') finalizadas++;
+    });
+
+    return {
+      childrenCount: children.length,
+      emAndamento,
+      concluidas,
+      finalizadas,
+      hasAny: emAndamento > 0 || concluidas > 0 || finalizadas > 0
+    };
+  };
+
   const allFilteredLocations = locations?.filter(loc => {
     const matchesSearch = loc.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
                          loc.description.toLowerCase().includes(searchTerm.toLowerCase());
@@ -559,6 +584,7 @@ export function LocationsView({ onSelectInspection }: { onSelectInspection: (id:
         {displayedLocations?.map(loc => {
           const status = getLatestStatus(loc.id);
           const isParent = !loc.parentId;
+          const stats = isParent ? getDepartmentStats(loc.id) : null;
           return (
             <Card key={loc.id} className={cn(
               "group p-10 rounded-[3rem] flex flex-col gap-8 transition-all duration-700 relative overflow-hidden hover:-translate-y-2 shadow-[0_8px_40px_-15px_rgba(0,0,0,0.03)]",
@@ -585,7 +611,8 @@ export function LocationsView({ onSelectInspection }: { onSelectInspection: (id:
                   {isParent ? <Building2 className="w-8 h-8" /> : <MapPin className="w-7 h-7" />}
                 </div>
                 <div className="flex flex-col items-end gap-3">
-                  {status && (
+                  {/* Para Salas (Filhos): Mostra o status normal */}
+                  {!isParent && status && (
                     <div className={cn(
                       "text-[9px] font-black uppercase tracking-[0.15em] px-4 py-1.5 rounded-full border shadow-sm transition-all",
                       status === 'em_andamento' ? "bg-indigo-50 text-indigo-600 border-indigo-100 ring-4 ring-indigo-500/5" :
@@ -593,6 +620,25 @@ export function LocationsView({ onSelectInspection }: { onSelectInspection: (id:
                       "bg-emerald-50 text-emerald-600 border-emerald-100 ring-4 ring-emerald-500/5"
                     )}>
                       {status.replace('_', ' ')}
+                    </div>
+                  )}
+
+                  {/* Para Departamentos (Pais): Mostra o progresso consolidado de todas as salas */}
+                  {isParent && stats?.hasAny && (
+                    <div className="flex flex-col items-end gap-1.5">
+                      <span className="text-[8px] font-black text-slate-400 uppercase tracking-widest">Painel do Departamento</span>
+                      <div className="flex flex-wrap items-center justify-end gap-2">
+                        {stats.emAndamento > 0 && <span className="text-[9px] px-2 py-1 rounded-lg bg-indigo-50 text-indigo-600 border border-indigo-100 font-bold shadow-sm">{stats.emAndamento} Em Aberto</span>}
+                        {stats.concluidas > 0 && <span className="text-[9px] px-2 py-1 rounded-lg bg-amber-50 text-amber-600 border border-amber-100 font-bold shadow-sm">{stats.concluidas} Concluídas</span>}
+                        {stats.finalizadas > 0 && <span className="text-[9px] px-2 py-1 rounded-lg bg-emerald-50 text-emerald-600 border border-emerald-100 font-bold shadow-sm">{stats.finalizadas} Homologadas</span>}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Se o Pai tiver salas mas nenhuma vistoria iniciada */}
+                  {isParent && !stats?.hasAny && stats && stats.childrenCount > 0 && (
+                    <div className="text-[9px] px-3 py-1.5 rounded-full border border-slate-200 bg-slate-50 text-slate-400 font-black uppercase tracking-widest shadow-sm">
+                      {stats.childrenCount} Ambientes Internos
                     </div>
                   )}
                   {isCommittee && (

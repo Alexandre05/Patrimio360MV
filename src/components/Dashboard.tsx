@@ -43,10 +43,11 @@ import { setupSync, pushLocalChanges, forceFullSyncRecovery } from '../lib/syncS
 import { db as firestore, auth } from '../lib/firebase';
 import { doc, deleteDoc, getDoc } from 'firebase/firestore';
 import { ScannerView } from './ScannerView';
+import { InventoryDashboard } from './InventoryDashboard';
 
 export function Dashboard() {
   const { user, signOut } = useAuth();
-  const [activeTab, setActiveTab] = useState<'home' | 'inspections' | 'locations' | 'reports' | 'users' | 'settings' | 'notifications' | 'scanner'>('home');
+  const [activeTab, setActiveTab] = useState<'home' | 'inspections' | 'locations' | 'reports' | 'users' | 'settings' | 'notifications' | 'scanner' | 'analytics'>('home');
   const [selectedInspectionId, setSelectedInspectionId] = useState<string | null>(null);
 
   const handleScannerOpen = (inspectionId: string, locationId: string) => {
@@ -283,6 +284,8 @@ export function Dashboard() {
     }
 
     switch (activeTab) {
+      case 'analytics':
+        return <InventoryDashboard />;
       case 'scanner':
         return <ScannerView onOpenInspection={handleScannerOpen} />;
       case 'home':
@@ -561,6 +564,7 @@ export function Dashboard() {
 
         <nav className="flex flex-col gap-1.5 flex-1">
           <NavItem active={activeTab === 'home' && !selectedInspectionId} label="Dashboard" icon={LayoutGrid} onClick={() => handleTabChange('home')} />
+          <NavItem active={activeTab === 'analytics'} label="Estatísticas" icon={BarChart3} onClick={() => handleTabChange('analytics')} />
           <NavItem active={activeTab === 'scanner'} label="Scanner QR" icon={Search} onClick={() => handleTabChange('scanner')} />
           <NavItem active={activeTab === 'notifications'} label="Alertas" icon={Bell} onClick={() => handleTabChange('notifications')} badge={unreadNotifications || 0} />
           <div className="h-4" />
@@ -687,7 +691,7 @@ export function Dashboard() {
       {/* 🤳 Mobile Bottom Tab Bar */}
       <nav className="fixed bottom-0 left-0 right-0 lg:hidden bg-card/90 backdrop-blur-xl border-t border-border flex items-center justify-around p-4 pb-6 z-50">
         <MobileNavItem active={activeTab === 'home' && !selectedInspectionId} icon={LayoutGrid} onClick={() => handleTabChange('home')} />
-        <MobileNavItem active={activeTab === 'inspections'} icon={ClipboardList} onClick={() => handleTabChange('inspections')} />
+        <MobileNavItem active={activeTab === 'analytics'} icon={BarChart3} onClick={() => handleTabChange('analytics')} />
         <div className="relative -top-6">
            <motion.button 
              whileTap={{ scale: 0.9 }}
