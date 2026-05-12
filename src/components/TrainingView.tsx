@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { Card, Button } from './UI';
 import { 
   BookOpen, 
@@ -13,11 +13,13 @@ import {
   Play,
   Download,
   ExternalLink,
-  ShieldCheck
+  ShieldCheck,
+  X
 } from 'lucide-react';
 import { cn } from '../lib/utils';
 
 export function TrainingView() {
+  const [activeVideo, setActiveVideo] = useState<string | null>(null);
   const guides = [
     {
       title: "Padrão de Conservação",
@@ -65,19 +67,22 @@ export function TrainingView() {
       title: "Introdução ao Patri-MV",
       duration: "05:20",
       thumbnail: "https://images.unsplash.com/photo-1516321318423-f06f85e504b3?w=800&auto=format&fit=crop&q=60",
-      category: "Básico"
+      category: "Básico",
+      url: "https://www.youtube.com/embed/dQw4w9WgXcQ"
     },
     {
       title: "Como usar o Scanner QR",
       duration: "03:45",
       thumbnail: "https://images.unsplash.com/photo-1550751827-4bd374c3f58b?w=800&auto=format&fit=crop&q=60",
-      category: "Operacional"
+      category: "Operacional",
+      url: "https://www.youtube.com/embed/dQw4w9WgXcQ"
     },
     {
       title: "Inventário de TI Complexo",
       duration: "08:12",
       thumbnail: "https://images.unsplash.com/photo-1518770660439-4636190af475?w=800&auto=format&fit=crop&q=60",
-      category: "Especializado"
+      category: "Especializado",
+      url: "https://www.youtube.com/embed/dQw4w9WgXcQ"
     }
   ];
 
@@ -89,6 +94,27 @@ export function TrainingView() {
 
   return (
     <div className="flex flex-col gap-10 animate-in fade-in slide-in-from-bottom-4 duration-700">
+      {/* Video Modal Overlay */}
+      {activeVideo && (
+        <div className="fixed inset-0 bg-slate-900/90 backdrop-blur-md z-[100] flex items-center justify-center p-4 lg:p-10 animate-in fade-in duration-300">
+          <button 
+            onClick={() => setActiveVideo(null)}
+            className="absolute top-6 right-6 lg:top-10 lg:right-10 w-14 h-14 bg-white/10 hover:bg-white/20 rounded-full flex items-center justify-center text-white transition-all backdrop-blur-xl border border-white/10"
+          >
+            <X className="w-7 h-7" />
+          </button>
+          
+          <div className="w-full max-w-6xl aspect-video rounded-[3rem] overflow-hidden bg-black shadow-2xl animate-in zoom-in-95 duration-500">
+            <iframe
+              src={`${activeVideo}?autoplay=1`}
+              className="w-full h-full"
+              allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+              allowFullScreen
+            />
+          </div>
+        </div>
+      )}
+
       {/* Header Treinamento */}
       <div className="relative overflow-hidden bg-slate-900 rounded-[3rem] p-10 md:p-16 text-white shadow-2xl">
         <div className="absolute top-0 right-0 w-1/2 h-full opacity-10 pointer-events-none">
@@ -153,7 +179,11 @@ export function TrainingView() {
 
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
           {videos.map((video, idx) => (
-            <div key={idx} className="group cursor-pointer flex flex-col gap-4">
+            <div 
+              key={idx} 
+              onClick={() => setActiveVideo(video.url)}
+              className="group cursor-pointer flex flex-col gap-4"
+            >
               <div className="relative aspect-video rounded-[2rem] overflow-hidden shadow-lg shadow-black/5 ring-1 ring-slate-100 transition-transform group-hover:scale-[1.02] duration-500">
                 <img 
                   src={video.thumbnail} 

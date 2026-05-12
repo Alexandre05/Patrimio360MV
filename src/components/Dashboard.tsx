@@ -162,13 +162,6 @@ export function Dashboard() {
     }
   }, [user, isOnline]);
 
-  if (selectedInspectionId) {
-    return <InspectionView id={selectedInspectionId} onBack={() => {
-      setSelectedInspectionId(null);
-      window.history.replaceState({}, '', '/');
-    }} />;
-  }
-
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(() => {
     const saved = localStorage.getItem('sidebar_collapsed');
     return saved ? JSON.parse(saved) : window.innerWidth < 1280;
@@ -189,6 +182,13 @@ export function Dashboard() {
     window.addEventListener('resize', handleResize);
     return () => window.removeEventListener('resize', handleResize);
   }, []);
+
+  if (selectedInspectionId) {
+    return <InspectionView id={selectedInspectionId} onBack={() => {
+      setSelectedInspectionId(null);
+      window.history.replaceState({}, '', '/');
+    }} />;
+  }
 
   const handleTabChange = (tab: typeof activeTab) => {
     setActiveTab(tab);
