@@ -277,6 +277,13 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
     setDuplicateWarning(null);
   };
 
+  const handleSaveAndContinue = async () => {
+    await handleAddItem();
+    setTimeout(() => {
+      setIsAdding(true);
+    }, 150);
+  };
+
   const handleDeleteAsset = async (assetId: string) => {
     if (!isCommittee) {
       setError("Apenas membros da comissão podem excluir itens registrados.");
@@ -1148,7 +1155,10 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
                <div className="flex-1 overflow-y-auto custom-scrollbar p-8 lg:p-12 flex flex-col gap-10 bg-white pb-32">
                  
                  <div className="flex flex-col gap-4">
-                   <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest ml-1">Descrição do Patrimônio</label>
+                    <div className="flex flex-col">
+                      <label className="text-[10px] font-bold text-slate-900 uppercase tracking-widest ml-1">Descrição do Patrimônio</label>
+                      <span className="text-slate-400 text-[9px] ml-1 mb-2 font-medium">O que é este item? Ex: Cadeira giratória preta</span>
+                    </div>
                    <Input 
                      ref={nameRef}
                      placeholder="Ex: Mesa de Escritório, Cadeira de Rodas..." 
@@ -1183,7 +1193,10 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
                  
                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-10">
                     <div className="flex flex-col gap-4">
-                      <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest ml-1">Etiq. Patrimônio</label>
+                      <div className="flex flex-col">
+                       <label className="text-[10px] font-bold text-slate-900 uppercase tracking-widest ml-1">Etiq. Patrimônio</label>
+                       <span className="text-slate-400 text-[9px] ml-1 mb-2 font-medium">Número da plaqueta de tombo (se houver)</span>
+                     </div>
                       <Input 
                         ref={patrimonyRef}
                         placeholder="Nº de Registro" 
@@ -1195,7 +1208,10 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
                     </div>
 
                     <div className="flex flex-col gap-4">
-                      <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest ml-1">Estado Físico</label>
+                      <div className="flex flex-col">
+                       <label className="text-[10px] font-bold text-slate-900 uppercase tracking-widest ml-1">Estado Físico</label>
+                       <span className="text-slate-400 text-[9px] ml-1 mb-2 font-medium">Qual a condição de uso atual do bem?</span>
+                     </div>
                       <Select 
                         ref={conditionRef}
                         value={newItem.condition}
@@ -1212,7 +1228,10 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
                     </div>
 
                     <div className="flex flex-col gap-4">
-                      <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest ml-1">Quantidade</label>
+                      <div className="flex flex-col">
+                       <label className="text-[10px] font-bold text-slate-900 uppercase tracking-widest ml-1">Quantidade</label>
+                       <span className="text-slate-400 text-[9px] ml-1 mb-2 font-medium">Quantos itens idênticos no local?</span>
+                     </div>
                       <Input 
                         ref={quantityRef}
                         type="number"
@@ -1226,7 +1245,10 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
                  </div>
 
                  <div className="flex flex-col gap-4">
-                    <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest ml-1">Observações Técnicas</label>
+                    <div className="flex flex-col">
+                        <label className="text-[10px] font-bold text-slate-900 uppercase tracking-widest ml-1">Observações Técnicas</label>
+                        <span className="text-slate-400 text-[9px] ml-1 mb-2 font-medium">Anote avarias, faltas de peças ou necessidade de descarte.</span>
+                     </div>
                     <Textarea 
                       ref={obsRef}
                       placeholder="Identificou avarias ou detalhes específicos? Descreva aqui..." 
@@ -1273,26 +1295,38 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
                  </div>
                </div>
 
-               {/* Footer Fixo */}
-               <div className="absolute bottom-0 inset-x-0 p-8 pt-4 bg-white border-t border-slate-100 flex items-center gap-4 z-30">
-                  <Button 
-                    variant="secondary" 
-                    onClick={() => { setIsAdding(false); setEditingAssetId(null); setDuplicateWarning(null); }}
-                    className="flex-1 h-16 rounded-2xl text-[10px] uppercase font-black tracking-widest"
-                  >
-                    Descartar
-                  </Button>
-                  <Button 
-                    ref={addButtonRef}
-                    variant="accent" 
-                    onClick={handleAddItem}
-                    onKeyDown={e => handleKeyDown(e, 5)}
-                    disabled={!newItem.name}
-                    className="flex-[2] h-16 rounded-2xl text-xs uppercase font-black tracking-widest shadow-2xl shadow-indigo-500/30"
-                  >
-                    {editingAssetId ? 'Salvar Alterações' : 'Registrar Patrimônio'}
-                  </Button>
-               </div>
+                {/* Footer Fixo */}
+                <div className="absolute bottom-0 inset-x-0 p-8 pt-4 bg-white border-t border-slate-100 flex items-center gap-4 z-30">
+                   <Button 
+                     variant="secondary" 
+                     onClick={() => { setIsAdding(false); setEditingAssetId(null); setDuplicateWarning(null); }}
+                     className="flex-1 h-16 rounded-2xl text-[10px] uppercase font-black tracking-widest"
+                   >
+                     Cancelar
+                   </Button>
+                   
+                   <Button 
+                     ref={addButtonRef}
+                     variant={editingAssetId ? "accent" : "outline"}
+                     onClick={handleAddItem}
+                     onKeyDown={e => handleKeyDown(e, 5)}
+                     disabled={!newItem.name}
+                     className="flex-1 h-16 rounded-2xl text-[10px] uppercase font-black tracking-widest border-slate-200"
+                   >
+                     {editingAssetId ? 'Salvar Alterações' : 'Salvar e Fechar'}
+                   </Button>
+
+                   {!editingAssetId && (
+                     <Button 
+                       variant="accent" 
+                       onClick={handleSaveAndContinue}
+                       disabled={!newItem.name}
+                       className="flex-1 h-16 rounded-2xl text-[10px] uppercase font-black tracking-widest shadow-xl shadow-indigo-500/20"
+                     >
+                       <Plus className="w-4 h-4 mr-2" /> Salvar e Novo
+                     </Button>
+                   )}
+                </div>
             </Card>
           </div>
         )}
@@ -1450,14 +1484,47 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
              </div>
           )}
           {assets?.length === 0 && !isAdding && (
-             <div className="col-span-full py-32 flex flex-col items-center justify-center text-slate-300 border-2 border-dashed border-slate-100 rounded-[3rem] bg-slate-50/20 group">
-               <div className="w-24 h-24 bg-white rounded-[2rem] flex items-center justify-center shadow-xl shadow-slate-200/50 mb-8 transition-all duration-700 group-hover:scale-110 group-hover:rotate-6">
-                  <Database className="w-10 h-10 text-slate-200 group-hover:text-indigo-600 transition-colors" />
-               </div>
-               <div className="text-center">
-                 <p className="font-display font-extrabold text-xl text-slate-900 tracking-tight mb-2">Local sem inventário</p>
-                 <p className="text-slate-400 font-medium max-w-xs mx-auto">Não encontramos nenhum bem catalogado neste ambiente. Toque acima para iniciar a auditoria.</p>
-               </div>
+             <div className="col-span-full py-16 px-8 lg:py-24 lg:px-16 flex flex-col items-center justify-center border-2 border-dashed border-slate-100 rounded-[3.5rem] bg-slate-50/20 group animate-in fade-in duration-1000">
+                <div className="max-w-2xl w-full flex flex-col items-center gap-10">
+                  <div className="flex flex-col items-center text-center gap-4">
+                    <div className="w-20 h-20 bg-indigo-600 rounded-[2rem] flex items-center justify-center shadow-2xl shadow-indigo-600/20 mb-2 transform group-hover:scale-110 group-hover:rotate-6 transition-all duration-700">
+                      <ShieldCheck className="w-10 h-10 text-white" />
+                    </div>
+                    <h3 className="font-display font-black text-3xl lg:text-4xl text-slate-900 tracking-tight leading-tight">
+                      Pronto para iniciar a auditoria?
+                    </h3>
+                    <p className="text-slate-500 font-medium text-lg leading-relaxed">
+                      Siga os passos abaixo para catalogar os bens deste ambiente com precisão.
+                    </p>
+                  </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-6 w-full">
+                    {[
+                      { icon: Plus, title: "Adicionar Item", desc: "Toque no botão e descreva o objeto." },
+                      { icon: Database, title: "Identificar", desc: "Informe a etiqueta e o estado do bem." },
+                      { icon: Camera, title: "Fotografar", desc: "Registre avarias ou faltas de peças." }
+                    ].map((step, idx) => (
+                      <div key={idx} className="bg-white p-8 rounded-[2rem] border border-slate-100 shadow-sm flex flex-col items-center text-center gap-4 hover:shadow-xl hover:border-indigo-100 transition-all duration-500">
+                        <div className="w-12 h-12 bg-slate-50 text-indigo-600 rounded-2xl flex items-center justify-center">
+                          <step.icon className="w-6 h-6" />
+                        </div>
+                        <div className="flex flex-col gap-1">
+                          <h4 className="font-black text-[10px] uppercase tracking-widest text-slate-900">{step.title}</h4>
+                          <p className="text-xs text-slate-400 font-medium leading-relaxed">{step.desc}</p>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+
+                  <Button 
+                    variant="accent" 
+                    size="lg" 
+                    onClick={() => setIsAdding(true)} 
+                    className="w-full max-w-sm h-20 rounded-[1.5rem] font-display font-black text-lg lg:text-xl uppercase tracking-[0.2em] shadow-2xl shadow-indigo-600/30 hover:scale-[1.02] transition-all"
+                  >
+                    COMEÇAR AGORA
+                  </Button>
+                </div>
              </div>
           )}
         </div>
