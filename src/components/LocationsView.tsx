@@ -592,26 +592,38 @@ export function LocationsView({ onSelectInspection }: { onSelectInspection: (id:
               attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
               url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
             />
-            {allFilteredLocations?.filter(loc => loc.latitude && loc.longitude).map(loc => (
-                <Marker key={loc.id} position={[loc.latitude!, loc.longitude!]}>
-                  <Popup className="custom-popup">
-                    <div className="flex flex-col gap-3 p-4 min-w-[240px]">
-                       <div className="flex flex-col gap-1">
-                          <h3 className="font-display font-bold text-slate-900 text-lg leading-tight uppercase tracking-tight">{loc.name}</h3>
-                          <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">{loc.description}</p>
-                       </div>
-                       <Button 
-                         size="sm"
-                         variant="primary"
-                         onClick={() => handleStartInspection(loc.id)}
-                         className="mt-2 w-full text-[10px] font-black uppercase tracking-[0.2em] h-10 rounded-xl"
-                       >
-                         {getLatestStatusCount(loc.id)?.status === 'em_andamento' ? 'CONTINUAR' : 'AUDITAR'}
-                       </Button>
-                    </div>
-                  </Popup>
-                </Marker>
-            ))}
+            {allFilteredLocations?.filter(loc => loc.latitude && loc.longitude).map(loc => {
+                const hasChildren = locations?.some(l => l.parentId === loc.id);
+                return (
+                  <Marker key={loc.id} position={[loc.latitude!, loc.longitude!]}>
+                    <Popup className="custom-popup">
+                      <div className="flex flex-col gap-3 p-4 min-w-[240px]">
+                         <div className="flex flex-col gap-1">
+                            <h3 className="font-display font-bold text-slate-900 text-lg leading-tight uppercase tracking-tight">{loc.name}</h3>
+                            <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">{loc.description}</p>
+                         </div>
+                         <Button 
+                           size="sm"
+                           variant={hasChildren ? "secondary" : "primary"}
+                           onClick={() => {
+                             if (hasChildren) {
+                               setViewMode('list'); // Volta para a lista
+                               setActiveParentId(loc.id); // Entra na pasta
+                             } else {
+                               handleStartInspection(loc.id);
+                             }
+                           }}
+                           className="mt-2 w-full text-[10px] font-black uppercase tracking-[0.2em] h-10 rounded-xl"
+                         >
+                           {hasChildren 
+                             ? 'VER DEPARTAMENTOS' 
+                             : (getLatestStatusCount(loc.id)?.status === 'em_andamento' ? 'CONTINUAR' : 'AUDITAR')}
+                         </Button>
+                      </div>
+                    </Popup>
+                  </Marker>
+                );
+            })}
           </MapContainer>
         </Card>
       ) : (

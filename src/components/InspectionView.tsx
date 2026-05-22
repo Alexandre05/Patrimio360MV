@@ -65,12 +65,25 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
     if (!hasSubLocations || !subLocations) return [];
     
     const subLocationIds = subLocations.map(sl => sl.id);
-    const subInspections = await db.inspections.where('locationId').anyOf(subLocationIds).filter(i => !i.deleted).toArray();
-    const subInspectionIds = subInspections.map(si => si.id);
+    const latestInspectionIds: string[] = [];
+
+    // Busca apenas a vistoria mais recente (independente do status) para cada sub-local
+    for (const subLocId of subLocationIds) {
+      const inspectionsForLoc = await db.inspections
+        .where('locationId').equals(subLocId)
+        .filter(i => !i.deleted)
+        .toArray();
+
+      if (inspectionsForLoc.length > 0) {
+        // Ordena da mais recente para a mais antiga e pega a primeira
+        inspectionsForLoc.sort((a, b) => b.date - a.date);
+        latestInspectionIds.push(inspectionsForLoc[0].id);
+      }
+    }
     
-    if (subInspectionIds.length === 0) return [];
+    if (latestInspectionIds.length === 0) return [];
     
-    return await db.assets.where('inspectionId').anyOf(subInspectionIds).filter(a => !a.deleted).toArray();
+    return await db.assets.where('inspectionId').anyOf(latestInspectionIds).filter(a => !a.deleted).toArray();
   }, [hasSubLocations, subLocations]);
 
   const allVisibleAssets = hasSubLocations 
