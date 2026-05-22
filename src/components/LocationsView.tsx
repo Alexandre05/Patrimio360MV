@@ -56,33 +56,51 @@ export function LocationsView({ onSelectInspection }: { onSelectInspection: (id:
     setIsAdding(true);
   };
 
-  const getLatestStatus = (locId: string) => {
+  const getLatestStatusCount = (locId: string) => {
     const locInspections = inspections?.filter(i => i.locationId === locId);
     if (!locInspections || locInspections.length === 0) return null;
     
-    // Prioridade: em_andamento > concluida > finalizada (pegando a mais relevante ou recente)
     const sorted = [...locInspections].sort((a, b) => b.date - a.date);
-    return sorted[0].status;
+    const latest = sorted[0];
+    const assetCount = assets?.filter(a => a.inspectionId === latest.id).length || 0;
+    return { status: latest.status, assetCount };
   };
 
   const getDepartmentStats = (parentId: string) => {
     const children = locations?.filter(l => l.parentId === parentId) || [];
-    // Inclui o próprio pai e todos os filhos
-    const relevantLocIds = [parentId, ...children.map(c => c.id)];
-
+    const directChildrenIds = children.map(c => c.id);
+    
+    // Recursive or multi-level? The current system seems to favor one level deep based on drill-down, 
+    // but let's just use direct children for stats for now.
+    
+    let totalAssets = 0;
     let emAndamento = 0;
     let concluidas = 0;
     let finalizadas = 0;
 
-    relevantLocIds.forEach(id => {
-      const s = getLatestStatus(id);
-      if (s === 'em_andamento') emAndamento++;
-      else if (s === 'concluida') concluidas++;
-      else if (s === 'finalizada') finalizadas++;
+    // Get stats for parent itself
+    const parentStatus = getLatestStatusCount(parentId);
+    if (parentStatus) {
+      totalAssets += parentStatus.assetCount;
+      if (parentStatus.status === 'em_andamento') emAndamento++;
+      else if (parentStatus.status === 'concluida') concluidas++;
+      else if (parentStatus.status === 'finalizada') finalizadas++;
+    }
+
+    // Get stats for children
+    children.forEach(c => {
+      const s = getLatestStatusCount(c.id);
+      if (s) {
+        totalAssets += s.assetCount;
+        if (s.status === 'em_andamento') emAndamento++;
+        else if (s.status === 'concluida') concluidas++;
+        else if (s.status === 'finalizada') finalizadas++;
+      }
     });
 
     return {
       childrenCount: children.length,
+      totalAssets,
       emAndamento,
       concluidas,
       finalizadas,
@@ -463,7 +481,7 @@ export function LocationsView({ onSelectInspection }: { onSelectInspection: (id:
           {!activeParentId ? (
             <div className="flex flex-col gap-2">
               <h2 className="text-4xl font-display font-extrabold text-slate-900 tracking-tight">Secretarias & Departamentos</h2>
-              <p className="text-sm font-medium text-slate-400 uppercase tracking-[0.2em] max-w-md">Escolha um departamento para visualizar as salas e vistorias vinculadas.</p>
+              <p className="text-sm font-medium text-slate-400 uppercase tracking-[0.2em] max-w-md">Escolha uma secretaria para gerenciar suas salas e arquivos.</p>
             </div>
           ) : (
             <Card className="bg-indigo-600 text-white p-6 md:p-8 rounded-[2.5rem] border-none shadow-2xl shadow-indigo-600/20 flex flex-col md:flex-row md:items-center justify-between gap-6 animate-in zoom-in-95 duration-500">
@@ -479,18 +497,29 @@ export function LocationsView({ onSelectInspection }: { onSelectInspection: (id:
               
               <div className="flex items-center gap-4 shrink-0">
                 <div className="flex flex-col items-end gap-1">
-                   <span className="text-[10px] font-black uppercase opacity-60">Status Geral</span>
+                   <span className="text-[10px] font-black uppercase opacity-60">Status Consolidado</span>
                    <div className="bg-white/20 px-4 py-1.5 rounded-full border border-white/20 text-[10px] font-black uppercase tracking-widest">
-                     {getLatestStatus(activeParentLocation?.id || '')?.replace('_', ' ') || 'Pendente'}
+                     {getDepartmentStats(activeParentId).totalAssets} Itens Totais
                    </div>
                 </div>
-                <Button 
-                  variant="accent" 
-                  onClick={() => handleStartInspection(activeParentId)}
-                  className="rounded-2xl h-14 px-8 bg-white text-indigo-600 hover:bg-indigo-50 border-none shadow-xl shadow-black/10 font-black uppercase tracking-widest text-[9px]"
-                >
-                  Auditar Secretaria <Plus className="w-4 h-4 ml-2" />
-                </Button>
+                {/* 
+                   Se tiver filhos, removemos o botão de auditar DIRETAMENTE o pai, 
+                   forçando o usuário a entrar nos filhos.
+                */}
+                {locations?.some(l => l.parentId === activeParentId) ? (
+                  <div className="bg-amber-400 text-amber-900 px-6 py-4 rounded-2xl flex items-center gap-2 shadow-lg animate-in fade-in duration-500">
+                     <AlertCircle className="w-5 h-5" />
+                     <span className="text-[9px] font-black uppercase tracking-widest">Abra as salas abaixo para auditar</span>
+                  </div>
+                ) : (
+                  <Button 
+                    variant="accent" 
+                    onClick={() => handleStartInspection(activeParentId)}
+                    className="rounded-2xl h-14 px-8 bg-white text-indigo-600 hover:bg-indigo-50 border-none shadow-xl shadow-black/10 font-black uppercase tracking-widest text-[9px]"
+                  >
+                    Auditar Local <Plus className="w-4 h-4 ml-2" />
+                  </Button>
+                )}
               </div>
             </Card>
           )}
@@ -577,7 +606,7 @@ export function LocationsView({ onSelectInspection }: { onSelectInspection: (id:
                          onClick={() => handleStartInspection(loc.id)}
                          className="mt-2 w-full text-[10px] font-black uppercase tracking-[0.2em] h-10 rounded-xl"
                        >
-                         {getLatestStatus(loc.id) === 'em_andamento' ? 'CONTINUAR' : 'AUDITAR'}
+                         {getLatestStatusCount(loc.id)?.status === 'em_andamento' ? 'CONTINUAR' : 'AUDITAR'}
                        </Button>
                     </div>
                   </Popup>
@@ -627,9 +656,11 @@ export function LocationsView({ onSelectInspection }: { onSelectInspection: (id:
         )}
 
         {displayedLocations?.map(loc => {
-          const status = getLatestStatus(loc.id);
-          const isParent = !loc.parentId;
-          const stats = isParent ? getDepartmentStats(loc.id) : null;
+          const stats = getLatestStatusCount(loc.id);
+          const status = stats?.status;
+          const hasChildren = locations?.some(l => l.parentId === loc.id);
+          const isParent = !loc.parentId || hasChildren;
+          const deptStats = isParent ? getDepartmentStats(loc.id) : null;
           return (
             <Card key={loc.id} className={cn(
               "group p-10 rounded-[3rem] flex flex-col gap-8 transition-all duration-700 relative overflow-hidden hover:-translate-y-2 shadow-[0_8px_40px_-15px_rgba(0,0,0,0.03)]",
@@ -638,7 +669,7 @@ export function LocationsView({ onSelectInspection }: { onSelectInspection: (id:
                 : "bg-white border-2 border-slate-100 hover:border-indigo-300 hover:shadow-slate-900/10"
             )}>
               {/* Parent badge indicator */}
-              {isParent && (
+              {hasChildren && (
                 <div className="absolute top-0 right-0">
                   <div className="bg-indigo-600 text-white text-[9px] font-black uppercase tracking-[0.2em] px-6 py-2 rounded-bl-3xl shadow-lg">
                     Secretaria / Depto
@@ -657,7 +688,7 @@ export function LocationsView({ onSelectInspection }: { onSelectInspection: (id:
                 </div>
                 <div className="flex flex-col items-end gap-3">
                   {/* Para Salas (Filhos): Mostra o status normal */}
-                  {!isParent && status && (
+                  {!hasChildren && status && (
                     <div className={cn(
                       "text-[9px] font-black uppercase tracking-[0.15em] px-4 py-1.5 rounded-full border shadow-sm transition-all",
                       status === 'em_andamento' ? "bg-indigo-50 text-indigo-600 border-indigo-100 ring-4 ring-indigo-500/5" :
@@ -669,21 +700,21 @@ export function LocationsView({ onSelectInspection }: { onSelectInspection: (id:
                   )}
 
                   {/* Para Departamentos (Pais): Mostra o progresso consolidado de todas as salas */}
-                  {isParent && stats?.hasAny && (
+                  {hasChildren && deptStats?.hasAny && (
                     <div className="flex flex-col items-end gap-1.5">
-                      <span className="text-[8px] font-black text-slate-400 uppercase tracking-widest">Painel do Departamento</span>
+                      <span className="text-[8px] font-black text-slate-400 uppercase tracking-widest">Resumo Consolidado</span>
                       <div className="flex flex-wrap items-center justify-end gap-2">
-                        {stats.emAndamento > 0 && <span className="text-[9px] px-2 py-1 rounded-lg bg-indigo-50 text-indigo-600 border border-indigo-100 font-bold shadow-sm">{stats.emAndamento} Em Aberto</span>}
-                        {stats.concluidas > 0 && <span className="text-[9px] px-2 py-1 rounded-lg bg-amber-50 text-amber-600 border border-amber-100 font-bold shadow-sm">{stats.concluidas} Concluídas</span>}
-                        {stats.finalizadas > 0 && <span className="text-[9px] px-2 py-1 rounded-lg bg-emerald-50 text-emerald-600 border border-emerald-100 font-bold shadow-sm">{stats.finalizadas} Homologadas</span>}
+                        {deptStats.emAndamento > 0 && <span className="text-[9px] px-2 py-1 rounded-lg bg-indigo-50 text-indigo-600 border border-indigo-100 font-bold shadow-sm">{deptStats.emAndamento} Em Aberto</span>}
+                        {deptStats.concluidas > 0 && <span className="text-[9px] px-2 py-1 rounded-lg bg-amber-50 text-amber-600 border border-amber-100 font-bold shadow-sm">{deptStats.concluidas} Concluídas</span>}
+                        {deptStats.finalizadas > 0 && <span className="text-[9px] px-2 py-1 rounded-lg bg-emerald-50 text-emerald-600 border border-emerald-100 font-bold shadow-sm">{deptStats.finalizadas} Homologadas</span>}
                       </div>
                     </div>
                   )}
 
                   {/* Se o Pai tiver salas mas nenhuma vistoria iniciada */}
-                  {isParent && !stats?.hasAny && stats && stats.childrenCount > 0 && (
+                  {hasChildren && !deptStats?.hasAny && deptStats && deptStats.childrenCount > 0 && (
                     <div className="text-[9px] px-3 py-1.5 rounded-full border border-slate-200 bg-slate-50 text-slate-400 font-black uppercase tracking-widest shadow-sm">
-                      {stats.childrenCount} Ambientes Internos
+                      {deptStats.childrenCount} Ambientes Internos
                     </div>
                   )}
                   {isCommittee && (
@@ -750,14 +781,14 @@ export function LocationsView({ onSelectInspection }: { onSelectInspection: (id:
               </div>
 
               <div className="pt-2 flex flex-col gap-4">
-                {!activeParentId ? (
+                {hasChildren ? (
                   <Button 
                     variant="accent" 
                     size="sm" 
                     onClick={() => setActiveParentId(loc.id)}
                     className="w-full h-16 rounded-2xl text-[10px] font-black uppercase tracking-[0.2em] shadow-xl shadow-indigo-600/20 transition-all duration-700 flex items-center justify-center gap-3"
                   >
-                    ABRIR DEPARTAMENTO <ArrowRight className="w-5 h-5 translate-x-1" />
+                    ABRIR REPARTIÇÃO <ArrowRight className="w-5 h-5 translate-x-1" />
                   </Button>
                 ) : (
                   <Button 
@@ -766,7 +797,7 @@ export function LocationsView({ onSelectInspection }: { onSelectInspection: (id:
                     onClick={() => handleStartInspection(loc.id)}
                     className="w-full h-16 rounded-2xl text-[10px] font-black uppercase tracking-[0.2em] shadow-xl shadow-indigo-600/20 transition-all duration-700 flex items-center justify-center gap-3"
                   >
-                    {status === 'em_andamento' ? 'CONTINUAR AUDITORIA' : status === 'concluida' ? 'REVISAR DOSSIÊ' : 'AUDITAR ESTA SALA'} <ArrowRight className="w-5 h-5 translate-x-2 transition-transform" />
+                    {status === 'em_andamento' ? 'CONTINUAR AUDITORIA' : status === 'concluida' ? 'REVISAR DOSSIÊ' : 'AUDITAR ESTE LOCAL'} <ArrowRight className="w-5 h-5 translate-x-2 transition-transform" />
                   </Button>
                 )}
 

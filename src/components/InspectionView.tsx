@@ -54,7 +54,41 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
   const [sectorSignature, setSectorSignature] = useState<{ responsibleName: string, signatureBase64: string, signedAt: number } | null>(null);
 
   const allLocations = useLiveQuery(() => db.locations.toArray());
+  const subLocations = React.useMemo(() => {
+    if (!location || !allLocations) return [];
+    return allLocations.filter(l => l.parentId === location.id && !l.deleted);
+  }, [allLocations, location]);
+  const hasSubLocations = subLocations.length > 0;
+
+  // Aggregate assets from sub-locations if this is a parent
+  const aggregatedSubAssets = useLiveQuery(async () => {
+    if (!hasSubLocations || !subLocations) return [];
+    
+    const subLocationIds = subLocations.map(sl => sl.id);
+    const subInspections = await db.inspections.where('locationId').anyOf(subLocationIds).filter(i => !i.deleted).toArray();
+    const subInspectionIds = subInspections.map(si => si.id);
+    
+    if (subInspectionIds.length === 0) return [];
+    
+    return await db.assets.where('inspectionId').anyOf(subInspectionIds).filter(a => !a.deleted).toArray();
+  }, [hasSubLocations, subLocations]);
+
+  const allVisibleAssets = hasSubLocations 
+    ? [...(assets || []), ...(aggregatedSubAssets || [])]
+    : (assets || []);
   
+  const filteredAssets = allVisibleAssets.filter(asset => 
+    (asset.name || '').toLowerCase().includes(searchTermAssets.toLowerCase()) || 
+    (asset.patrimonyNumber || '').toLowerCase().includes(searchTermAssets.toLowerCase())
+  );
+
+  const displayedAssets = searchTermAssets 
+    ? filteredAssets 
+    : filteredAssets?.slice(0, displayLimit);
+
+  const unsyncedAssetsCount = assets?.filter(a => a.needsSync === 1 || a.needsSync === true as any).length || 0;
+
+  // Restore Missing logic starts here
   // Fetch signature data quando a vistoria mudar ou for homologada
   React.useEffect(() => {
     const fetchSignature = async () => {
@@ -133,8 +167,30 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
       }
     }
   };
+  // Restore Missing logic ends here
 
-  const unsyncedAssetsCount = assets?.filter(a => a.needsSync === 1 || a.needsSync === true as any).length || 0;
+  const [locationNames, setLocationNames] = useState<Record<string, string>>({});
+
+  // Sync location names for display labels
+  React.useEffect(() => {
+    const fetchLocNames = async () => {
+      const inspIds = [...new Set(allVisibleAssets.map(a => a.inspectionId))];
+      const mappings: Record<string, string> = {};
+      for (const iId of inspIds) {
+        if (iId === id) {
+          mappings[iId] = location?.name || '';
+        } else {
+          const insp = await db.inspections.get(iId);
+          if (insp) {
+            const loc = await db.locations.get(insp.locationId);
+            if (loc) mappings[iId] = loc.name;
+          }
+        }
+      }
+      setLocationNames(prev => ({ ...prev, ...mappings }));
+    };
+    if (allVisibleAssets.length > 0) fetchLocNames();
+  }, [allVisibleAssets.length, id, location?.name]);
 
   const [newItem, setNewItem] = useState({
     name: '',
@@ -791,7 +847,20 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
 
   const isFinalized = inspection.status === 'finalizada';
   const isConcluded = inspection.status === 'concluida';
-  const isLocked = isFinalized || (isConcluded && !isCommittee); // Permitir que a comissão edite se estiver apenas concluída
+  const isLocked = isFinalized || (isConcluded && !isCommittee) || hasSubLocations; // Prevent adding items to parent locations
+
+  const handleStartSubInspection = async (subLocId: string) => {
+    // Navigate to a sub-location audit
+    // Need to find existing or create new
+    const existing = await db.inspections.where({ locationId: subLocId }).filter(i => !i.deleted && i.status !== 'finalizada').first();
+    if (existing) {
+       onBack(); // Go back to trigger selecting another one? 
+       // Better: the app usually manages selecting via ID in Dashboard
+       // For now, let's just use the dashboard's logic by popping back and letting user click?
+       // Actually, we can't easily change the dashboard state from here without props.
+       // Let's just assume navigation happens through Dashboard for now, or just show the links.
+    }
+  };
 
   const handleBack = async () => {
     if (inspection?.status === 'em_andamento') {
@@ -808,15 +877,6 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
     }
     onBack();
   };
-
-  const filteredAssets = assets?.filter(asset => 
-    (asset.name || '').toLowerCase().includes(searchTermAssets.toLowerCase()) || 
-    (asset.patrimonyNumber || '').toLowerCase().includes(searchTermAssets.toLowerCase())
-  );
-
-  const displayedAssets = searchTermAssets 
-    ? filteredAssets 
-    : filteredAssets?.slice(0, displayLimit);
 
   return (
     <div className="flex flex-col gap-10 animate-in fade-in slide-in-from-right-4 duration-700 pb-24">
@@ -909,7 +969,7 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
                   <Building2 className="w-8 h-8 text-white" />
                </div>
                <div className="flex flex-col">
-                  <span className="text-[10px] font-black text-indigo-400 uppercase tracking-[0.2em] leading-none mb-2">Local em Auditoria</span>
+                  <span className="text-[10px] font-black text-indigo-400 uppercase tracking-[0.2em] leading-none mb-2">{hasSubLocations ? 'Visão Consolidada' : 'Local em Auditoria'}</span>
                   <h1 className="text-4xl lg:text-5xl font-display font-extrabold tracking-tight leading-none">{location.name}</h1>
                </div>
             </div>
@@ -922,8 +982,8 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
                 <span className="font-display text-2xl font-black tracking-tight text-white">{formatDate(inspection.date).split(',')[0]}</span>
              </div>
              <div className="flex flex-col gap-1">
-                <span className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Itens</span>
-                <span className="font-display text-2xl font-black tracking-tight text-white">{assets?.length || 0}</span>
+                <span className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Itens {hasSubLocations ? 'Totais' : ''}</span>
+                <span className="font-display text-2xl font-black tracking-tight text-white">{allVisibleAssets.length}</span>
              </div>
              <div className="flex flex-col gap-1">
                 <span className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Status</span>
@@ -931,7 +991,7 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
                   "font-display text-2xl font-black tracking-tight uppercase",
                   isFinalized ? "text-emerald-400" : isConcluded ? "text-indigo-400" : "text-blue-400"
                 )}>
-                  {inspection.status.split('_')[0]}
+                  {hasSubLocations ? 'GERAL' : inspection.status.split('_')[0]}
                 </span>
              </div>
           </div>
@@ -973,6 +1033,46 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
         </div>
       )}
 
+      {/* Sub-locations section if is parent */}
+      {hasSubLocations && (
+        <div className="flex flex-col gap-6 animate-in slide-in-from-bottom-4 duration-700">
+           <div className="flex items-center justify-between ml-2">
+              <div className="flex flex-col">
+                <h3 className="text-xs font-black text-slate-400 uppercase tracking-[0.2em]">Ambientes Internos</h3>
+                <span className="text-[10px] font-bold text-indigo-600 uppercase tracking-widest mt-1">Gavetas/Salas desta repartição</span>
+              </div>
+           </div>
+           <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-4">
+              {subLocations?.map(sl => (
+                <button 
+                  key={sl.id}
+                  onClick={onBack} // Forcing back to dashboard for now as drill-down is reliable there
+                  className="bg-white border border-slate-100 p-6 rounded-3xl hover:border-indigo-300 hover:shadow-xl hover:shadow-indigo-600/5 transition-all text-left flex flex-col gap-3 group"
+                >
+                   <div className="w-10 h-10 bg-slate-50 rounded-xl flex items-center justify-center text-slate-400 group-hover:bg-indigo-600 group-hover:text-white transition-all">
+                      <Home className="w-5 h-5" />
+                   </div>
+                   <div className="flex flex-col">
+                      <span className="text-xs font-black text-slate-900 group-hover:text-indigo-600 transition-colors uppercase truncate">{sl.name}</span>
+                      <span className="text-[9px] font-bold text-slate-400 uppercase tracking-widest mt-1">Ver Itens</span>
+                   </div>
+                </button>
+              ))}
+           </div>
+           
+           <div className="bg-amber-50 border border-amber-100 p-6 rounded-[2rem] flex flex-col md:flex-row items-center gap-6 shadow-xl shadow-amber-500/5">
+              <div className="w-14 h-14 bg-white rounded-2xl flex items-center justify-center shadow-lg text-amber-500 shrink-0">
+                 <AlertCircle className="w-7 h-7" />
+              </div>
+              <div className="flex flex-col gap-1 text-center md:text-left">
+                <span className="text-sm font-black text-amber-900 uppercase tracking-tight">Bloqueio de Inclusão Direta</span>
+                <p className="text-[11px] font-medium text-amber-600 leading-relaxed uppercase tracking-widest">
+                  Este local é um <span className="font-bold">Agrupador</span>. Para manter a organização, os novos itens devem ser cadastrados dentro das salas/gavetas específicas listadas acima.
+                </p>
+              </div>
+           </div>
+        </div>
+      )}
       {/* QR Code section if finalized */}
       {isFinalized && (
         <div className="flex flex-col gap-8 animate-in zoom-in-95 duration-700">
@@ -1365,6 +1465,12 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
                         <span className="text-[9px] text-slate-400 font-bold uppercase tracking-widest">Qtd</span>
                         <span className="text-xs text-slate-700 font-black">{asset.quantity || 1}</span>
                      </div>
+                     {hasSubLocations && locationNames[asset.inspectionId] && (
+                        <div className="flex items-center gap-2 px-2 py-1 bg-indigo-50 border border-indigo-100 rounded-lg">
+                           <Home className="w-3 h-3 text-indigo-400" />
+                           <span className="text-[9px] text-indigo-600 font-black uppercase tracking-widest">{locationNames[asset.inspectionId]}</span>
+                        </div>
+                     )}
                   </div>
                 </div>
                 <div className={cn(
