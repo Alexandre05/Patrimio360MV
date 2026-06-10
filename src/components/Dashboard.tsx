@@ -13,6 +13,7 @@ import {
   AlertCircle, 
   Bell, 
   Plus, 
+  Trash2,
   Search, 
   LayoutGrid, 
   PlayCircle, 
@@ -198,30 +199,74 @@ export function Dashboard() {
 
   const handleResetSystem = async () => {
     if (!isAdmin) return;
-    const confirm1 = window.confirm("⚠️ ATENÇÃO: Isso irá apagar TODAS as vistorias e itens do sistema. Esta ação não pode ser desfeita. Deseja continuar?");
+    const confirm1 = window.confirm("⚠️ ATENÇÃO: Isso irá apagar COMPLETAMENTE o banco de dados (Locais/Setores, Vistorias, Itens e Alertas) tanto localmente quanto na nuvem. Esta ação é irreversível e apagará todos os dados de teste. Deseja prosseguir?");
     if (!confirm1) return;
     
-    const confirm2 = window.confirm("CONFIRMAÇÃO FINAL: Você tem certeza absoluta que deseja ZERAR o sistema de vistorias?");
+    const confirm2 = window.confirm("CONFIRMAÇÃO FINAL: Você tem certeza absoluta de que quer ZERAR tudo?");
     if (!confirm2) return;
 
     setIsResetting(true);
     try {
-      // Usar Promise.all para garantir que tudo seja limpo antes de avisar
+      // 1. Limpar banco local Dexie
       await Promise.all([
         db.assets.clear(),
         db.inspections.clear(),
+        db.locations.clear(),
         db.notifications.clear()
       ]);
+
+      // 2. Limpar do Firestore se estiver conectado
+      if (isOnline) {
+        try {
+          const { getDocs, collection, deleteDoc, doc } = await import('firebase/firestore');
+          
+          // Limpa Bens (assets)
+          const assetsSnap = await getDocs(collection(firestore, 'assets'));
+          for (const d of assetsSnap.docs) {
+            await deleteDoc(doc(firestore, 'assets', d.id));
+          }
+
+          // Limpa Vistorias (inspections)
+          const inspectionsSnap = await getDocs(collection(firestore, 'inspections'));
+          for (const d of inspectionsSnap.docs) {
+            await deleteDoc(doc(firestore, 'inspections', d.id));
+          }
+
+          // Limpa Ambientes/Locais (locations)
+          const locationsSnap = await getDocs(collection(firestore, 'locations'));
+          for (const d of locationsSnap.docs) {
+            await deleteDoc(doc(firestore, 'locations', d.id));
+          }
+
+          // Limpa Alertas (notifications)
+          const notificationsSnap = await getDocs(collection(firestore, 'notifications'));
+          for (const d of notificationsSnap.docs) {
+            await deleteDoc(doc(firestore, 'notifications', d.id));
+          }
+
+        } catch (firestoreErr) {
+          console.error("Erro ao limpar dados remotos do Firestore:", firestoreErr);
+        }
+      }
+
+      // 3. Limpa os marcadores de tempo do Delta Sync no localStorage para não sincronizar lixo
+      const keys = [
+        'lastSyncTime_locations',
+        'lastSyncTime_inspections',
+        'lastSyncTime_assets',
+        'lastSyncTime_users',
+        'lastSyncTime_sector_inspections'
+      ];
+      keys.forEach(key => localStorage.removeItem(key));
       
-      alert("✅ SISTEMA REINICIADO: Todas as vistorias e itens de teste foram apagados com sucesso.");
+      alert("✅ SUCESSO: O banco de dados (locais, vistorias, bens e alertas) local e na nuvem foi zerado com sucesso para fins de testes.");
       
-      // Pequeno delay para garantir que o Dexie terminou
       setTimeout(() => {
-        window.location.href = '/'; // Recarregar na home
+        window.location.href = '/'; // Recarregar a aplicação na Home
       }, 500);
     } catch (err) {
       console.error("Erro ao zerar sistema:", err);
-      alert("Erro ao zerar o sistema.");
+      alert("Erro ao zerar o banco de dados.");
     } finally {
       setIsResetting(false);
     }
@@ -418,6 +463,15 @@ export function Dashboard() {
                           <Database className="w-3 h-3" />
                           Sincronização Forçada
                         </button>
+
+                        <button 
+                          onClick={handleResetSystem}
+                          disabled={isResetting}
+                          className="text-[10px] font-black uppercase text-rose-500 hover:text-rose-700 transition-all flex items-center gap-1 bg-rose-50/40 hover:bg-rose-50 border border-rose-100/50 hover:border-rose-200 px-3 py-1.5 rounded-xl ml-2 shadow-sm"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                          {isResetting ? "Zerando..." : "Zerar Banco & Vistorias (Testes)"}
+                        </button>
                       </div>
                     )}
                   </div>
@@ -544,6 +598,76 @@ export function Dashboard() {
         return isAdmin ? <UsersView /> : <div className="p-20 text-center text-slate-400 font-bold uppercase tracking-widest">Acesso restrito a administradores.</div>;
       case 'notifications':
         return <NotificationsView onBack={() => setActiveTab('home')} />;
+      case 'settings':
+        return isAdmin ? (
+          <div className="flex flex-col gap-8 animate-in fade-in duration-500 max-w-4xl">
+            <div className="bg-white border border-slate-100 p-8 rounded-[2.5rem] shadow-sm flex flex-col gap-6">
+              <div className="flex items-center gap-4">
+                <div className="w-12 h-12 rounded-[1.25rem] bg-indigo-50 border border-indigo-100/40 flex items-center justify-center text-indigo-600">
+                  <Settings className="w-6 h-6" />
+                </div>
+                <div className="flex flex-col">
+                  <h3 className="text-lg font-black text-slate-900 uppercase tracking-tight">Ferramentas de Sistema & Administração</h3>
+                  <span className="text-slate-400 text-[10px] font-bold uppercase tracking-widest">Painel para fins de teste e manutenção</span>
+                </div>
+              </div>
+
+              <div className="h-px bg-slate-100 w-full" />
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                {/* Card Zerar Banco */}
+                <div className="border border-rose-100 bg-rose-50/20 p-6 rounded-[2rem] flex flex-col justify-between gap-6">
+                  <div className="flex flex-col gap-2">
+                    <span className="text-xs font-black text-rose-600 uppercase tracking-widest">Zona de Perigo</span>
+                    <h4 className="text-xl font-bold text-rose-950 leading-none">Zerar Banco de Dados</h4>
+                    <p className="text-slate-500 text-xs leading-relaxed mt-2">
+                      Apaga permanentemente todas as vistorias, ambientes criados, observações, fotos e itens do banco de dados local e do servidor na nuvem.
+                    </p>
+                  </div>
+                  <Button 
+                    variant="danger" 
+                    onClick={handleResetSystem}
+                    disabled={isResetting}
+                    className="w-full h-14 text-xs uppercase tracking-widest bg-rose-600 text-white hover:bg-rose-700 font-bold"
+                  >
+                    {isResetting ? "Limpando Banco..." : "Zerar Banco de Dados e Vistorias"}
+                  </Button>
+                </div>
+
+                {/* Card Backup */}
+                <div className="border border-indigo-100/30 bg-slate-50/40 p-6 rounded-[2rem] flex flex-col justify-between gap-6">
+                  <div className="flex flex-col gap-2">
+                    <span className="text-xs font-black text-indigo-600 uppercase tracking-widest">Preservação de Dados</span>
+                    <h4 className="text-xl font-bold text-slate-950 leading-none">Backup do Sistema</h4>
+                    <p className="text-slate-500 text-xs leading-relaxed mt-2">
+                      Exporte todos os dados cadastrados para um arquivo JSON local ou importe um arquivo de backup previamente gerado.
+                    </p>
+                  </div>
+                  <div className="flex flex-col gap-3">
+                    <Button 
+                      variant="outline" 
+                      onClick={handleExportData}
+                      className="w-full h-14 text-xs uppercase tracking-widest bg-white border-2 border-slate-200 text-slate-800 font-bold"
+                    >
+                      Exportar Dados (.json)
+                    </Button>
+                    <label className="flex items-center justify-center gap-2 w-full h-14 px-4 bg-indigo-600 hover:bg-indigo-700 text-white rounded-2xl text-xs uppercase tracking-widest font-black pointer-events-auto cursor-pointer transition-all select-none text-center">
+                      Importar Backup
+                      <input 
+                        type="file" 
+                        accept=".json" 
+                        onChange={handleImportData} 
+                        className="hidden" 
+                      />
+                    </label>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        ) : (
+          <div className="p-20 text-center text-slate-400 font-bold uppercase tracking-widest">Acesso restrito a administradores.</div>
+        );
       default:
         return <div className="flex items-center justify-center py-20 text-slate-400 font-medium italic">Selecione uma opção no menu.</div>;
     }
@@ -654,8 +778,9 @@ export function Dashboard() {
           {isAdmin && (
             <>
               {!isSidebarCollapsed && <div className="h-4" />}
-              {!isSidebarCollapsed && <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest px-4 mb-2 animate-in fade-in duration-700">Equipe</span>}
+              {!isSidebarCollapsed && <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest px-4 mb-2 animate-in fade-in duration-700">Equipe & Sistema</span>}
               <NavItem collapsed={isSidebarCollapsed} active={activeTab === 'users'} label="Agentes" icon={Users} onClick={() => handleTabChange('users')} />
+              <NavItem collapsed={isSidebarCollapsed} active={activeTab === 'settings'} label="Configurações" icon={Settings} onClick={() => handleTabChange('settings')} />
             </>
           )}
         </nav>

@@ -1,7 +1,7 @@
 import React, { useState, useRef } from 'react';
 import { Card, Button, Input, Select, Textarea } from './UI';
 import { useOnlineStatus } from '../lib/hooks';
-import { ArrowLeft, Plus, Image as ImageIcon, Trash2, Camera, UserPlus, Save, CheckCircle2, History, Eye, PlayCircle, ArrowRight, X, Edit2, Search, ShieldCheck, AlertCircle, Home, ChevronLeft, ChevronRight, Zap, Copy, Database, Signature } from 'lucide-react';
+import { ArrowLeft, Plus, Image as ImageIcon, Trash2, Camera, UserPlus, Save, CheckCircle2, History, Eye, PlayCircle, ArrowRight, X, Edit2, Search, ShieldCheck, AlertCircle, Home, ChevronLeft, ChevronRight, Zap, Copy, Database, Signature, Mic, Filter } from 'lucide-react';
 import { db, Asset, generateAssetHash, generateId, AssetCondition, InspectionStatus, Inspection, Location } from '../lib/db';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { useAuth } from '../lib/AuthContext';
@@ -29,6 +29,8 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
   const assets = useLiveQuery(() => db.assets.where('inspectionId').equals(id).filter(a => !a.deleted).toArray(), [id]);
   
   const [searchTermAssets, setSearchTermAssets] = useState('');
+  const [conditionFilter, setConditionFilter] = useState('all');
+  const [isListening, setIsListening] = useState(false);
   const [displayLimit, setDisplayLimit] = useState(20);
   const [isAdding, setIsAdding] = useState(false);
   const [isConcluding, setIsConcluding] = useState(false);
@@ -91,8 +93,13 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
     : (assets || []);
   
   const filteredAssets = allVisibleAssets.filter(asset => 
-    (asset.name || '').toLowerCase().includes(searchTermAssets.toLowerCase()) || 
-    (asset.patrimonyNumber || '').toLowerCase().includes(searchTermAssets.toLowerCase())
+    ((asset.name || '').toLowerCase().includes(searchTermAssets.toLowerCase()) || 
+    (asset.patrimonyNumber || '').toLowerCase().includes(searchTermAssets.toLowerCase())) &&
+    (conditionFilter === 'all' || 
+     (conditionFilter === 'bom' && (asset.condition === 'bom' || asset.condition === 'novo')) ||
+     (conditionFilter === 'regular' && (asset.condition === 'regular' || asset.condition === 'ruim')) ||
+     (conditionFilter === 'inservivel' && asset.condition === 'inservivel') ||
+     (asset.condition === conditionFilter))
   );
 
   const displayedAssets = searchTermAssets 
@@ -388,6 +395,41 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
     });
     setEditingAssetId(asset.id);
     setIsAdding(true);
+  };
+
+  const handleCloneAsset = (asset: Asset) => {
+    setNewItem({
+      name: asset.name,
+      patrimonyNumber: '', // Deixa em branco para a nova plaqueta
+      condition: asset.condition,
+      observations: asset.observations,
+      photos: asset.photos || [],
+      quantity: 1
+    });
+    setEditingAssetId(null);
+    setIsAdding(true);
+  };
+
+  const handleVoiceDictation = () => {
+    const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+    if (!SpeechRecognition) {
+      alert('Seu navegador não suporta digitação por voz.');
+      return;
+    }
+    const recognition = new SpeechRecognition();
+    recognition.lang = 'pt-BR';
+    setIsListening(true);
+    recognition.onresult = (event: any) => {
+      const transcript = event.results[0][0].transcript;
+      setNewItem(prev => ({ 
+        ...prev, 
+        observations: prev.observations ? prev.observations + ' ' + transcript : transcript 
+      }));
+      setIsListening(false);
+    };
+    recognition.onerror = () => setIsListening(false);
+    recognition.onend = () => setIsListening(false);
+    recognition.start();
   };
 
   const loadHistory = async (asset: Asset) => {
@@ -1359,7 +1401,23 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
 
                  <div className="flex flex-col gap-4">
                     <div className="flex flex-col">
-                        <label className="text-[10px] font-bold text-slate-900 uppercase tracking-widest ml-1">Observações Técnicas</label>
+                        <div className="flex items-center justify-between pb-1 pr-1 w-full">
+                          <label className="text-[10px] font-bold text-slate-900 uppercase tracking-widest ml-1">Observações Técnicas</label>
+                          <button
+                            type="button"
+                            onClick={handleVoiceDictation}
+                            className={cn(
+                              "flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[9px] font-black uppercase tracking-widest border transition-all cursor-pointer",
+                              isListening 
+                                ? "bg-rose-500 border-rose-500 text-white animate-pulse" 
+                                : "bg-slate-50 hover:bg-slate-100 border-slate-200 text-slate-600"
+                            )}
+                            title="Digitar por voz (API Web Speech)"
+                          >
+                            <Mic className={cn("w-3.5 h-3.5", isListening && "text-white animate-bounce")} />
+                            {isListening ? "Ouvindo..." : "Ditado por Voz"}
+                          </button>
+                        </div>
                         <span className="text-slate-400 text-[9px] ml-1 mb-2 font-medium">Anote avarias, faltas de peças ou necessidade de descarte.</span>
                      </div>
                     <Textarea 
@@ -1443,6 +1501,72 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
             </Card>
           </div>
         )}
+
+         {/* Barra de Filtro Semafórico Visual - Zero Digitação */}
+         <div className="flex flex-wrap items-center justify-between gap-5 bg-white border border-slate-100 p-5 rounded-[2rem] px-8 select-none shadow-sm mb-4">
+           <div className="flex items-center gap-3">
+             <div className="w-10 h-10 rounded-[1.25rem] bg-indigo-50 border border-indigo-100/40 flex items-center justify-center text-indigo-500">
+               <Filter className="w-5 h-5" />
+             </div>
+             <div className="flex flex-col">
+               <span className="text-[10px] font-black text-slate-800 uppercase tracking-widest leading-none">Filtro Rápido Estado</span>
+               <span className="text-slate-400 text-[8px] font-bold uppercase tracking-widest mt-1">Conformidade do Acervo</span>
+             </div>
+           </div>
+           <div className="flex flex-wrap gap-2">
+             <button
+               type="button"
+               onClick={() => setConditionFilter('all')}
+               className={cn(
+                 "px-5 py-3 rounded-2xl text-[10px] font-black uppercase tracking-widest border transition-all cursor-pointer",
+                 conditionFilter === 'all'
+                   ? "bg-slate-900 border-slate-900 text-white shadow-xl shadow-slate-900/15"
+                   : "bg-slate-50 border-slate-200 hover:bg-slate-100 text-slate-600"
+               )}
+             >
+               Todos ({allVisibleAssets.length})
+             </button>
+             <button
+               type="button"
+               onClick={() => setConditionFilter('bom')}
+               className={cn(
+                 "px-5 py-3 rounded-2xl text-[10px] font-black uppercase tracking-widest border flex items-center gap-2.5 transition-all cursor-pointer",
+                 conditionFilter === 'bom'
+                   ? "bg-emerald-600 border-emerald-600 text-white shadow-xl"
+                   : "bg-emerald-50/50 border-emerald-100 hover:bg-emerald-50 text-emerald-600"
+               )}
+             >
+               <span className={cn("w-2 h-2 rounded-full", conditionFilter === 'bom' ? "bg-white" : "bg-emerald-500")} />
+               Bons ({allVisibleAssets.filter(a => a.condition === 'bom' || a.condition === 'novo').length})
+             </button>
+             <button
+               type="button"
+               onClick={() => setConditionFilter('regular')}
+               className={cn(
+                 "px-5 py-3 rounded-2xl text-[10px] font-black uppercase tracking-widest border flex items-center gap-2.5 transition-all cursor-pointer",
+                 conditionFilter === 'regular'
+                   ? "bg-amber-500 border-amber-500 text-white shadow-xl"
+                   : "bg-amber-50/50 border-amber-100 hover:bg-amber-50 text-amber-600"
+               )}
+             >
+               <span className={cn("w-2 h-2 rounded-full", conditionFilter === 'regular' ? "bg-white" : "bg-amber-500")} />
+               Regulares/Ruins ({allVisibleAssets.filter(a => a.condition === 'regular' || a.condition === 'ruim').length})
+             </button>
+             <button
+               type="button"
+               onClick={() => setConditionFilter('inservivel')}
+               className={cn(
+                 "px-5 py-3 rounded-2xl text-[10px] font-black uppercase tracking-widest border flex items-center gap-2.5 transition-all cursor-pointer",
+                 conditionFilter === 'inservivel'
+                   ? "bg-rose-500 border-rose-500 text-white shadow-xl"
+                   : "bg-rose-50/50 border-rose-100 hover:bg-rose-50 text-rose-600"
+               )}
+             >
+               <span className={cn("w-2 h-2 rounded-full", conditionFilter === 'inservivel' ? "bg-white" : "bg-rose-500")} />
+               Inservíveis ({allVisibleAssets.filter(a => a.condition === 'inservivel').length})
+             </button>
+           </div>
+         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
           {displayedAssets?.map(asset => (
@@ -1533,6 +1657,13 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
                         </button>
                         {!isLocked && (
                           <>
+                            <button 
+                              onClick={() => handleCloneAsset(asset)}
+                              className="p-3 bg-white text-slate-400 hover:text-emerald-600 rounded-2xl border border-slate-100 hover:border-emerald-100 shadow-sm transition-all"
+                              title="Clonagem Rápida (Zero Digitação)"
+                            >
+                              <Copy className="w-5 h-5" />
+                            </button>
                             <button 
                               onClick={() => handleEditAsset(asset)}
                               className="p-3 bg-white text-slate-400 hover:text-blue-600 rounded-2xl border border-slate-100 hover:border-blue-100 shadow-sm transition-all"

@@ -1,6 +1,6 @@
 import React, { useState, MouseEvent } from 'react';
 import { Card, Button, Input, Select } from './UI';
-import { Building2, Plus, ArrowRight, Trash2, AlertCircle, X, Search, History, Calendar, CheckSquare, Map, ShieldCheck, Edit2, Database, MapPin } from 'lucide-react';
+import { Building2, Plus, ArrowRight, Trash2, AlertCircle, X, Search, History, Calendar, CheckSquare, Map, ShieldCheck, Edit2, Database, MapPin, RotateCcw } from 'lucide-react';
 import { db, generateId, Inspection, Location } from '../lib/db';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { cn, formatDate } from '../lib/utils';
@@ -11,6 +11,7 @@ import { QRCodePrintCard } from './QRCodePrintCard';
 import { doc, deleteDoc } from 'firebase/firestore';
 import { MapContainer, TileLayer, Marker, Popup } from 'react-leaflet';
 import L from 'leaflet';
+import { recreateFisioRoom } from '../lib/seed';
 
 // Fix Leaflet marker icons in React (vite)
 delete (L.Icon.Default.prototype as any)._getIconUrl;
@@ -29,6 +30,13 @@ export function LocationsView({ onSelectInspection }: { onSelectInspection: (id:
   const locations = useLiveQuery(() => db.locations.filter(l => !l.deleted).toArray());
   const inspections = useLiveQuery(() => db.inspections.filter(i => !i.deleted).toArray());
   const assets = useLiveQuery(() => db.assets.filter(a => !a.deleted).toArray());
+  
+  const [showTrashBin, setShowTrashBin] = useState(false);
+  const [trashTab, setTrashTab] = useState<'locations' | 'inspections' | 'assets'>('locations');
+  const deletedLocations = useLiveQuery(() => db.locations.filter(l => !!l.deleted).toArray());
+  const deletedInspections = useLiveQuery(() => db.inspections.filter(i => !!i.deleted).toArray());
+  const deletedAssets = useLiveQuery(() => db.assets.filter(a => !!a.deleted).toArray());
+
   const [viewMode, setViewMode] = useState<'list' | 'map'>('list');
   const [searchTerm, setSearchTerm] = useState('');
   const [displayLimit, setDisplayLimit] = useState(20);
@@ -305,6 +313,118 @@ export function LocationsView({ onSelectInspection }: { onSelectInspection: (id:
     }
   };
 
+  const handleRestoreLocation = async (locId: string) => {
+    try {
+      await db.locations.update(locId, { deleted: false, needsSync: 1, updatedAt: Date.now() });
+      
+      const relatedInspections = await db.inspections.where('locationId').equals(locId).toArray();
+      let restoredInspectionsCount = 0;
+      let restoredAssetsCount = 0;
+      
+      for (const i of relatedInspections) {
+        if (i.deleted) {
+          await db.inspections.update(i.id, { deleted: false, needsSync: 1, updatedAt: Date.now() });
+          restoredInspectionsCount++;
+        }
+        const relatedAssets = await db.assets.where('inspectionId').equals(i.id).toArray();
+        for (const a of relatedAssets) {
+          if (a.deleted) {
+            await db.assets.update(a.id, { deleted: false, needsSync: 1, updatedAt: Date.now() });
+            restoredAssetsCount++;
+          }
+        }
+      }
+      
+      pushLocalChanges();
+      return { success: true, restoredInspectionsCount, restoredAssetsCount };
+    } catch (err) {
+      console.error("Erro ao restaurar local:", err);
+      return { success: false, error: err };
+    }
+  };
+
+  const handleRestoreInspection = async (inspId: string) => {
+    try {
+      await db.inspections.update(inspId, { deleted: false, needsSync: 1, updatedAt: Date.now() });
+      
+      let parentRestored = false;
+      const insp = await db.inspections.get(inspId);
+      if (insp) {
+        const loc = await db.locations.get(insp.locationId);
+        if (loc && loc.deleted) {
+          await db.locations.update(loc.id, { deleted: false, needsSync: 1, updatedAt: Date.now() });
+          parentRestored = true;
+        }
+        
+        const relatedAssets = await db.assets.where('inspectionId').equals(inspId).toArray();
+        for (const a of relatedAssets) {
+          if (a.deleted) {
+            await db.assets.update(a.id, { deleted: false, needsSync: 1, updatedAt: Date.now() });
+          }
+        }
+      }
+      
+      pushLocalChanges();
+      return { success: true, parentRestored };
+    } catch (err) {
+      console.error("Erro ao restaurar vistoria:", err);
+      return { success: false, error: err };
+    }
+  };
+
+  const handleRestoreAsset = async (assetId: string) => {
+    try {
+      await db.assets.update(assetId, { deleted: false, needsSync: 1, updatedAt: Date.now() });
+      
+      let hierarchyRestored = false;
+      const asset = await db.assets.get(assetId);
+      if (asset) {
+        const insp = await db.inspections.get(asset.inspectionId);
+        if (insp) {
+          if (insp.deleted) {
+            await db.inspections.update(insp.id, { deleted: false, needsSync: 1, updatedAt: Date.now() });
+            hierarchyRestored = true;
+          }
+          const loc = await db.locations.get(insp.locationId);
+          if (loc && loc.deleted) {
+            await db.locations.update(loc.id, { deleted: false, needsSync: 1, updatedAt: Date.now() });
+            hierarchyRestored = true;
+          }
+        }
+      }
+      
+      pushLocalChanges();
+      return { success: true, hierarchyRestored };
+    } catch (err) {
+      console.error("Erro ao restaurar item de patrimônio:", err);
+      return { success: false, error: err };
+    }
+  };
+
+  const handleRecoverFisioRoomDirect = async () => {
+    try {
+      await recreateFisioRoom();
+      alert("🩺 Excelente! A Sala de Fisioterapia e todos os seus 6 itens patrimoniais (incluindo divãs, aparelhos de ultrassom e TENS, espaldar, etc.) foram restabelecidos com sucesso no banco de dados e sincronizados.");
+      pushLocalChanges();
+    } catch (err: any) {
+      console.error(err);
+      alert(`Houve um erro técnico ao restabelecer os dados: ${err.message || err}`);
+    }
+  };
+
+  const handleClearTrashBin = async () => {
+    const confirmClear = window.confirm("⚠️ Deseja ESVAZIAR a lixeira permanentemente do dispositivo? Isso apagará os rascunhos locais que foram excluídos.");
+    if (!confirmClear) return;
+    try {
+      await db.locations.filter(l => !!l.deleted).delete();
+      await db.inspections.filter(i => !!i.deleted).delete();
+      await db.assets.filter(a => !!a.deleted).delete();
+      alert("Lixeira local limpa com sucesso!");
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
   const handleAddLocation = () => {
     setNewLoc({ 
       name: '', 
@@ -453,6 +573,256 @@ export function LocationsView({ onSelectInspection }: { onSelectInspection: (id:
         </div>
       )}
 
+      {showTrashBin && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 md:p-10 pointer-events-none">
+          <div className="absolute inset-0 bg-slate-900/45 backdrop-blur-sm pointer-events-auto" onClick={() => setShowTrashBin(false)} />
+          <Card className="w-full max-w-4xl max-h-[85vh] flex flex-col p-0 overflow-hidden shadow-2xl animate-in zoom-in-95 duration-300 pointer-events-auto rounded-[3rem] border-none bg-white font-sans">
+             <div className="p-8 bg-emerald-950 text-white flex items-center justify-between shrink-0">
+                <div className="flex items-center gap-4">
+                   <div className="w-14 h-14 bg-white/10 rounded-[1.5rem] flex items-center justify-center border border-white/10">
+                      <Trash2 className="w-7 h-7 text-emerald-300" />
+                   </div>
+                   <div className="flex flex-col">
+                      <h3 className="font-display font-extrabold text-2xl tracking-tight leading-none text-white">Lixeira de Segurança</h3>
+                      <span className="text-[10px] font-black text-emerald-400 uppercase tracking-[0.2em] mt-3">
+                         Restauração de Ambientes, Auditorias e Patrimônios Deletados
+                      </span>
+                   </div>
+                </div>
+                <button onClick={() => setShowTrashBin(false)} className="p-3 hover:bg-white/10 rounded-2xl transition-colors text-white border-none bg-transparent cursor-pointer">
+                   <X className="w-7 h-7" />
+                </button>
+             </div>
+
+             {/* Smart Action Notification for Physiotherapy Suite */}
+             {(() => {
+                const hasFisio = deletedLocations?.some(l => l.name.toLowerCase().includes('fisio')) || 
+                                 deletedAssets?.some(a => a.name.toLowerCase().includes('fisio')) ||
+                                 deletedInspections?.some(i => i.id.toLowerCase().includes('fisio'));
+                if (!hasFisio) return null;
+                return (
+                  <div className="px-8 mt-6 shrink-0">
+                     <div className="p-5 bg-amber-500/10 border border-amber-500/20 rounded-[2rem] flex flex-col md:flex-row items-start md:items-center justify-between gap-5 animate-in slide-in-from-top-4 duration-300">
+                       <div className="flex items-start gap-4">
+                         <div className="p-3 bg-amber-500 text-white rounded-2xl shadow-lg shadow-amber-500/10">
+                           <AlertCircle className="w-6 h-6 animate-pulse" />
+                         </div>
+                         <div>
+                           <h4 className="font-display font-extrabold text-amber-950 uppercase tracking-widest text-xs">Itens da Sala Fisioterapia Encontrados</h4>
+                           <p className="text-amber-800 text-[11px] font-bold mt-1 max-w-xl">
+                             Detectamos registros da "Sala Fisio" na lixeira! Clique para recuperar toda a sala, vistorias e seus múltiplos bens patrimoniais associados de uma só vez.
+                           </p>
+                         </div>
+                       </div>
+                       <button
+                         onClick={async () => {
+                           let restoredLocs = 0;
+                           const fisioLocs = deletedLocations?.filter(l => l.name.toLowerCase().includes('fisio')) || [];
+                           for (const l of fisioLocs) {
+                             await handleRestoreLocation(l.id);
+                             restoredLocs++;
+                           }
+                           const fisioAssets = deletedAssets?.filter(a => a.name.toLowerCase().includes('fisio')) || [];
+                           for (const a of fisioAssets) {
+                             await handleRestoreAsset(a.id);
+                           }
+                           alert("Fisioterapia e itens vinculados restaurados com sucesso!");
+                           pushLocalChanges();
+                         }}
+                         className="px-6 py-3 bg-amber-500 hover:bg-amber-600 active:scale-95 text-white text-[10px] font-black uppercase tracking-widest rounded-xl transition-all shadow-md shrink-0 border-none cursor-pointer"
+                       >
+                         Restaurar Tudo do Físio
+                       </button>
+                     </div>
+                  </div>
+                );
+             })()}
+
+             {/* Tab Switcher */}
+             <div className="px-8 mt-6 flex gap-2 border-b border-slate-100 shrink-0 pb-4">
+                <button
+                  type="button"
+                  onClick={() => setTrashTab('locations')}
+                  className={cn(
+                    "px-5 py-3 rounded-2xl text-[10px] font-black uppercase tracking-wider transition-all cursor-pointer",
+                    trashTab === 'locations' 
+                      ? "bg-emerald-950 text-white shadow-lg shadow-emerald-950/20 border-none"
+                      : "bg-slate-50 text-slate-500 hover:bg-slate-100 border border-slate-200"
+                  )}
+                >
+                   Ambientes ({deletedLocations?.length || 0})
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setTrashTab('inspections')}
+                  className={cn(
+                    "px-5 py-3 rounded-2xl text-[10px] font-black uppercase tracking-wider transition-all cursor-pointer",
+                    trashTab === 'inspections' 
+                      ? "bg-emerald-950 text-white shadow-lg shadow-emerald-950/20 border-none"
+                      : "bg-slate-50 text-slate-500 hover:bg-slate-100 border border-slate-200"
+                  )}
+                >
+                   Vistorias ({deletedInspections?.length || 0})
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setTrashTab('assets')}
+                  className={cn(
+                    "px-5 py-3 rounded-2xl text-[10px] font-black uppercase tracking-wider transition-all cursor-pointer",
+                    trashTab === 'assets' 
+                      ? "bg-emerald-950 text-white shadow-lg shadow-emerald-950/20 border-none"
+                      : "bg-slate-50 text-slate-500 hover:bg-slate-100 border border-slate-200"
+                  )}
+                >
+                   Itens de Patrimônio ({deletedAssets?.length || 0})
+                </button>
+             </div>
+
+             {/* Tab Content */}
+             <div className="flex-1 overflow-y-auto p-8 flex flex-col gap-4 custom-scrollbar bg-slate-50/50 min-h-[300px]">
+                {trashTab === 'locations' && (
+                  <>
+                    {deletedLocations?.map(loc => (
+                      <div key={loc.id} className="p-6 bg-white border border-slate-100 rounded-[2rem] flex flex-col md:flex-row items-stretch md:items-center justify-between gap-6 hover:shadow-lg transition-all">
+                        <div className="flex items-center gap-4">
+                          <div className="w-12 h-12 rounded-xl bg-slate-100 flex items-center justify-center text-slate-500 shrink-0">
+                            <Building2 className="w-6 h-6" />
+                          </div>
+                          <div>
+                            <h4 className="font-display font-bold text-slate-900 text-lg">{loc.name}</h4>
+                            <p className="text-slate-400 text-xs mt-1">{loc.description || 'Sem descrição cadastrada'}</p>
+                            <span className="inline-block mt-2 text-[8px] font-black uppercase tracking-widest bg-slate-100 text-slate-500 px-2 py-1 rounded-md">ID: {loc.id}</span>
+                          </div>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={async () => {
+                            const res = await handleRestoreLocation(loc.id);
+                            if (res.success) {
+                              alert(`Local "${loc.name}" restaurado! Reativadas ${res.restoredInspectionsCount} vistorias e ${res.restoredAssetsCount} itens vinculados.`);
+                            } else {
+                              alert("Erro ao restaurar.");
+                            }
+                          }}
+                          className="flex items-center gap-2 px-6 py-3 bg-emerald-600 hover:bg-emerald-700 text-white text-[10px] font-black uppercase tracking-widest rounded-xl transition-all self-start md:self-center cursor-pointer border-none"
+                        >
+                          <RotateCcw className="w-4 h-4" /> Restaurar
+                        </button>
+                      </div>
+                    ))}
+                    {deletedLocations?.length === 0 && (
+                      <div className="py-20 text-center text-slate-400 font-bold">Nenhum ambiente deletado na lixeira.</div>
+                    )}
+                  </>
+                )}
+
+                {trashTab === 'inspections' && (
+                  <>
+                    {deletedInspections?.map(insp => {
+                      const locName = locations?.find(l => l.id === insp.locationId)?.name || 'Ambiente Desconhecido';
+                      return (
+                        <div key={insp.id} className="p-6 bg-white border border-slate-100 rounded-[2rem] flex flex-col md:flex-row items-stretch md:items-center justify-between gap-6 hover:shadow-lg transition-all">
+                          <div className="flex items-center gap-4">
+                            <div className="w-12 h-12 rounded-xl bg-slate-100 flex items-center justify-center text-slate-500 shrink-0">
+                              <Calendar className="w-6 h-6" />
+                            </div>
+                            <div>
+                              <h4 className="font-display font-bold text-slate-900 text-base font-sans">Vistoria realizada em {formatDate(insp.date)}</h4>
+                              <p className="text-slate-400 text-xs mt-1">Local correspondente: <strong className="text-slate-700">{locName}</strong></p>
+                              <p className="text-slate-400 text-xs mt-0.5">Participantes: {insp.participants?.join(', ') || 'Nenhum'}</p>
+                            </div>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={async () => {
+                              const res = await handleRestoreInspection(insp.id);
+                              if (res.success) {
+                                alert(`Vistoria restaurada com sucesso! ${res.parentRestored ? 'O local pai também foi reativado.' : ''}`);
+                              } else {
+                                alert("Erro ao restaurar.");
+                              }
+                            }}
+                            className="flex items-center gap-2 px-6 py-3 bg-emerald-600 hover:bg-emerald-700 text-white text-[10px] font-black uppercase tracking-widest rounded-xl transition-all self-start md:self-center cursor-pointer border-none"
+                          >
+                            <RotateCcw className="w-4 h-4" /> Restaurar
+                          </button>
+                        </div>
+                      );
+                    })}
+                    {deletedInspections?.length === 0 && (
+                      <div className="py-20 text-center text-slate-400 font-bold">Nenhuma vistoria deletada na lixeira.</div>
+                    )}
+                  </>
+                )}
+
+                {trashTab === 'assets' && (
+                  <>
+                    {deletedAssets?.map(asset => (
+                      <div key={asset.id} className="p-6 bg-white border border-slate-100 rounded-[2rem] flex flex-col md:flex-row items-stretch md:items-center justify-between gap-6 hover:shadow-lg transition-all">
+                        <div className="flex items-center gap-4">
+                          <div className="w-12 h-12 rounded-xl bg-slate-100 flex items-center justify-center text-slate-500 shrink-0">
+                            <CheckSquare className="w-6 h-6" />
+                          </div>
+                          <div>
+                            <div className="flex items-center gap-2 flex-wrap">
+                              <h4 className="font-display font-bold text-slate-900 text-base">{asset.name}</h4>
+                              <span className={cn(
+                                "text-[8px] font-black uppercase tracking-widest px-2.5 py-1 rounded-full",
+                                asset.condition === 'novo' && "bg-emerald-50 text-emerald-600 border border-emerald-100",
+                                asset.condition === 'bom' && "bg-blue-50 text-blue-600 border border-blue-100",
+                                asset.condition === 'regular' && "bg-amber-50 text-amber-600 border border-amber-100",
+                                asset.condition === 'inservivel' && "bg-rose-50 text-rose-600 border border-rose-100"
+                              )}>
+                                {asset.condition}
+                              </span>
+                            </div>
+                            <p className="text-slate-400 text-xs mt-1">Nº Patrimônio: <strong className="text-slate-700">{asset.patrimonyNumber}</strong></p>
+                            {asset.observations && <p className="text-slate-400 text-xs mt-1 italic text-slate-500">Obs: "{asset.observations}"</p>}
+                          </div>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={async () => {
+                            const res = await handleRestoreAsset(asset.id);
+                            if (res.success) {
+                              alert(`Item de patrimônio "${asset.name}" restaurado! ${res.hierarchyRestored ? 'Toda a estrutura superior correspondente foi reativada!' : ''}`);
+                            } else {
+                              alert("Erro ao restaurar.");
+                            }
+                          }}
+                          className="flex items-center gap-2 px-6 py-3 bg-emerald-600 hover:bg-emerald-700 text-white text-[10px] font-black uppercase tracking-widest rounded-xl transition-all self-start md:self-center cursor-pointer border-none"
+                        >
+                          <RotateCcw className="w-4 h-4" /> Restaurar
+                        </button>
+                      </div>
+                    ))}
+                    {deletedAssets?.length === 0 && (
+                      <div className="py-20 text-center text-slate-400 font-bold">Nenhum item patrimonial deletado na lixeira.</div>
+                    )}
+                  </>
+                )}
+             </div>
+
+             <div className="p-10 bg-white border-t border-slate-100 shrink-0 flex flex-col md:flex-row items-center justify-between gap-6 font-sans">
+                <button 
+                  type="button"
+                  onClick={handleClearTrashBin}
+                  className="text-[10px] font-black text-rose-500 hover:text-white uppercase tracking-widest px-6 py-3 hover:bg-rose-600 border border-rose-500/20 rounded-2xl transition-all cursor-pointer bg-white"
+                >
+                  Esvaziar Lixeira Permanente
+                </button>
+                <button 
+                  type="button"
+                  onClick={() => setShowTrashBin(false)}
+                  className="px-12 rounded-2xl uppercase font-black text-[10px] tracking-widest h-14 bg-emerald-950 hover:bg-emerald-900 text-white border-none cursor-pointer transition-colors"
+                >
+                  Fechar Lixeira
+                </button>
+             </div>
+          </Card>
+        </div>
+      )}
+
       <div className="flex flex-col md:flex-row md:items-end justify-between gap-8 md:px-2">
         <div className="flex flex-col gap-5 w-full">
           {/* Breadcrumbs e Botão Voltar */}
@@ -524,23 +894,42 @@ export function LocationsView({ onSelectInspection }: { onSelectInspection: (id:
             </Card>
           )}
 
-          {isAdmin && !activeParentId && (
-            <div className="flex items-center gap-3 mt-2">
+           {isAdmin && !activeParentId && (
+            <div className="flex flex-wrap items-center gap-3 mt-2 bg-indigo-50/40 p-5 rounded-3rem border border-indigo-100/50">
+               <div className="w-full mb-1 flex items-center justify-between">
+                  <span className="text-[10px] font-black uppercase tracking-[0.2em] text-indigo-900/60 block">Painel de Recuperação e Automação</span>
+                  <span className="text-[9px] font-bold text-indigo-500 bg-white border border-indigo-100 px-2 py-0.5 rounded-full">Exclusivo: Ti e Administração</span>
+               </div>
               <button 
                 onClick={() => forceFullSyncRecovery()}
-                className="flex items-center gap-2 px-4 py-2 bg-amber-500 text-white rounded-xl hover:bg-amber-600 transition-all font-black text-[10px] uppercase tracking-widest shadow-lg shadow-amber-500/20"
+                className="flex items-center gap-2 px-5 py-3 bg-slate-800 text-white rounded-2xl hover:bg-slate-900 transition-all font-black text-[10px] uppercase tracking-widest shadow-lg shadow-slate-900/10"
               >
-                <Database className="w-4 h-4" />
-                Forçar Sincronização (Recuperar Dados)
+                <Database className="w-4 h-4 text-sky-400" />
+                Forçar Sincronização
               </button>
               <button 
                 onClick={() => hardResetAndRescue()}
-                className="flex items-center gap-2 px-4 py-2 bg-rose-600 text-white rounded-xl hover:bg-rose-700 transition-all font-black text-[10px] uppercase tracking-widest shadow-lg shadow-rose-600/20"
+                className="flex items-center gap-2 px-5 py-3 bg-orange-500 text-white rounded-2xl hover:bg-orange-600 transition-all font-black text-[10px] uppercase tracking-widest shadow-lg shadow-orange-500/10"
               >
                 <AlertCircle className="w-4 h-4" />
-                Sincronização Profunda (Geral)
+                Sincronização Profunda
               </button>
-              <span className="text-[9px] font-bold text-amber-600 uppercase tracking-tighter opacity-60">Use para atualizar dados de ontem</span>
+              
+              <button 
+                onClick={handleRecoverFisioRoomDirect}
+                className="flex items-center gap-2 px-5 py-3 bg-indigo-600 text-white rounded-2xl hover:bg-indigo-700 transition-all font-black text-[10px] uppercase tracking-widest shadow-lg shadow-indigo-600/20"
+              >
+                <Building2 className="w-4 h-4 text-emerald-300" />
+                Restaurar Sala Fisio
+              </button>
+
+              <button 
+                onClick={() => setShowTrashBin(true)}
+                className="flex items-center gap-2 px-5 py-3 bg-emerald-600 text-white rounded-2xl hover:bg-emerald-700 transition-all font-black text-[10px] uppercase tracking-widest shadow-lg shadow-emerald-600/20"
+              >
+                <Trash2 className="w-4 h-4" />
+                Lixeira de Segurança ({(deletedLocations?.length || 0) + (deletedInspections?.length || 0) + (deletedAssets?.length || 0)})
+              </button>
             </div>
           )}
         </div>
