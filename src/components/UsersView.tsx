@@ -114,95 +114,106 @@ export function UsersView() {
   };
 
   return (
-    <div className="flex flex-col gap-10 animate-in fade-in slide-in-from-bottom-4 duration-700 max-w-5xl mx-auto pb-20">
-      <div className="flex items-center justify-between px-2 leading-none">
-        <div className="flex flex-col gap-2">
-          <h2 className="text-3xl font-black text-slate-900 tracking-tighter uppercase">Comissão de Auditores</h2>
-          <span className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] leading-none">Gestão de acessos e permissões administrativas</span>
+    <div className="flex flex-col gap-8 animate-in fade-in duration-500 max-w-5xl mx-auto pb-16">
+      {/* Header and Add Button */}
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 px-2">
+        <div className="flex flex-col gap-1">
+          <h2 className="text-2xl font-black text-slate-900 tracking-tight uppercase">Comissão de Auditores</h2>
+          <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest block">
+            Gestão de acessos e permissões administrativas
+          </span>
         </div>
         {!isAdding && (
-          <Button variant="accent" icon={UserPlus} onClick={() => setIsAdding(true)} className="rounded-2xl px-10 h-16 shadow-2xl shadow-indigo-600/20 uppercase tracking-widest font-black text-xs">
+          <Button 
+            variant="accent" 
+            icon={UserPlus} 
+            onClick={() => setIsAdding(true)} 
+            className="rounded-3xl shadow-xl hover:shadow-indigo-500/20 px-8 py-4 transition-all duration-300 uppercase tracking-widest font-bold text-xs"
+          >
             Adicionar Agente
           </Button>
         )}
       </div>
 
+      {/* Add / Edit Form Card */}
       {isAdding && (
-        <Card className="p-12 border-none shadow-[0_50px_100px_-20px_rgba(0,0,0,0.15)] animate-in zoom-in-95 duration-500 rounded-[3.5rem] bg-indigo-600 text-white overflow-hidden relative">
-          <div className="absolute top-0 right-0 p-12 opacity-10 pointer-events-none">
-             <ShieldCheck className="w-64 h-64 text-white -rotate-12" />
+        <Card className="p-8 md:p-10 border-none bg-indigo-600 text-white rounded-3xl shadow-xl transition-all duration-300 relative overflow-hidden animate-in zoom-in-95 duration-300">
+          <div className="absolute top-0 right-0 p-8 opacity-10 pointer-events-none">
+            <ShieldCheck className="w-56 h-56 text-white -rotate-12" />
           </div>
-          <div className="relative z-10 flex flex-col gap-10">
+          <div className="relative z-10 flex flex-col gap-8">
             <div className="flex items-center justify-between">
-              <div className="flex flex-col gap-2">
-                <h3 className="font-black text-2xl uppercase tracking-tighter">
+              <div className="flex flex-col gap-1">
+                <h3 className="font-extrabold text-xl uppercase tracking-tight">
                   {editingUserId ? 'Editar Credenciais' : 'Novas Credenciais'}
                 </h3>
-                <span className="text-[10px] font-black text-indigo-200 uppercase tracking-widest">Preencha os dados do servidor público</span>
+                <span className="text-[10px] font-bold text-indigo-200 uppercase tracking-widest">
+                  Preencha os dados de acesso do servidor público
+                </span>
               </div>
               <button 
                 onClick={resetForm} 
-                className="w-12 h-12 flex items-center justify-center bg-white/10 hover:bg-white/20 rounded-2xl transition-all border border-white/10"
+                className="w-10 h-10 flex items-center justify-center bg-white/10 hover:bg-white/20 rounded-2xl transition-all duration-300 border border-white/10"
               >
-                <X className="w-6 h-6 text-white" />
+                <X className="w-5 h-5 text-white" />
               </button>
             </div>
 
-            <form onSubmit={handleSave} className="grid grid-cols-1 md:grid-cols-2 gap-10">
-              <div className="flex flex-col gap-6">
+            <form onSubmit={handleSave} className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              <div className="flex flex-col gap-4">
                 <Input 
                   label="Nome Completo" 
                   placeholder="Ex: João da Silva"
                   value={formData.name}
                   onChange={e => setFormData({ ...formData, name: e.target.value })}
-                  className="bg-indigo-500/50 border-indigo-400/30 text-white placeholder:text-indigo-200"
+                  className="bg-indigo-500/30 border-indigo-400/20 text-white placeholder:text-indigo-200 rounded-2xl focus:border-white focus:ring-white/10"
                   required
                 />
                 <Input 
-                  label="E-mail Institucional" 
+                  label="E-mail Institucional (Google Auth)" 
                   placeholder="Ex: joao@manoelviana.rs.gov.br"
                   type="email"
                   value={formData.email}
                   onChange={e => setFormData({ ...formData, email: e.target.value })}
-                  className="bg-indigo-500/50 border-indigo-400/30 text-white placeholder:text-indigo-200"
+                  className="bg-indigo-500/30 border-indigo-400/20 text-white placeholder:text-indigo-200 rounded-2xl focus:border-white focus:ring-white/10"
                   required
                 />
               </div>
               
-              <div className="flex flex-col gap-6">
+              <div className="flex flex-col gap-4">
                 <Input 
                   label="Cargo / Função" 
                   placeholder="Ex: Secretário de Administração"
                   value={formData.cargo}
                   onChange={e => setFormData({ ...formData, cargo: e.target.value })}
-                  className="bg-indigo-500/50 border-indigo-400/30 text-white placeholder:text-indigo-200"
+                  className="bg-indigo-500/30 border-indigo-400/20 text-white placeholder:text-indigo-200 rounded-2xl focus:border-white focus:ring-white/10"
                 />
                 <Select 
                   label="Privilégios no Sistema"
                   value={formData.role}
                   onChange={e => setFormData({ ...formData, role: e.target.value as User['role'] })}
-                  className="bg-indigo-500/60 border-indigo-400/30 text-white"
+                  className="bg-indigo-500/30 border-indigo-400/20 text-white rounded-2xl focus:border-white"
                   options={[
                     { value: 'vistoriador', label: 'Vistoriador (Comissão)' },
                     { value: 'responsavel', label: 'Responsável (Setor)' },
-                    { value: 'administrador', label: 'Administrador Senior' },
+                    { value: 'administrador', label: 'Administrador Sênior' },
                   ]}
                 />
               </div>
 
               {!editingUserId && (
-                <div className="md:col-span-2 bg-indigo-700/40 p-10 rounded-[2.5rem] border border-white/5 flex flex-col md:flex-row items-center gap-10">
-                  <div className="flex flex-col gap-2 md:w-1/3">
-                    <span className="text-[10px] font-black text-indigo-200 uppercase tracking-widest">Senha Provisória</span>
+                <div className="md:col-span-2 bg-indigo-700/30 p-6 rounded-3xl border border-white/5 flex flex-col md:flex-row items-center gap-6">
+                  <div className="flex flex-col gap-1 md:w-1/3">
+                    <span className="text-[10px] font-bold text-indigo-200 uppercase tracking-widest">Senha Provisória</span>
                     <p className="text-[10px] font-medium text-indigo-300 leading-relaxed uppercase">
-                      Se preenchido, o usuário poderá logar com email e senha. Caso contrário, apenas via Google Auth.
+                      Se preenchido, o usuário poderá logar com email e senha. Caso contrário, apenas via Google Auth (Recomendado).
                     </p>
                   </div>
                   <div className="flex-1 w-full">
                     <Input 
                       placeholder="Mínimo 6 caracteres"
                       type="text"
-                      className="bg-white/10 border-white/10 text-white placeholder:text-indigo-300 h-16 text-center text-lg font-mono tracking-widest"
+                      className="bg-white/10 border-white/10 text-white placeholder:text-indigo-300 h-14 text-center text-md font-mono tracking-widest rounded-2xl"
                       value={formData.password}
                       onChange={e => setFormData({ ...formData, password: e.target.value })}
                     />
@@ -210,76 +221,105 @@ export function UsersView() {
                 </div>
               )}
 
-              <div className="md:col-span-2 flex justify-end gap-4 mt-4">
-                 <button type="button" onClick={resetForm} className="px-10 h-16 rounded-2xl text-[10px] font-black uppercase tracking-[0.2em] text-indigo-200 hover:text-white transition-colors">Cancelar</button>
-                 <Button type="submit" variant="secondary" className="px-16 h-16 rounded-2xl text-xs font-black uppercase tracking-[0.2em] shadow-2xl shadow-black/20 text-indigo-600 bg-white hover:bg-indigo-50">
-                   {editingUserId ? 'Salvar Alterações' : 'Concluir Cadastro'}
-                 </Button>
+              <div className="md:col-span-2 flex justify-end gap-3 mt-4">
+                <button 
+                  type="button" 
+                  onClick={resetForm} 
+                  className="px-6 h-12 rounded-2xl text-[10px] font-bold uppercase tracking-wider text-indigo-100 hover:text-white transition-all duration-300"
+                >
+                  Cancelar
+                </button>
+                <Button 
+                  type="submit" 
+                  variant="secondary" 
+                  className="px-10 h-12 rounded-3xl text-xs font-bold uppercase tracking-widest shadow-xl text-indigo-600 bg-white hover:bg-indigo-50 border-none transition-all duration-300"
+                >
+                  {editingUserId ? 'Salvar Alterações' : 'Concluir Cadastro'}
+                </Button>
               </div>
             </form>
           </div>
         </Card>
       )}
 
+      {/* Users List Grid */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
         {users?.map(u => (
-          <Card key={u.userId} className="flex items-center gap-6 p-8 group hover:shadow-[0_40px_80px_-20px_rgba(0,0,0,0.08)] transition-all duration-700 border-slate-50 bg-white rounded-[2.5rem] shadow-sm relative overflow-hidden">
-             <div className="w-20 h-20 bg-slate-50 border border-slate-100 rounded-[2rem] flex items-center justify-center text-slate-300 group-hover:bg-slate-900 group-hover:text-white transition-all duration-700 font-black text-2xl uppercase shadow-inner group-hover:rotate-6">
-               {u.name.charAt(0)}
-             </div>
-              <div className="flex-1 flex flex-col min-w-0">
-                <div className="flex items-center gap-3">
-                  <span className="font-black text-slate-900 tracking-tight text-xl line-clamp-1">{u.name}</span>
-                  {u.role === 'administrador' && <ShieldCheck className="w-5 h-5 text-indigo-500 shrink-0" />}
+          <Card 
+            key={u.userId} 
+            className="flex items-center gap-6 p-6 group hover:shadow-xl transition-all duration-300 border-slate-100 bg-white rounded-3xl shadow-sm relative overflow-hidden"
+          >
+            {/* User Initial Circle */}
+            <div className="w-16 h-16 bg-slate-50 border border-slate-100 rounded-3xl flex items-center justify-center text-slate-400 group-hover:bg-slate-900 group-hover:text-white transition-all duration-300 font-extrabold text-xl uppercase group-hover:rotate-6 shrink-0">
+              {u.name.charAt(0)}
+            </div>
+
+            {/* User Info */}
+            <div className="flex-1 flex flex-col min-w-0">
+              <div className="flex items-center gap-2">
+                <span className="font-extrabold text-slate-900 tracking-tight text-lg line-clamp-1">{u.name}</span>
+                {u.role === 'administrador' && <ShieldCheck className="w-4.5 h-4.5 text-indigo-600 shrink-0" />}
+              </div>
+              <div className="flex flex-col text-[10px] font-bold text-slate-400 uppercase tracking-widest mt-2 gap-1.5">
+                <span className="flex items-center gap-1.5 leading-none truncate">
+                  <Mail className="w-3.5 h-3.5 opacity-40 shrink-0" /> {u.email}
+                </span>
+                <span className="flex items-center gap-1.5 leading-none truncate">
+                  <Briefcase className="w-3.5 h-3.5 opacity-40 shrink-0" /> {u.cargo || 'Comissão Oficial'}
+                </span>
+              </div>
+            </div>
+            
+            {/* Status badges & Actions */}
+            <div className="flex flex-col items-end gap-3 min-w-[110px] relative z-10 shrink-0">
+              <div className={cn(
+                "text-[9px] font-black uppercase px-3 py-1 rounded-xl border-2 shadow-sm transition-all duration-300",
+                u.role === 'administrador' ? "bg-slate-900 text-white border-slate-900 group-hover:bg-indigo-600 group-hover:border-indigo-600" : 
+                u.role === 'responsavel' ? "bg-indigo-50 text-indigo-600 border-indigo-100" :
+                "bg-slate-50 text-slate-500 border-slate-100"
+              )}>
+                {u.role === 'administrador' ? 'Admin Sênior' : u.role === 'responsavel' ? 'Gestor' : 'Vistoriador'}
+              </div>
+              
+              {deleteConfirmId === u.userId ? (
+                <div className="flex items-center gap-1.5 animate-in slide-in-from-right-4 duration-200">
+                  <button 
+                    onClick={() => handleDelete(u.userId)}
+                    className="h-8 px-4 bg-rose-600 text-white text-[10px] font-extrabold rounded-xl shadow-md uppercase tracking-wider hover:bg-rose-700 transition-colors"
+                  >
+                    OK
+                  </button>
+                  <button 
+                    onClick={() => setDeleteConfirmId(null)}
+                    className="h-8 px-3 bg-slate-100 text-slate-400 text-[10px] font-bold rounded-xl uppercase hover:bg-slate-200 transition-colors"
+                  >
+                    X
+                  </button>
                 </div>
-                <div className="flex flex-col text-[10px] font-bold text-slate-400 uppercase tracking-widest mt-2 gap-1.5">
-                  <span className="flex items-center gap-2 leading-none"><Mail className="w-3.5 h-3.5 opacity-40 shrink-0" /> {u.email}</span>
-                  <span className="flex items-center gap-2 leading-none"><Briefcase className="w-3.5 h-3.5 opacity-40 shrink-0" /> {u.cargo || 'Comissão Oficial'}</span>
+              ) : (
+                <div className="flex items-center gap-1.5 opacity-0 group-hover:opacity-100 transition-all duration-300 translate-x-3 group-hover:translate-x-0">
+                  <button 
+                    onClick={() => handleEdit(u)} 
+                    className="w-9 h-9 flex items-center justify-center text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-2xl transition-all duration-300 border border-transparent hover:border-indigo-100 shadow-sm bg-white"
+                  >
+                    <Edit2 className="w-4 h-4" />
+                  </button>
+                  <button 
+                    onClick={() => setDeleteConfirmId(u.userId)} 
+                    className="w-9 h-9 flex items-center justify-center text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-2xl transition-all duration-300 border border-transparent hover:border-rose-100 shadow-sm bg-white"
+                  >
+                    <Trash2 className="w-4 h-4" />
+                  </button>
                 </div>
-             </div>
-             
-             <div className="flex flex-col items-end gap-4 min-w-[110px] relative z-10">
-                <div className={cn(
-                   "text-[9px] font-black uppercase px-3.5 py-1.5 rounded-xl border-2 shadow-sm transition-colors duration-500",
-                   u.role === 'administrador' ? "bg-slate-900 text-white border-slate-900 group-hover:bg-indigo-600 group-hover:border-indigo-600" : 
-                   u.role === 'responsavel' ? "bg-indigo-50 text-indigo-600 border-indigo-100" :
-                   "bg-slate-50 text-slate-500 border-slate-100"
-                )}>
-                  {u.role === 'administrador' ? 'Admin Senior' : u.role === 'responsavel' ? 'Gestor' : 'Vistoriador'}
-                </div>
-                
-                {deleteConfirmId === u.userId ? (
-                  <div className="flex items-center gap-2 animate-in slide-in-from-right-4 duration-300">
-                    <button 
-                      onClick={() => handleDelete(u.userId)}
-                      className="h-10 px-5 bg-rose-600 text-white text-[10px] font-black rounded-xl shadow-xl shadow-rose-600/20 uppercase tracking-widest"
-                    >
-                      OK
-                    </button>
-                    <button 
-                      onClick={() => setDeleteConfirmId(null)}
-                      className="h-10 px-5 bg-slate-100 text-slate-400 text-[10px] font-black rounded-xl uppercase tracking-widest"
-                    >
-                      X
-                    </button>
-                  </div>
-                ) : (
-                  <div className="flex items-center gap-1.5 opacity-0 group-hover:opacity-100 transition-all duration-500 translate-x-4 group-hover:translate-x-0">
-                    <button onClick={() => handleEdit(u)} className="w-10 h-10 flex items-center justify-center text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-xl transition-all border border-transparent hover:border-indigo-100 shadow-sm bg-white">
-                      <Edit2 className="w-4 h-4" />
-                    </button>
-                    <button onClick={() => setDeleteConfirmId(u.userId)} className="w-10 h-10 flex items-center justify-center text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-xl transition-all border border-transparent hover:border-rose-100 shadow-sm bg-white">
-                      <Trash2 className="w-4 h-4" />
-                    </button>
-                  </div>
-                )}
-             </div>
-             
-             {/* Decorative Background Icon */}
-             <Briefcase className="absolute -bottom-6 -right-6 w-24 h-24 text-slate-50 opacity-0 group-hover:opacity-100 transition-opacity duration-1000 -z-0" />
+              )}
+            </div>
+            
+            {/* Decorative Background Icon */}
+            <Briefcase className="absolute -bottom-6 -right-6 w-20 h-20 text-slate-50 opacity-0 group-hover:opacity-100 transition-opacity duration-700 -z-0" />
           </Card>
         ))}
       </div>
     </div>
   );
 }
+
