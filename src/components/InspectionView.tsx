@@ -1431,6 +1431,7 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
                  </div>
 
                  <div className="flex flex-col gap-6">
+                    <input type="file" hidden ref={fileInputRef} accept="image/*" multiple onChange={handlePhotoCapture} />
                     <div className="flex items-center justify-between">
                        <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Evidências Fotográficas ({newItem.photos.length}/4)</label>
                        <button 
