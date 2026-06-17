@@ -214,8 +214,8 @@ export function LocationsView({ onSelectInspection }: { onSelectInspection: (id:
     const locationData = {
       name: newLoc.name,
       description: newLoc.description,
-      parentId: newLoc.parentId || undefined,
       needsSync: 1,
+      ...(newLoc.parentId ? { parentId: newLoc.parentId } : {}),
       ...(lat && lng ? { latitude: lat, longitude: lng } : {})
     };
 
