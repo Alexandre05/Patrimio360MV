@@ -1,4 +1,5 @@
 import React, { createContext, useContext, useEffect, useState } from 'react';
+import { v4 as uuidv4 } from 'uuid';
 import { User, db as localDb } from './db';
 import { auth, db as firestore, googleProvider } from './firebase';
 import { 
@@ -386,8 +387,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     </AuthContext.Provider>
   );
 }
-
-import { v4 as uuidv4 } from 'uuid';
 
 export function useAuth() {
   const context = useContext(AuthContext);
