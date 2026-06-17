@@ -3,6 +3,16 @@ import { db as firestore, auth, handleFirestoreError } from './firebase';
 import { collection, doc, setDoc, onSnapshot, query, where, deleteDoc } from 'firebase/firestore';
 import { uploadAssetPhoto } from './storageService';
 
+function sanitizeForFirestore(obj: any) {
+  const newObj = { ...obj };
+  Object.keys(newObj).forEach(key => {
+    if (newObj[key] === undefined) {
+      delete newObj[key];
+    }
+  });
+  return newObj;
+}
+
 // Synchronize simple collections (Delta Sync: Cloud -> Local)
 export function setupSync() {
   if (!auth.currentUser) return;
@@ -83,7 +93,7 @@ export async function pushLocalChanges() {
         } else {
           const { needsSync, ...data } = loc;
           data.updatedAt = Date.now();
-          await setDoc(locRef, data);
+          await setDoc(locRef, sanitizeForFirestore(data));
           await dexie.locations.update(loc.id, { needsSync: 0, updatedAt: data.updatedAt });
         }
       } catch (e) {
@@ -107,7 +117,7 @@ export async function pushLocalChanges() {
         } else {
           const { needsSync, ...data } = insp;
           data.updatedAt = Date.now();
-          await setDoc(inspRef, data);
+          await setDoc(inspRef, sanitizeForFirestore(data));
           await dexie.inspections.update(insp.id, { needsSync: 0, updatedAt: data.updatedAt });
         }
       } catch (e) {
@@ -156,7 +166,7 @@ export async function pushLocalChanges() {
       data.photos = processedPhotos;
       if (data.isPublic === undefined) data.isPublic = true;
       
-      await setDoc(assetRef, data);
+      await setDoc(assetRef, sanitizeForFirestore(data));
 
       // Otimização do Banco Local (Dexie): Salva as URLs leves no lugar do Base64 pesado
       await dexie.assets.update(asset.id, { 
@@ -188,7 +198,7 @@ export async function syncInspection(inspectionId: string) {
     } else {
       const { ...data } = inspection;
       data.updatedAt = Date.now();
-      await setDoc(inspectionRef, data);
+      await setDoc(inspectionRef, sanitizeForFirestore(data));
       await dexie.inspections.update(inspection.id, { updatedAt: data.updatedAt, needsSync: 0 });
     }
     window.dispatchEvent(new CustomEvent('app-sync-end', { detail: { success: true } }));
@@ -211,7 +221,7 @@ export async function syncLocation(locationId: string) {
     } else {
       const { ...data } = location;
       data.updatedAt = Date.now();
-      await setDoc(locationRef, data);
+      await setDoc(locationRef, sanitizeForFirestore(data));
       await dexie.locations.update(location.id, { updatedAt: data.updatedAt, needsSync: 0 });
     }
     window.dispatchEvent(new CustomEvent('app-sync-end', { detail: { success: true } }));
