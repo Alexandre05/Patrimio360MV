@@ -530,7 +530,8 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
         ...current,
         status: 'concluida',
         concludedBy: user?.userId,
-        concludedAt: Date.now()
+        concludedAt: Date.now(),
+        needsSync: 1
       });
       
       console.log("Status atualizado para 'concluida'.");
@@ -581,7 +582,8 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
         status: 'finalizada',
         finalizedBy: user.userId,
         finalizedAt: Date.now(),
-        qrCodeData: qrCodeDataPayload
+        qrCodeData: qrCodeDataPayload,
+        needsSync: 1
       });
       
       // Mark all assets as public for public view without O(N) get() in rules
