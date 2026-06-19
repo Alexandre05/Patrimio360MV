@@ -812,15 +812,14 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
           if (qrSvg) {
             const svgData = new XMLSerializer().serializeToString(qrSvg);
             const canvas = document.createElement('canvas');
-            const svgSize = 160;
-            canvas.width = svgSize;
-            canvas.height = svgSize;
             const ctx = canvas.getContext('2d');
             const img = new Image();
             img.src = 'data:image/svg+xml;base64,' + btoa(svgData);
             
             await new Promise((resolve) => {
               img.onload = () => {
+                canvas.width = img.width;
+                canvas.height = img.height;
                 ctx?.drawImage(img, 0, 0);
                 doc.addImage(canvas.toDataURL('image/png'), 'PNG', 14, finalY + 5, 40, 40);
                 resolve(null);
