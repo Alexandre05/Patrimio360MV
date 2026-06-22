@@ -767,12 +767,12 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
     }
   };
 
- const generatePDF = async () => {
+const generatePDF = async () => {
     try {
       setError(null);
       const doc = new jsPDF();
       
-      // --- TITULO PRINCIPAL ---
+      // --- TÍTULO PRINCIPAL ---
       doc.setFont('helvetica', 'bold');
       doc.setFontSize(18);
       doc.text('Relatório de Vistoria Patrimonial', 14, 22);
@@ -810,20 +810,20 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
       const totalUnidadesAbsolutas = assets?.reduce((acc, curr) => acc + (curr.quantity || 1), 0) || 0;
 
       // --- PAINEL INDICADOR ELEGANTE ---
-      doc.setDrawColor(226, 232, 240); // Cor slate-200 (cinza claro elegante)
-      doc.setFillColor(248, 250, 252); // Cor slate-50 (fundo leve)
-      doc.roundedRect(14, 55, 182, 14, 3, 3, 'FD'); // Moldura arredondada para os totais
+      doc.setDrawColor(226, 232, 240);
+      doc.setFillColor(248, 250, 252);
+      doc.roundedRect(14, 56, 182, 14, 3, 3, 'FD');
       
       doc.setFont('helvetica', 'bold');
       doc.setFontSize(10);
-      doc.setTextColor(15, 23, 42); // Cor slate-900
-      doc.text(`RESUMO DO INVENTÁRIO:`, 18, 64);
+      doc.setTextColor(15, 23, 42);
+      doc.text(`RESUMO DO INVENTÁRIO:`, 18, 65);
       
       doc.setFont('helvetica', 'normal');
-      doc.text(`Total de Bens Catalogados: ${totalUnidadesAbsolutas} unidade(s) `, 68, 64);
+      doc.text(`Total de Bens Catalogados: ${totalUnidadesAbsolutas} unidade(s) `, 68, 65);
       doc.setFontSize(9);
       doc.setTextColor(100);
-      doc.text(`(${totalTiposDiferentes} registros distintos na sala)`, 138, 64);
+      doc.text(`(${totalTiposDiferentes} registros distintos na sala)`, 138, 65);
       doc.setTextColor(0);
 
       // Texto de aviso do QR Code Dinâmico
@@ -839,38 +839,28 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
         a.observations || '-'
       ]);
 
-      // Define a altura inicial da tabela dependendo se tem assinatura setorial no topo
-      const tabelaStartY = sectorSignature ? 112 : 82;
-
+      // A tabela começa sempre na mesma posição estável, pois a assinatura foi para o fim
       autoTable(doc, {
         head: [['Item', 'Patrimônio', 'Estado', 'Obs']],
         body: tableData,
-        startY: tabelaStartY,
+        startY: 84,
         theme: 'grid',
-        headStyles: { fillColor: [15, 23, 42], fontStyle: 'bold' } // Cabeçalho da tabela em slate-900
+        headStyles: { fillColor: [15, 23, 42], fontStyle: 'bold' }
       });
 
-      // Se houver Assinatura Setorial anexada
-      if (sectorSignature) {
-        doc.setFontSize(9);
-        doc.setFont('helvetica', 'bold');
-        doc.text('RESPONSÁVEL PELO SETOR (ATESTADO DE CIÊNCIA):', 14, 85);
-        doc.setFontSize(10);
-        doc.setFont('helvetica', 'normal');
-        doc.text(sectorSignature.responsibleName.toUpperCase(), 14, 91);
-        doc.addImage(sectorSignature.signatureBase64, 'PNG', 14, 93, 40, 13);
+      // Define o ponto Y onde a tabela acabou
+      let finalY = (doc as any).lastAutoTable.finalY + 15;
+      
+      // Se não houver espaço suficiente para o QR Code e a Assinatura, cria uma nova página
+      if (finalY > 220) {
+        doc.addPage();
+        finalY = 25;
       }
 
-      // Selo Permanente com QR Code no final da tabela
-      let finalY = (doc as any).lastAutoTable.finalY + 12;
-      if (finalY > 230) {
-        doc.addPage();
-        finalY = 20;
-      }
-      
+      // --- LADO ESQUERDO: QR CODE PERMANENTE ---
       doc.setFontSize(10);
       doc.setFont('helvetica', 'bold');
-      doc.text('SELO PERMANENTE DE TRANSPARÊNCIA (PORTA DO SETOR):', 14, finalY);
+      doc.text('SELO PERMANENTE DE TRANSPARÊNCIA:', 14, finalY);
       
       const qrSvg = document.querySelector('#qr-code-dynamic svg');
       if (qrSvg) {
@@ -885,10 +875,31 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
             canvas.width = img.width;
             canvas.height = img.height;
             ctx?.drawImage(img, 0, 0);
-            doc.addImage(canvas.toDataURL('image/png'), 'PNG', 14, finalY + 4, 38, 38);
+            doc.addImage(canvas.toDataURL('image/png'), 'PNG', 14, finalY + 5, 38, 38);
             resolve(null);
           };
         });
+      }
+
+      // --- LADO DIREITO: ASSINATURA DO RESPONSÁVEL ---
+      if (sectorSignature) {
+        // Linha formal para a assinatura
+        doc.setLineWidth(0.5);
+        doc.setDrawColor(0, 0, 0);
+        doc.line(110, finalY + 25, 190, finalY + 25);
+        
+        // Imagem da Assinatura (centralizada acima da linha)
+        doc.addImage(sectorSignature.signatureBase64, 'PNG', 125, finalY + 5, 50, 18);
+        
+        // Nome do responsável
+        doc.setFontSize(10);
+        doc.setFont('helvetica', 'bold');
+        doc.text(sectorSignature.responsibleName.toUpperCase(), 150, finalY + 31, { align: 'center' });
+        
+        // Cargo institucional
+        doc.setFontSize(8);
+        doc.setFont('helvetica', 'normal');
+        doc.text('RESPONSÁVEL PELO SETOR (ATESTADO DE CIÊNCIA)', 150, finalY + 36, { align: 'center' });
       }
 
       try {
