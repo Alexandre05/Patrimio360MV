@@ -613,28 +613,47 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
     }
     if (!id || isReopening) return;
 
-    // First click: ask for confirmation in-UI
-    if (!isConfirmingReopen) {
-      setIsConfirmingReopen(true);
-      setError(null);
-      return;
-    }
-
-    setIsReopening(true);
-    setError(null);
-    console.log("Reabrindo vistoria:", id);
-
     try {
       const current = await db.inspections.get(id);
       if (!current) throw new Error("Vistoria não encontrada.");
 
+      // --- REGRA DE OURO DA PREFEITURA: TRAVA HISTÓRICA POR ANO ---
+      const currentYear = new Date().getFullYear();
+      const inspectionYear = new Date(current.date).getFullYear();
+
+      if (inspectionYear < currentYear) {
+        setError(`⚠️ Bloqueio de Histórico: Não é permitido reabrir vistorias de anos anteriores (${inspectionYear}). Crie uma nova vistoria para este ano para poder comparar os dados.`);
+        setIsConfirmingReopen(false);
+        return;
+      }
+
+      // Primeiro clique: pede confirmação visual na tela
+      if (!isConfirmingReopen) {
+        setIsConfirmingReopen(true);
+        setError(null);
+        return;
+      }
+
+      setIsReopening(true);
+      setError(null);
+      console.log("Reabrindo e atualizando data da vistoria:", id);
+
+      // --- NOVO REGISTRO DE DATA E HORA ATUALIZADOS ---
+      const now = Date.now();
       await db.inspections.put({
         ...current,
-        status: 'em_andamento'
+        status: 'em_andamento',
+        date: now,         // Seta o relógio para o dia e hora de agora
+        updatedAt: now,    // Grava o momento da modificação
+        needsSync: 1       // Avisa o Firebase que este documento precisa subir atualizado
       });
       
       await new Promise(resolve => setTimeout(resolve, 400));
       setIsConfirmingReopen(false);
+      
+      if (typeof toast === 'function') {
+        toast("Vistoria reaberta com a data e hora atuais!", "success");
+      }
     } catch (err: any) {
       console.error("Erro ao reabrir vistoria:", err);
       setError(`Erro ao reabrir: ${err.message || 'Erro desconhecido'}`);
