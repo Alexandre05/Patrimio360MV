@@ -771,11 +771,16 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
     try {
       setError(null);
       const doc = new jsPDF();
+      
+      // --- TITULO PRINCIPAL ---
+      doc.setFont('helvetica', 'bold');
       doc.setFontSize(18);
       doc.text('Relatório de Vistoria Patrimonial', 14, 22);
       
-      doc.setFontSize(11);
-      doc.text(`Local: ${location?.name}`, 14, 32);
+      // --- DADOS DE IDENTIFICAÇÃO ---
+      doc.setFontSize(10);
+      doc.setFont('helvetica', 'normal');
+      doc.text(`Local Inspecionado: ${location?.name}`, 14, 32);
       
       // Tratamento robusto para extrair milissegundos de qualquer formato de data do Firebase
       const getTimestampMs = (val: any) => {
@@ -787,27 +792,44 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
         return isNaN(parsed) ? 0 : parsed;
       };
 
-      // Define a data de homologação como prioritária. Se não houver, usa a data inicial.
       const finalDateToShow = getTimestampMs(inspection?.finalizedAt || inspection?.updatedAt || inspection?.date);
-      doc.text(`Data: ${formatDate(finalDateToShow)}`, 14, 38);
+      doc.text(`Data de Emissão: ${formatDate(finalDateToShow)}`, 14, 38);
       
-      // Show who concluded vs who authorized
       if (inspection?.concludedBy) {
-        doc.text(`Vistoriador: ${inspection.concludedBy === user?.userId ? user?.name : 'Identificado no Sistema'}`, 14, 44);
+        doc.text(`Vistoriador Responsável: ${inspection.concludedBy === user?.userId ? user?.name : 'Identificado no Sistema'}`, 14, 44);
       } else {
-        doc.text(`Responsável: ${user?.name}`, 14, 44);
+        doc.text(`Vistoriador Responsável: ${user?.name}`, 14, 44);
       }
       
       if (inspection?.status === 'finalizada') {
         doc.text(`Homologado por: ${inspection.finalizedBy === user?.userId ? user?.name : 'Autoridade Municipal'}`, 14, 50);
       }
 
-      // Dynamic QR Code Info
-      const qrData = `https://patrimonio360-75ade.web.app/local/${location?.id}`;
+      // --- CÁLCULO DOS TOTAIS DO ACERVO ---
+      const totalTiposDiferentes = assets?.length || 0;
+      const totalUnidadesAbsolutas = assets?.reduce((acc, curr) => acc + (curr.quantity || 1), 0) || 0;
+
+      // --- PAINEL INDICADOR ELEGANTE ---
+      doc.setDrawColor(226, 232, 240); // Cor slate-200 (cinza claro elegante)
+      doc.setFillColor(248, 250, 252); // Cor slate-50 (fundo leve)
+      doc.roundedRect(14, 55, 182, 14, 3, 3, 'FD'); // Moldura arredondada para os totais
+      
+      doc.setFont('helvetica', 'bold');
       doc.setFontSize(10);
+      doc.setTextColor(15, 23, 42); // Cor slate-900
+      doc.text(`RESUMO DO INVENTÁRIO:`, 18, 64);
+      
+      doc.setFont('helvetica', 'normal');
+      doc.text(`Total de Bens Catalogados: ${totalUnidadesAbsolutas} unidade(s) `, 68, 64);
+      doc.setFontSize(9);
       doc.setTextColor(100);
-      doc.text('Este documento contém um QR Code DINÂMICO vinculado ao SETOR.', 14, 56);
-      doc.text('A leitura deste código sempre exibirá a auditoria mais recente homologada.', 14, 61);
+      doc.text(`(${totalTiposDiferentes} registros distintos na sala)`, 138, 64);
+      doc.setTextColor(0);
+
+      // Texto de aviso do QR Code Dinâmico
+      doc.setFontSize(9);
+      doc.setTextColor(100);
+      doc.text('Este documento contém um QR Code DINÂMICO. A leitura em tempo real sempre exibirá a versão mais atualizada.', 14, 76);
       doc.setTextColor(0);
 
       const tableData = assets?.map(a => [
@@ -817,58 +839,62 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
         a.observations || '-'
       ]);
 
+      // Define a altura inicial da tabela dependendo se tem assinatura setorial no topo
+      const tabelaStartY = sectorSignature ? 112 : 82;
+
       autoTable(doc, {
         head: [['Item', 'Patrimônio', 'Estado', 'Obs']],
         body: tableData,
-        startY: sectorSignature ? 90 : 60,
-        theme: 'grid'
+        startY: tabelaStartY,
+        theme: 'grid',
+        headStyles: { fillColor: [15, 23, 42], fontStyle: 'bold' } // Cabeçalho da tabela em slate-900
       });
 
-      // Add Sector Signature if available
+      // Se houver Assinatura Setorial anexada
       if (sectorSignature) {
+        doc.setFontSize(9);
+        doc.setFont('helvetica', 'bold');
+        doc.text('RESPONSÁVEL PELO SETOR (ATESTADO DE CIÊNCIA):', 14, 85);
         doc.setFontSize(10);
-        doc.text('RESPONSÁVEL PELO SETOR (ATÉSTADO DE CIÊNCIA):', 14, 65);
-        doc.setFontSize(11);
-        doc.text(sectorSignature.responsibleName.toUpperCase(), 14, 72);
-        doc.addImage(sectorSignature.signatureBase64, 'PNG', 14, 75, 40, 15);
+        doc.setFont('helvetica', 'normal');
+        doc.text(sectorSignature.responsibleName.toUpperCase(), 14, 91);
+        doc.addImage(sectorSignature.signatureBase64, 'PNG', 14, 93, 40, 13);
       }
 
-      // Add QR Code to the bottom if exists
-      if (true) { // Always generate for the location in the PDF
-        let finalY = (doc as any).lastAutoTable.finalY + 10;
-        if (finalY > 230) {
-          doc.addPage();
-          finalY = 20;
-        }
-        doc.setFontSize(10);
-        doc.setFont('helvetica', 'bold');
-        doc.text('SELO PERMANENTE DE TRANSPARÊNCIA (PORTA DO SETOR):', 14, finalY);
+      // Selo Permanente com QR Code no final da tabela
+      let finalY = (doc as any).lastAutoTable.finalY + 12;
+      if (finalY > 230) {
+        doc.addPage();
+        finalY = 20;
+      }
+      
+      doc.setFontSize(10);
+      doc.setFont('helvetica', 'bold');
+      doc.text('SELO PERMANENTE DE TRANSPARÊNCIA (PORTA DO SETOR):', 14, finalY);
+      
+      const qrSvg = document.querySelector('#qr-code-dynamic svg');
+      if (qrSvg) {
+        const svgData = new XMLSerializer().serializeToString(qrSvg);
+        const canvas = document.createElement('canvas');
+        const ctx = canvas.getContext('2d');
+        const img = new Image();
+        img.src = 'data:image/svg+xml;base64,' + btoa(svgData);
         
-        // Get QR Code Image from SVG (Dynamic URL for Location)
-        const qrSvg = document.querySelector('#qr-code-dynamic svg');
-        if (qrSvg) {
-          const svgData = new XMLSerializer().serializeToString(qrSvg);
-          const canvas = document.createElement('canvas');
-          const ctx = canvas.getContext('2d');
-          const img = new Image();
-          img.src = 'data:image/svg+xml;base64,' + btoa(svgData);
-          
-          await new Promise((resolve) => {
-            img.onload = () => {
-              canvas.width = img.width;
-              canvas.height = img.height;
-              ctx?.drawImage(img, 0, 0);
-              doc.addImage(canvas.toDataURL('image/png'), 'PNG', 14, finalY + 5, 40, 40);
-              resolve(null);
-            };
-          });
-        }
+        await new Promise((resolve) => {
+          img.onload = () => {
+            canvas.width = img.width;
+            canvas.height = img.height;
+            ctx?.drawImage(img, 0, 0);
+            doc.addImage(canvas.toDataURL('image/png'), 'PNG', 14, finalY + 4, 38, 38);
+            resolve(null);
+          };
+        });
       }
 
       try {
         doc.save(`Vistoria_${location?.name}_${new Date().toLocaleDateString()}.pdf`);
       } catch (saveErr) {
-        console.warn("doc.save falhou, tentando abrir em aba nova:", saveErr);
+        console.warn("doc.save falhou, abrindo em nova aba:", saveErr);
         const blob = doc.output('blob');
         const url = URL.createObjectURL(blob);
         window.open(url, '_blank');
