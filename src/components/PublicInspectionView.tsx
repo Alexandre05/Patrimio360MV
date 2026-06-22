@@ -133,10 +133,10 @@ export function PublicInspectionView({ inspectionId: propId, locationId: propLoc
       const assetsQuery = query(
         collection(firestore, 'assets'), 
         where('inspectionId', '==', inspSnap.id),
-        limit(100)
+        limit(3000)
       );
       const assetsSnap = await getDocs(assetsQuery);
-      const loadedAssets = assetsSnap.docs.map(doc => ({ id: doc.id, ...doc.data() } as Asset));
+      const loadedAssets = assetsSnap.docs.map(doc => ({ id: doc.id, ...doc.data() } as Asset)).filter(a => !a.deleted);
       
       setAssets(loadedAssets.sort((a, b) => b.createdAt - a.createdAt));
       
