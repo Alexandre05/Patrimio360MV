@@ -58,6 +58,14 @@ export function PublicInspectionView({ inspectionId: propId, locationId: propLoc
     initializeAndFetch();
   }, [propId, propLocationId]);
 
+  const getTimestampMs = (val: any) => {
+    if (!val) return 0;
+    if (typeof val === 'number') return val;
+    if (typeof val.toMillis === 'function') return val.toMillis();
+    if (val.seconds) return val.seconds * 1000;
+    return new Date(val).getTime() || 0;
+  };
+
   const fetchDataByLocation = async (locId: string) => {
     try {
       setLoading(true);
@@ -76,7 +84,7 @@ export function PublicInspectionView({ inspectionId: propId, locationId: propLoc
       
       const finishedInspections = inspSnap.docs
         .map(d => ({ id: d.id, ...d.data() } as Inspection))
-        .sort((a, b) => (b.finalizedAt || 0) - (a.finalizedAt || 0));
+        .sort((a, b) => getTimestampMs(b.finalizedAt) - getTimestampMs(a.finalizedAt));
 
       if (finishedInspections.length === 0) {
         // Find location info anyway to show a better error
