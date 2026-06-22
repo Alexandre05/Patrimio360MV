@@ -66,6 +66,13 @@ export function PublicInspectionView({ inspectionId: propId, locationId: propLoc
     return new Date(val).getTime() || 0;
   };
 
+  const getDisplayDate = (insp: any) => {
+    const finalDate = insp.finalizedAt || insp.updatedAt || insp.date;
+    if (finalDate && typeof finalDate.toMillis === 'function') return finalDate.toMillis();
+    if (finalDate && finalDate.seconds) return finalDate.seconds * 1000;
+    return finalDate;
+  };
+
   const fetchDataByLocation = async (locId: string) => {
     try {
       setLoading(true);
@@ -293,7 +300,7 @@ export function PublicInspectionView({ inspectionId: propId, locationId: propLoc
                <div className="flex flex-col md:flex-row items-center gap-4 md:gap-6 text-sm">
                  <div className="flex items-center gap-2 text-blue-100/90">
                    <Calendar className="w-4 h-4 opacity-70" />
-                   <span className="font-medium">Data-Base: {formatDate(inspection.date)}</span>
+                   <span className="font-medium">Data-Base: {formatDate(getDisplayDate(inspection))}</span>
                  </div>
                  <div className="hidden md:block w-px h-5 bg-white/10"></div>
                  <div className="flex items-center gap-2 text-emerald-400 font-semibold drop-shadow-[0_0_15px_rgba(52,211,153,0.3)]">

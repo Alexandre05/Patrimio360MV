@@ -757,7 +757,15 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
       
       doc.setFontSize(11);
       doc.text(`Local: ${location?.name}`, 14, 32);
-      doc.text(`Data: ${formatDate(inspection?.date || 0)}`, 14, 38);
+      const getPDFDisplayDate = (insp: any) => {
+        const finalDate = insp?.finalizedAt || insp?.updatedAt || insp?.date;
+        if (!finalDate) return 0;
+        if (typeof finalDate === 'number') return finalDate;
+        if (typeof finalDate.toMillis === 'function') return finalDate.toMillis();
+        if (finalDate.seconds) return finalDate.seconds * 1000;
+        return new Date(finalDate).getTime() || 0;
+      };
+      doc.text(`Data: ${formatDate(getPDFDisplayDate(inspection))}`, 14, 38);
       
       // Show who concluded vs who authorized
       if (inspection?.concludedBy) {
