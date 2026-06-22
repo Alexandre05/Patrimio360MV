@@ -18,12 +18,16 @@ export function PublicInspectionView({ inspectionId: propId, locationId: propLoc
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedImage, setSelectedImage] = useState<string | null>(null);
 
-  useEffect(() => {
+useEffect(() => {
     const initializeAndFetch = async () => {
-      // 1. Aguarda a autenticação (Crachá de visitante ou usuário logado)
-      const { auth } = await import('../lib/firebase');
-      if (!auth.currentUser) {
-        await signInAsGuest();
+      // 1. Tenta obter o crachá de visitante, mas não trava o sistema se falhar
+      try {
+        const { auth } = await import('../lib/firebase');
+        if (!auth.currentUser) {
+          await signInAsGuest();
+        }
+      } catch (authErr) {
+        console.warn("Autenticação anônima pendente ou desativada. Proseguindo com acesso público direto:", authErr);
       }
 
       // 2. Extrai os parâmetros do link
@@ -44,7 +48,7 @@ export function PublicInspectionView({ inspectionId: propId, locationId: propLoc
         }
       }
       
-      // 3. Somente DEPOIS de autenticado, faz a busca
+      // 3. Executa a busca dos dados
       if (id) {
         await fetchDataByInspection(id);
       } else if (locId) {

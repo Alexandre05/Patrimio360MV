@@ -113,12 +113,23 @@ service cloud.firestore {
                (data.get('isPublic', false) is bool);
       }
 
-      allow get, list: if isSignedIn();
-      allow get, list: if resource.data.isPublic == true;
-      
+      // 5. Assets Collection
+    match /assets/{assetId} {
+      function isValidAsset(data) {
+        return isValidId(data.id) &&
+               data.name is string && data.name.size() <= 150 &&
+               data.inspectionId is string &&
+               data.condition in ['novo', 'bom', 'regular', 'ruim', 'inservivel'] &&
+               (data.get('isPublic', false) is bool);
+      }
+
+      // Permite leitura se estiver logado OU se a vistoria vinculada estiver finalizada (pública)
+      allow get, list: if isSignedIn() || 
+                        get(/databases/$(database)/documents/inspections/$(resource.data.inspectionId)).data.status == 'finalizada';
       allow write: if isVerified() && isValidAsset(incoming());
       allow delete: if isVerified();
     }
+    
 
     // 6. Sector Inspections
     match /sector_inspections/{id} {
