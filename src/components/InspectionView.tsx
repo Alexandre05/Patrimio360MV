@@ -759,7 +759,6 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
       doc.text(`Local: ${location?.name}`, 14, 32);
       doc.text(`Data: ${formatDate(inspection?.date || 0)}`, 14, 38);
       
-      // Show who concluded vs who authorized
       if (inspection?.concludedBy) {
         doc.text(`Vistoriador: ${inspection.concludedBy === user?.userId ? user?.name : 'Identificado no Sistema'}`, 14, 44);
       } else {
@@ -770,7 +769,6 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
         doc.text(`Homologado por: ${inspection.finalizedBy === user?.userId ? user?.name : 'Autoridade Municipal'}`, 14, 50);
       }
 
-      // Dynamic QR Code Info
       const qrData = `https://patrimonio360-75ade.web.app/local/${location?.id}`;
       doc.setFontSize(10);
       doc.setTextColor(100);
@@ -788,47 +786,61 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
       autoTable(doc, {
         head: [['Item', 'Patrimônio', 'Estado', 'Obs']],
         body: tableData,
-        startY: sectorSignature ? 90 : 60,
+        startY: 70, // Começa a tabela um pouco mais abaixo para ficar limpo
         theme: 'grid'
       });
 
-      // Add Sector Signature if available
-      if (sectorSignature) {
-        doc.setFontSize(10);
-        doc.text('RESPONSÁVEL PELO SETOR (ATÉSTADO DE CIÊNCIA):', 14, 65);
-        doc.setFontSize(11);
-        doc.text(sectorSignature.responsibleName.toUpperCase(), 14, 72);
-        doc.addImage(sectorSignature.signatureBase64, 'PNG', 14, 75, 40, 15);
+      // Pega a posição exata onde a tabela terminou
+      let finalY = (doc as any).lastAutoTable.finalY + 15;
+      
+      // Se não houver espaço na folha para as assinaturas, cria uma nova página
+      if (finalY > 230) {
+        doc.addPage();
+        finalY = 20;
       }
 
-      // Add QR Code to the bottom if exists
-      if (true) { // Always generate for the location in the PDF
-        const finalY = (doc as any).lastAutoTable.finalY + 10;
-        if (finalY < 230) {
-          doc.setFontSize(10);
-          doc.setFont('helvetica', 'bold');
-          doc.text('SELO PERMANENTE DE TRANSPARÊNCIA (PORTA DO SETOR):', 14, finalY);
-          
-          // Get QR Code Image from SVG (Dynamic URL for Location)
-          const qrSvg = document.querySelector('#qr-code-dynamic svg');
-          if (qrSvg) {
-            const svgData = new XMLSerializer().serializeToString(qrSvg);
-            const canvas = document.createElement('canvas');
-            const ctx = canvas.getContext('2d');
-            const img = new Image();
-            img.src = 'data:image/svg+xml;base64,' + btoa(svgData);
-            
-            await new Promise((resolve) => {
-              img.onload = () => {
-                canvas.width = img.width;
-                canvas.height = img.height;
-                ctx?.drawImage(img, 0, 0);
-                doc.addImage(canvas.toDataURL('image/png'), 'PNG', 14, finalY + 5, 40, 40);
-                resolve(null);
-              };
-            });
-          }
-        }
+      // --- LADO ESQUERDO: QR CODE ---
+      doc.setFontSize(10);
+      doc.setFont('helvetica', 'bold');
+      doc.text('SELO DE TRANSPARÊNCIA:', 14, finalY);
+      
+      const qrSvg = document.querySelector('#qr-code-dynamic svg');
+      if (qrSvg) {
+        const svgData = new XMLSerializer().serializeToString(qrSvg);
+        const canvas = document.createElement('canvas');
+        const ctx = canvas.getContext('2d');
+        const img = new Image();
+        img.src = 'data:image/svg+xml;base64,' + btoa(svgData);
+        
+        await new Promise((resolve) => {
+          img.onload = () => {
+            canvas.width = img.width;
+            canvas.height = img.height;
+            ctx?.drawImage(img, 0, 0);
+            doc.addImage(canvas.toDataURL('image/png'), 'PNG', 14, finalY + 5, 35, 35);
+            resolve(null);
+          };
+        });
+      }
+
+      // --- LADO DIREITO: ASSINATURA OFICIAL ---
+      if (sectorSignature) {
+        // Linha preta da assinatura
+        doc.setLineWidth(0.5);
+        doc.line(110, finalY + 30, 190, finalY + 30);
+        
+        // Imagem da Assinatura (centralizada acima da linha)
+        doc.addImage(sectorSignature.signatureBase64, 'PNG', 125, finalY + 10, 50, 20);
+        
+        // Nome em negrito
+        doc.setFontSize(10);
+        doc.setFont('helvetica', 'bold');
+        doc.text(sectorSignature.responsibleName.toUpperCase(), 150, finalY + 35, { align: 'center' });
+        
+        // Cargo abaixo do nome
+        doc.setFontSize(8);
+        doc.setFont('helvetica', 'normal');
+        doc.text('RESPONSÁVEL PELO SETOR', 150, finalY + 40, { align: 'center' });
       }
 
       try {
@@ -844,7 +856,6 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
       setError(`Erro ao gerar PDF: ${err.message || 'Falha desconhecida'}`);
     }
   };
-
   const handlePrintQRCode = (type: 'vistoria' | 'local' = 'local') => {
     try {
       const qrData = type === 'local' 
