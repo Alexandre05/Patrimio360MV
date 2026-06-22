@@ -757,7 +757,19 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
       
       doc.setFontSize(11);
       doc.text(`Local: ${location?.name}`, 14, 32);
-      doc.text(`Data: ${formatDate(inspection?.date || 0)}`, 14, 38);
+      // Converte qualquer formato de data do Firebase para milissegundos corretos
+      const getTimestampMs = (val: any) => {
+        if (!val) return 0;
+        if (typeof val === 'number') return val;
+        if (typeof val.toMillis === 'function') return val.toMillis();
+        if (val.seconds) return val.seconds * 1000;
+        return new Date(val).getTime() || 0;
+      };
+      
+      // Pega a data de homologação. Se não tiver, tenta a atualização. Se não, usa a inicial.
+      const finalDateToShow = getTimestampMs(inspection?.finalizedAt || inspection?.updatedAt || inspection?.date);
+      
+      doc.text(`Data: ${formatDate(finalDateToShow)}`, 14, 38);
       
       if (inspection?.concludedBy) {
         doc.text(`Vistoriador: ${inspection.concludedBy === user?.userId ? user?.name : 'Identificado no Sistema'}`, 14, 44);
