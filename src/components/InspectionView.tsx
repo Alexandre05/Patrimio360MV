@@ -767,7 +767,7 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
     }
   };
 
-const generatePDF = async () => {
+ const generatePDF = async () => {
     try {
       setError(null);
       const doc = new jsPDF();
@@ -782,7 +782,6 @@ const generatePDF = async () => {
       doc.setFont('helvetica', 'normal');
       doc.text(`Local Inspecionado: ${location?.name}`, 14, 32);
       
-      // Tratamento robusto para extrair milissegundos de qualquer formato de data do Firebase
       const getTimestampMs = (val: any) => {
         if (!val) return 0;
         if (typeof val === 'number') return val;
@@ -805,8 +804,7 @@ const generatePDF = async () => {
         doc.text(`Homologado por: ${inspection.finalizedBy === user?.userId ? user?.name : 'Autoridade Municipal'}`, 14, 50);
       }
 
-      // --- CÁLCULO DOS TOTAIS DO ACERVO ---
-      const totalTiposDiferentes = assets?.length || 0;
+      // --- CÁLCULO DOS TOTAIS REALIZANDO O SOMATÓRIO DAS QUANTIDADES ---
       const totalUnidadesAbsolutas = assets?.reduce((acc, curr) => acc + (curr.quantity || 1), 0) || 0;
 
       // --- PAINEL INDICADOR ELEGANTE ---
@@ -820,38 +818,33 @@ const generatePDF = async () => {
       doc.text(`RESUMO DO INVENTÁRIO:`, 18, 65);
       
       doc.setFont('helvetica', 'normal');
-      doc.text(`Total de Bens Catalogados: ${totalUnidadesAbsolutas} unidade(s) `, 68, 65);
-      doc.setFontSize(9);
-      doc.setTextColor(100);
-      doc.text(`(${totalTiposDiferentes} registros distintos na sala)`, 138, 65);
+      doc.text(`Total de Bens Catalogados: ${totalUnidadesAbsolutas} unidade(s) físicas`, 68, 65);
       doc.setTextColor(0);
 
-      // Texto de aviso do QR Code Dinâmico
       doc.setFontSize(9);
       doc.setTextColor(100);
       doc.text('Este documento contém um QR Code DINÂMICO. A leitura em tempo real sempre exibirá a versão mais atualizada.', 14, 76);
       doc.setTextColor(0);
 
+      // Mapeia os dados incluindo a coluna de quantidade de forma explícita
       const tableData = assets?.map(a => [
         a.name,
         a.patrimonyNumber || '-',
         a.condition,
+        `${a.quantity || 1} u.`,
         a.observations || '-'
       ]);
 
-      // A tabela começa sempre na mesma posição estável, pois a assinatura foi para o fim
       autoTable(doc, {
-        head: [['Item', 'Patrimônio', 'Estado', 'Obs']],
+        head: [['Item', 'Patrimônio', 'Estado', 'Qtd', 'Obs']],
         body: tableData,
         startY: 84,
         theme: 'grid',
         headStyles: { fillColor: [15, 23, 42], fontStyle: 'bold' }
       });
 
-      // Define o ponto Y onde a tabela acabou
       let finalY = (doc as any).lastAutoTable.finalY + 15;
       
-      // Se não houver espaço suficiente para o QR Code e a Assinatura, cria uma nova página
       if (finalY > 220) {
         doc.addPage();
         finalY = 25;
@@ -883,20 +876,16 @@ const generatePDF = async () => {
 
       // --- LADO DIREITO: ASSINATURA DO RESPONSÁVEL ---
       if (sectorSignature) {
-        // Linha formal para a assinatura
         doc.setLineWidth(0.5);
         doc.setDrawColor(0, 0, 0);
         doc.line(110, finalY + 25, 190, finalY + 25);
         
-        // Imagem da Assinatura (centralizada acima da linha)
         doc.addImage(sectorSignature.signatureBase64, 'PNG', 125, finalY + 5, 50, 18);
         
-        // Nome do responsável
         doc.setFontSize(10);
         doc.setFont('helvetica', 'bold');
         doc.text(sectorSignature.responsibleName.toUpperCase(), 150, finalY + 31, { align: 'center' });
         
-        // Cargo institucional
         doc.setFontSize(8);
         doc.setFont('helvetica', 'normal');
         doc.text('RESPONSÁVEL PELO SETOR (ATESTADO DE CIÊNCIA)', 150, finalY + 36, { align: 'center' });
@@ -1219,7 +1208,7 @@ const generatePDF = async () => {
                     <h3 className="font-display font-extrabold text-3xl text-slate-900 tracking-tight leading-none uppercase">Selo de Transparência</h3>
                  </div>
                  <p className="text-lg text-slate-500 leading-relaxed font-medium max-w-xl">
-                    Este ambiente foi <span className="text-emerald-600 font-bold">Blindado Digitalmente</span>. Ao escanear este QR Code, a sociedade civil e os auditores terão acesso imediato aos {assets?.length} itens tombados nesta sala.
+                    Este ambiente foi <span className="text-emerald-600 font-bold">Blindado Digitalmente</span>. Ao escanear este QR Code, a sociedade civil e os auditores terão acesso imediato aos {assets?.reduce((acc, curr) => acc + (curr.quantity || 1), 0)} itens tombados nesta sala.
                  </p>
                  {sectorSignature && (
                     <div className="mt-2 p-4 bg-emerald-50/50 rounded-2xl border border-emerald-100 flex items-center gap-4">
