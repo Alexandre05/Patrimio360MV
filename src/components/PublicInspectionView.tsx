@@ -19,42 +19,43 @@ export function PublicInspectionView({ inspectionId: propId, locationId: propLoc
   const [selectedImage, setSelectedImage] = useState<string | null>(null);
 
   useEffect(() => {
-    // Ensure we are at least logged in as guest to satisfy rules
-    const initAuth = async () => {
+    const initializeAndFetch = async () => {
+      // 1. Aguarda a autenticação (Crachá de visitante ou usuário logado)
       const { auth } = await import('../lib/firebase');
       if (!auth.currentUser) {
         await signInAsGuest();
       }
-    };
-    initAuth();
 
-    let id = propId;
-    let locId = propLocationId;
+      // 2. Extrai os parâmetros do link
+      let id = propId;
+      let locId = propLocationId;
 
-    if (!id && !locId) {
-      // Extract from URL if not through props
-      const path = window.location.pathname;
-      const hash = window.location.hash || '';
-      
-      // More robust regex-based path detection
-      const localMatch = path.match(/\/local\/([^\/]+)/) || hash.match(/\/local\/([^\/]+)/);
-      const vistoriaMatch = path.match(/\/vistoria\/([^\/]+)/) || hash.match(/\/vistoria\/([^\/]+)/);
+      if (!id && !locId) {
+        const path = window.location.pathname;
+        const hash = window.location.hash || '';
+        
+        const localMatch = path.match(/\/local\/([^\/]+)/) || hash.match(/\/local\/([^\/]+)/);
+        const vistoriaMatch = path.match(/\/vistoria\/([^\/]+)/) || hash.match(/\/vistoria\/([^\/]+)/);
 
-      if (localMatch && localMatch[1]) {
-        locId = localMatch[1];
-      } else if (vistoriaMatch && vistoriaMatch[1]) {
-        id = vistoriaMatch[1];
+        if (localMatch && localMatch[1]) {
+          locId = localMatch[1];
+        } else if (vistoriaMatch && vistoriaMatch[1]) {
+          id = vistoriaMatch[1];
+        }
       }
-    }
-    
-    if (id) {
-      fetchDataByInspection(id);
-    } else if (locId) {
-      fetchDataByLocation(locId);
-    } else {
-      setError("Link inválido. Certifique-se de que o QR Code está correto.");
-      setLoading(false);
-    }
+      
+      // 3. Somente DEPOIS de autenticado, faz a busca
+      if (id) {
+        await fetchDataByInspection(id);
+      } else if (locId) {
+        await fetchDataByLocation(locId);
+      } else {
+        setError("Link inválido. Certifique-se de que o QR Code está correto.");
+        setLoading(false);
+      }
+    };
+
+    initializeAndFetch();
   }, [propId, propLocationId]);
 
   const fetchDataByLocation = async (locId: string) => {
