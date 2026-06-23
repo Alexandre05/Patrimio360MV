@@ -402,22 +402,8 @@ export function Dashboard() {
                       Escanear QR
                     </Button>
                     
-                    {/* 👇 BOTÃO LIBERADO PARA TODOS (COMISSÃO E ADMIN) 👇 */}
-                    <button 
-                      onClick={() => {
-                        if (window.confirm("Isso irá limpar o cache local e baixar todos os dados da nuvem novamente. Deseja continuar?")) {
-                          forceFullSyncRecovery();
-                        }
-                      }}
-                      className="text-[10px] font-bold uppercase text-slate-400 hover:text-indigo-600 transition-colors flex items-center gap-1 ml-2"
-                    >
-                      <Database className="w-3 h-3" />
-                      Sincronização Forçada
-                    </button>
-
-                    {/* 👇 BOTÕES RESTRITOS APENAS PARA ADMINISTRADOR 👇 */}
                     {isManager && (
-                      <div className="flex items-center gap-4 ml-4 border-l border-slate-200 pl-4">
+                      <div className="flex items-center gap-4 ml-2">
                         <button onClick={async () => {
                           const confirmCleanup = window.confirm("Isso irá remover vistorias sem itens e locais sem vistorias. Deseja prosseguir?");
                           if (!confirmCleanup) return;
@@ -467,16 +453,31 @@ export function Dashboard() {
                         }} className="text-[10px] font-bold uppercase text-slate-400 hover:text-indigo-600 transition-colors">Higienizar</button>
 
                         <button 
+                          onClick={() => {
+                            if (window.confirm("Isso irá limpar o cache local e baixar todos os dados da nuvem novamente. Deseja continuar?")) {
+                              forceFullSyncRecovery();
+                            }
+                          }}
+                          className="text-[10px] font-bold uppercase text-slate-400 hover:text-indigo-600 transition-colors flex items-center gap-1"
+                        >
+                          <Database className="w-3 h-3" />
+                          Sincronização Forçada
+                        </button>
+
+                        <button 
                           onClick={handleResetSystem}
                           disabled={isResetting}
-                          className="text-[10px] font-black uppercase text-rose-500 hover:text-rose-700 transition-all flex items-center gap-1 bg-rose-50/40 hover:bg-rose-50 border border-rose-100/50 hover:border-rose-200 px-3 py-1.5 rounded-xl shadow-sm"
+                          className="text-[10px] font-black uppercase text-rose-500 hover:text-rose-700 transition-all flex items-center gap-1 bg-rose-50/40 hover:bg-rose-50 border border-rose-100/50 hover:border-rose-200 px-3 py-1.5 rounded-xl ml-2 shadow-sm"
                         >
                           <Trash2 className="w-3.5 h-3.5" />
-                          {isResetting ? "Zerando..." : "Zerar Banco (Testes)"}
+                          {isResetting ? "Zerando..." : "Zerar Banco & Vistorias (Testes)"}
                         </button>
                       </div>
                     )}
                   </div>
+                </div>
+                
+                <div className="hidden lg:flex flex-col gap-6 relative">
                    <Card className="p-8 bg-slate-900 border-slate-800 rounded-[2rem] shadow-2xl flex flex-col items-center gap-3 transform rotate-2 hover:rotate-0 transition-all duration-500 cursor-pointer group/card" onClick={() => setActiveTab('notifications')}>
                       <div className="w-16 h-16 bg-white/5 rounded-2xl flex items-center justify-center border border-white/10 mb-2 transition-transform group-hover/card:scale-110">
                         <Bell className="w-8 h-8 text-indigo-400" />
