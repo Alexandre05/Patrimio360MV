@@ -118,7 +118,13 @@ export function Dashboard() {
   const locations = useLiveQuery(() => db.locations.toArray());
   const activeInspectionsCount = useLiveQuery(() => db.inspections.where('status').equals('em_andamento').count());
   const concludedInspectionsCount = useLiveQuery(() => db.inspections.where('status').anyOf('concluida', 'finalizada').count());
-  const totalAssetsCount = useLiveQuery(() => db.assets.count());
+  
+  // SOMA REAL DAS QUANTIDADES NO DASHBOARD
+  const totalAssetsCount = useLiveQuery(async () => {
+    const todosItens = await db.assets.toArray();
+    return todosItens.reduce((acc, curr) => acc + (curr.quantity || 1), 0);
+  });
+
   const unreadNotifications = useLiveQuery(() => user ? db.notifications.where('targetUserId').equals(user.userId).and(n => !n.read).count() : 0, [user]);
   const unsyncedCount = useLiveQuery(() => 
     db.assets.filter(a => 
@@ -401,9 +407,22 @@ export function Dashboard() {
                     <Button variant="outline" icon={Search} onClick={() => setActiveTab('scanner')} className="px-10 h-16 text-xs uppercase tracking-widest bg-white">
                       Escanear QR
                     </Button>
+
+                    {/* BOTÃO LIBERADO PARA A COMISSÃO E ADMIN */}
+                    <button 
+                      onClick={() => {
+                        if (window.confirm("Isso irá forçar a atualização dos seus dados baixando as informações mais recentes da nuvem. Deseja continuar?")) {
+                          forceFullSyncRecovery();
+                        }
+                      }}
+                      className="text-[10px] font-bold uppercase text-slate-400 hover:text-indigo-600 transition-colors flex items-center gap-1 ml-4"
+                    >
+                      <Database className="w-3 h-3" />
+                      Sincronização Forçada
+                    </button>
                     
                     {isManager && (
-                      <div className="flex items-center gap-4 ml-2">
+                      <div className="flex items-center gap-4 ml-4 border-l border-slate-200 pl-4">
                         <button onClick={async () => {
                           const confirmCleanup = window.confirm("Isso irá remover vistorias sem itens e locais sem vistorias. Deseja prosseguir?");
                           if (!confirmCleanup) return;
@@ -453,24 +472,12 @@ export function Dashboard() {
                         }} className="text-[10px] font-bold uppercase text-slate-400 hover:text-indigo-600 transition-colors">Higienizar</button>
 
                         <button 
-                          onClick={() => {
-                            if (window.confirm("Isso irá limpar o cache local e baixar todos os dados da nuvem novamente. Deseja continuar?")) {
-                              forceFullSyncRecovery();
-                            }
-                          }}
-                          className="text-[10px] font-bold uppercase text-slate-400 hover:text-indigo-600 transition-colors flex items-center gap-1"
-                        >
-                          <Database className="w-3 h-3" />
-                          Sincronização Forçada
-                        </button>
-
-                        <button 
                           onClick={handleResetSystem}
                           disabled={isResetting}
-                          className="text-[10px] font-black uppercase text-rose-500 hover:text-rose-700 transition-all flex items-center gap-1 bg-rose-50/40 hover:bg-rose-50 border border-rose-100/50 hover:border-rose-200 px-3 py-1.5 rounded-xl ml-2 shadow-sm"
+                          className="text-[10px] font-black uppercase text-rose-500 hover:text-rose-700 transition-all flex items-center gap-1 bg-rose-50/40 hover:bg-rose-50 border border-rose-100/50 hover:border-rose-200 px-3 py-1.5 rounded-xl shadow-sm"
                         >
                           <Trash2 className="w-3.5 h-3.5" />
-                          {isResetting ? "Zerando..." : "Zerar Banco & Vistorias (Testes)"}
+                          {isResetting ? "Zerando..." : "Zerar Banco (Testes)"}
                         </button>
                       </div>
                     )}
@@ -556,7 +563,7 @@ export function Dashboard() {
               </div>
             </div>
 
-            {/* 📡 5. Status Offline/Sync (Removed as per user request to avoid persistent messages) */}
+            {/* 📡 5. Status Offline/Sync */}
             {!isOnline && (
               <div className="bg-rose-50 border border-rose-100 rounded-[2.5rem] p-6 flex flex-col md:flex-row items-center gap-6 animate-in zoom-in-95 duration-500 shadow-xl shadow-rose-500/5">
                 <div className="w-20 h-20 bg-white rounded-3xl flex items-center justify-center shadow-lg shadow-rose-500/10 shrink-0">
@@ -573,7 +580,6 @@ export function Dashboard() {
       case 'locations':
         return <LocationsView onSelectInspection={(id) => setSelectedInspectionId(id)} />;
       case 'inspections':
-        // Reuse similar structure or pass setTab
         return (
           <div className="flex flex-col gap-6 animate-in fade-in duration-500">
              <div className="flex items-center justify-between">
@@ -993,10 +999,11 @@ function RecentInspectionRow({ inspection, locationName, onClick }: { inspection
   const isFinalized = inspection.status === 'finalizada';
   const isInProgress = inspection.status === 'em_andamento';
   
-  const assetCount = useLiveQuery(
-    () => db.assets.where('inspectionId').equals(inspection.id).count(),
-    [inspection.id]
-  );
+  // SOMA REAL DAS QUANTIDADES NA LISTA DE VISTORIAS
+  const assetCount = useLiveQuery(async () => {
+    const itensDaVistoria = await db.assets.where('inspectionId').equals(inspection.id).toArray();
+    return itensDaVistoria.reduce((acc, curr) => acc + (curr.quantity || 1), 0);
+  }, [inspection.id]);
 
   return (
     <Card 
