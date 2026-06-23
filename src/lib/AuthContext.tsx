@@ -205,6 +205,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       await signInAnonymously(auth);
     } catch (e) {
       console.error("Erro ao entrar como convidado:", e);
+      throw e;
     }
   };
 

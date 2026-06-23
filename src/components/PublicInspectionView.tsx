@@ -3,7 +3,7 @@ import { db as firestore } from '../lib/firebase';
 import { doc, getDoc, collection, query, where, getDocs, orderBy, limit } from 'firebase/firestore';
 import { Inspection, Location, Asset } from '../lib/db';
 import { formatDate } from '../lib/utils';
-import { ShieldCheck, MapPin, Search, Box, CheckCircle2, AlertTriangle, AlertCircle, XCircle, Maximize2, X, Calendar, Landmark } from 'lucide-react';
+import { ShieldCheck, MapPin, Search, Box, CheckCircle2, AlertTriangle, AlertCircle, XCircle, Maximize2, X, Calendar, Landmark, ExternalLink } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 
 import { useAuth } from '../lib/AuthContext';
@@ -20,37 +20,47 @@ export function PublicInspectionView({ inspectionId: propId, locationId: propLoc
 
   useEffect(() => {
     const initializeAndFetch = async () => {
-      // 1. Aguarda a autenticação (Crachá de visitante ou usuário logado)
-      const { auth } = await import('../lib/firebase');
-      if (!auth.currentUser) {
-        await signInAsGuest();
-      }
-
-      // 2. Extrai os parâmetros do link
-      let id = propId;
-      let locId = propLocationId;
-
-      if (!id && !locId) {
-        const path = window.location.pathname;
-        const hash = window.location.hash || '';
-        
-        const localMatch = path.match(/\/local\/([^\/]+)/) || hash.match(/\/local\/([^\/]+)/);
-        const vistoriaMatch = path.match(/\/vistoria\/([^\/]+)/) || hash.match(/\/vistoria\/([^\/]+)/);
-
-        if (localMatch && localMatch[1]) {
-          locId = localMatch[1];
-        } else if (vistoriaMatch && vistoriaMatch[1]) {
-          id = vistoriaMatch[1];
+      try {
+        // 1. Aguarda a autenticação (Crachá de visitante ou usuário logado)
+        const { auth } = await import('../lib/firebase');
+        if (!auth.currentUser) {
+          await signInAsGuest();
         }
-      }
-      
-      // 3. Somente DEPOIS de autenticado, faz a busca
-      if (id) {
-        await fetchDataByInspection(id);
-      } else if (locId) {
-        await fetchDataByLocation(locId);
-      } else {
-        setError("Link inválido. Certifique-se de que o QR Code está correto.");
+
+        // 2. Extrai os parâmetros do link
+        let id = propId;
+        let locId = propLocationId;
+
+        if (!id && !locId) {
+          const path = window.location.pathname;
+          const hash = window.location.hash || '';
+          
+          const localMatch = path.match(/\/local\/([^\/]+)/) || hash.match(/\/local\/([^\/]+)/);
+          const vistoriaMatch = path.match(/\/vistoria\/([^\/]+)/) || hash.match(/\/vistoria\/([^\/]+)/);
+
+          if (localMatch && localMatch[1]) {
+            locId = localMatch[1];
+          } else if (vistoriaMatch && vistoriaMatch[1]) {
+            id = vistoriaMatch[1];
+          }
+        }
+        
+        // 3. Somente DEPOIS de autenticado, faz a busca
+        if (id) {
+          await fetchDataByInspection(id);
+        } else if (locId) {
+          await fetchDataByLocation(locId);
+        } else {
+          setError("Link inválido. Certifique-se de que o QR Code está correto.");
+          setLoading(false);
+        }
+      } catch (err: any) {
+        console.error("Erro na inicialização pública:", err);
+        if (err.code === 'auth/network-request-failed' || err.message?.includes('network-request-failed') || err.message?.includes('auth/')) {
+          setError("Não foi possível conectar com segurança aos servidores de autenticação do Firebase. Isso geralmente ocorre devido a restrições de segurança do navegador que bloqueiam cookies e armazenamento de terceiros dentro do modo de visualização (iframe) do AI Studio. Por favor, clique no botão abaixo para abrir o aplicativo em uma Nova Aba.");
+        } else {
+          setError(err.message || "Erro desconhecido ao carregar dados.");
+        }
         setLoading(false);
       }
     };
@@ -201,6 +211,7 @@ export function PublicInspectionView({ inspectionId: propId, locationId: propLoc
   }
 
   if (error || !inspection) {
+    const isNetworkOrIframeError = error?.includes("autenticação") || error?.includes("CONEXÃO") || error?.includes("auth/") || error?.includes("network-request-failed");
     return (
       <div className="min-h-screen bg-slate-50 flex items-center justify-center p-6 text-center">
         <div className="bg-white p-8 rounded-2xl shadow-sm max-w-md w-full border border-rose-200">
@@ -208,7 +219,16 @@ export function PublicInspectionView({ inspectionId: propId, locationId: propLoc
               <AlertTriangle className="w-8 h-8" />
            </div>
            <h2 className="text-2xl font-bold text-slate-800 mb-2">Atenção</h2>
-           <p className="text-slate-600 font-medium">{error || "Registro não localizado no sistema."}</p>
+           <p className="text-slate-600 text-sm leading-relaxed mb-6 font-medium">{error || "Registro não localizado no sistema."}</p>
+           {isNetworkOrIframeError && (
+             <button
+               onClick={() => window.open(window.location.href, '_blank')}
+               className="w-full flex items-center justify-center gap-2 px-4 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl font-semibold shadow-sm transition-colors text-sm"
+             >
+               <ExternalLink className="w-4 h-4" />
+               Abrir em Nova Aba
+             </button>
+           )}
         </div>
       </div>
     );
