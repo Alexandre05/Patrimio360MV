@@ -1098,7 +1098,9 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
              </div>
              <div className="flex flex-col gap-1">
                 <span className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Itens {hasSubLocations ? 'Totais' : ''}</span>
-                <span className="font-display text-2xl font-black tracking-tight text-white">{allVisibleAssets.length}</span>
+                <span className="font-display text-2xl font-black tracking-tight text-white">
+  {allVisibleAssets.reduce((acc, curr) => acc + (Number(curr.quantity) || 1), 0)}
+</span>
              </div>
              <div className="flex flex-col gap-1">
                 <span className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Status</span>
