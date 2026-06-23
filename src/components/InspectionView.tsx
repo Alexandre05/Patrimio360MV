@@ -62,14 +62,12 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
   }, [allLocations, location]);
   const hasSubLocations = subLocations.length > 0;
 
-  // Aggregate assets from sub-locations if this is a parent
   const aggregatedSubAssets = useLiveQuery(async () => {
     if (!hasSubLocations || !subLocations) return [];
     
     const subLocationIds = subLocations.map(sl => sl.id);
     const latestInspectionIds: string[] = [];
 
-    // Busca apenas a vistoria mais recente (independente do status) para cada sub-local
     for (const subLocId of subLocationIds) {
       const inspectionsForLoc = await db.inspections
         .where('locationId').equals(subLocId)
@@ -77,7 +75,6 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
         .toArray();
 
       if (inspectionsForLoc.length > 0) {
-        // Ordena da mais recente para a mais antiga e pega a primeira
         inspectionsForLoc.sort((a, b) => b.date - a.date);
         latestInspectionIds.push(inspectionsForLoc[0].id);
       }
@@ -108,17 +105,13 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
 
   const unsyncedAssetsCount = assets?.filter(a => a.needsSync === 1 || a.needsSync === true as any).length || 0;
 
-  // Restore Missing logic starts here
-  // Fetch signature data quando a vistoria mudar ou for homologada
   React.useEffect(() => {
     const fetchSignature = async () => {
       if (!id || !isOnline) return;
 
-      // Verificação proativa de permissão para evitar avisos no console
       const isPublic = inspection?.status === 'finalizada';
       const isAuthenticated = !!auth.currentUser;
 
-      // Se não for pública e não estiver autenticado, nem tenta
       if (!isPublic && !isAuthenticated) return;
 
       try {
@@ -132,7 +125,6 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
           });
         }
       } catch (err: any) {
-        // Trata erro de permissão com mensagem amigável em vez de warn agressivo
         if (err.message?.includes('permissions')) {
           console.info("Assinatura restrita: Aguardando homologação do dossiê.");
         } else {
@@ -170,7 +162,6 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
     const isTextarea = e.currentTarget.tagName === 'TEXTAREA';
     const isInput = e.currentTarget.tagName === 'INPUT';
     
-    // For text inputs and textareas, only navigate if cursor is at bounds OR if it's a select/button
     const canMoveRight = !isInput && !isTextarea || (e.currentTarget as any).selectionEnd === (e.currentTarget as any).value?.length;
     const canMoveLeft = !isInput && !isTextarea || (e.currentTarget as any).selectionStart === 0;
 
@@ -187,11 +178,9 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
       }
     }
   };
-  // Restore Missing logic ends here
 
   const [locationNames, setLocationNames] = useState<Record<string, string>>({});
 
-  // Sync location names for display labels
   React.useEffect(() => {
     const fetchLocNames = async () => {
       const inspIds = [...new Set(allVisibleAssets.map(a => a.inspectionId))];
@@ -236,7 +225,6 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
 
     const hash = generateAssetHash(newItem.name, newItem.patrimonyNumber, inspection?.locationId || '');
     
-    // Check if we are transferring an existing asset
     if (transferCandidate && !editingAssetId) {
       try {
         const confirmTransfer = window.confirm(`Deseja TRANSFERIR o patrimônio ${transferCandidate.patrimonyNumber} para esta localização? ele será removido do local original.`);
@@ -245,7 +233,6 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
             inspectionId: id,
             hash: hash,
             needsSync: 1,
-            // Optionally update with new details provided in the form
             condition: newItem.condition,
             observations: newItem.observations,
             quantity: newItem.quantity
@@ -264,10 +251,8 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
       }
     }
 
-    // Duplication Check (only for new items)
     if (!editingAssetId) {
       if (newItem.patrimonyNumber) {
-        // GLOBAL Patrimony check
         let globalExisting = await db.assets.where('patrimonyNumber').equals(newItem.patrimonyNumber).first();
         
         if (!globalExisting && isOnline) {
@@ -293,7 +278,6 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
           return;
         }
       } else {
-        // Local Check (same location, no patrimony)
         let existingHash = await db.assets.where('hash').equals(hash).first();
 
         if (!existingHash && isOnline) {
@@ -344,7 +328,6 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
       toast("Item adicionado à vistoria!", "success", "Novo Patrimônio");
     }
 
-    // Trigger sync
     pushLocalChanges();
 
     setNewItem({ name: '', patrimonyNumber: '', condition: 'bom', observations: '', photos: [], quantity: 1 });
@@ -400,7 +383,7 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
   const handleCloneAsset = (asset: Asset) => {
     setNewItem({
       name: asset.name,
-      patrimonyNumber: '', // Deixa em branco para a nova plaqueta
+      patrimonyNumber: '',
       condition: asset.condition,
       observations: asset.observations,
       photos: asset.photos || [],
@@ -477,11 +460,10 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
       reader.onloadend = async () => {
         try {
           const rawBase64 = reader.result as string;
-          // COMPRESS to avoid storage quota issues (now using 1000px since we hit Storage, not Firestore)
           const compressedBase64 = await compressImage(rawBase64, 1000, 0.7);
           setNewItem(prev => ({
             ...prev,
-            photos: [...prev.photos, compressedBase64].slice(-4) // Limit to 4 photos
+            photos: [...prev.photos, compressedBase64].slice(-4)
           }));
         } catch (err) {
           console.error("Erro ao processar imagem:", err);
@@ -502,7 +484,6 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
   const handleConclude = async (force: boolean = false) => {
     if (!id || isConcluding) return;
     
-    // First click: ask for confirmation in-UI (unless forced by signature modal)
     if (!isConfirmingConclude && !force) {
       setIsConfirmingConclude(true);
       return;
@@ -513,19 +494,16 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
     console.log("Tentando concluir vistoria ID:", id);
     
     try {
-      // 0. Safety check: must have assets
       const assetsCount = await db.assets.where('inspectionId').equals(id).count();
       if (assetsCount === 0) {
         throw new Error("Não é possível concluir uma vistoria sem itens registrados.");
       }
 
-      // 1. Verify existence check
       const current = await db.inspections.get(id);
       if (!current) {
         throw new Error(`Vistoria ${id} não encontrada no banco local.`);
       }
 
-      // 2. Perform update using the most robust method (put)
       await db.inspections.put({
         ...current,
         status: 'concluida',
@@ -539,7 +517,6 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
       await syncInspection(id);
       await pushLocalChanges();
       
-      // Safety delay for reaction
       await new Promise(resolve => setTimeout(resolve, 400));
       setIsConfirmingConclude(false);
       
@@ -559,7 +536,6 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
 
     if (!id || isFinalizing) return;
 
-    // First click: ask for confirmation in-UI
     if (!isConfirmingFinalize) {
       setIsConfirmingFinalize(true);
       setError(null);
@@ -574,7 +550,6 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
       const current = await db.inspections.get(id);
       if (!current) throw new Error("Vistoria não encontrada.");
 
-      // Forçar o uso do domínio de produção para o QR Code
       const qrCodeDataPayload = `https://patrimonio360-75ade.web.app/vistoria/${id}`;
 
       await db.inspections.put({
@@ -586,7 +561,6 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
         needsSync: 1
       });
       
-      // Mark all assets as public for public view without O(N) get() in rules
       const assets = await db.assets.where('inspectionId').equals(id).toArray();
       for (const asset of assets) {
         await db.assets.update(asset.id, { isPublic: true, needsSync: 1 });
@@ -613,47 +587,27 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
     }
     if (!id || isReopening) return;
 
+    if (!isConfirmingReopen) {
+      setIsConfirmingReopen(true);
+      setError(null);
+      return;
+    }
+
+    setIsReopening(true);
+    setError(null);
+    console.log("Reabrindo vistoria:", id);
+
     try {
       const current = await db.inspections.get(id);
       if (!current) throw new Error("Vistoria não encontrada.");
 
-      // --- REGRA DE OURO DA PREFEITURA: TRAVA HISTÓRICA POR ANO ---
-      const currentYear = new Date().getFullYear();
-      const inspectionYear = new Date(current.date).getFullYear();
-
-      if (inspectionYear < currentYear) {
-        setError(`⚠️ Bloqueio de Histórico: Não é permitido reabrir vistorias de anos anteriores (${inspectionYear}). Crie uma nova vistoria para este ano para poder comparar os dados.`);
-        setIsConfirmingReopen(false);
-        return;
-      }
-
-      // Primeiro clique: pede confirmação visual na tela
-      if (!isConfirmingReopen) {
-        setIsConfirmingReopen(true);
-        setError(null);
-        return;
-      }
-
-      setIsReopening(true);
-      setError(null);
-      console.log("Reabrindo e atualizando data da vistoria:", id);
-
-      // --- NOVO REGISTRO DE DATA E HORA ATUALIZADOS ---
-      const now = Date.now();
       await db.inspections.put({
         ...current,
-        status: 'em_andamento',
-        date: now,         // Seta o relógio para o dia e hora de agora
-        updatedAt: now,    // Grava o momento da modificação
-        needsSync: 1       // Avisa o Firebase que este documento precisa subir atualizado
+        status: 'em_andamento'
       });
       
       await new Promise(resolve => setTimeout(resolve, 400));
       setIsConfirmingReopen(false);
-      
-      if (typeof toast === 'function') {
-        toast("Vistoria reaberta com a data e hora atuais!", "success");
-      }
     } catch (err: any) {
       console.error("Erro ao reabrir vistoria:", err);
       setError(`Erro ao reabrir: ${err.message || 'Erro desconhecido'}`);
@@ -675,13 +629,11 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
     setError(null);
     try {
       const now = Date.now();
-      // 1. Soft delete items
       const assetsToSoftDelete = await db.assets.where('inspectionId').equals(id).toArray();
       for (const asset of assetsToSoftDelete) {
         await db.assets.update(asset.id, { deleted: true, needsSync: 1, updatedAt: now });
       }
 
-      // 2. Soft delete inspection
       await db.inspections.update(id, { deleted: true, needsSync: 1, updatedAt: now });
       
       console.log("Vistoria marcada para exclusão:", id);
@@ -712,7 +664,6 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
       
       if (idsToTransfer.length === 0) throw new Error("Nenhum item para transferir");
 
-      // 1. Procurar ou criar vistoria ativa no destino
       let targetInspection = await db.inspections
         .where({ locationId: targetLocationId })
         .filter(i => i.status === 'em_andamento')
@@ -733,14 +684,12 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
 
       if (!targetInspection) throw new Error("Falha ao preparar destino");
 
-      // 2. Transferir itens
       for (const assetId of idsToTransfer) {
         const asset = await db.assets.get(assetId);
         if (!asset) continue;
 
         const newHash = generateAssetHash(asset.name, asset.patrimonyNumber, targetLocationId);
         
-        // Verificar se já existe no destino
         const existingInTarget = await db.assets.where('hash').equals(newHash).first();
         if (existingInTarget) {
           console.warn(`Item ${asset.name} já existe no destino, pulando...`);
@@ -767,17 +716,16 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
     }
   };
 
- const generatePDF = async () => {
+  // --- GERADOR DE PDF ELEGANTE E CORRIGIDO ---
+  const generatePDF = async () => {
     try {
       setError(null);
       const doc = new jsPDF();
       
-      // --- TÍTULO PRINCIPAL ---
       doc.setFont('helvetica', 'bold');
       doc.setFontSize(18);
       doc.text('Relatório de Vistoria Patrimonial', 14, 22);
       
-      // --- DADOS DE IDENTIFICAÇÃO ---
       doc.setFontSize(10);
       doc.setFont('helvetica', 'normal');
       doc.text(`Local Inspecionado: ${location?.name}`, 14, 32);
@@ -804,10 +752,11 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
         doc.text(`Homologado por: ${inspection.finalizedBy === user?.userId ? user?.name : 'Autoridade Municipal'}`, 14, 50);
       }
 
-      // --- CÁLCULO DOS TOTAIS REALIZANDO O SOMATÓRIO DAS QUANTIDADES ---
-      const totalUnidadesAbsolutas = assets?.reduce((acc, curr) => acc + (curr.quantity || 1), 0) || 0;
+      // SOMA REAL DAS QUANTIDADES PARA O PDF
+      const totalUnidadesAbsolutas = assets?.reduce((acc, curr) => acc + (Number(curr.quantity) || 1), 0) || 0;
+      const totalTiposDiferentes = assets?.length || 0;
 
-      // --- PAINEL INDICADOR ELEGANTE ---
+      // Painel Elegante
       doc.setDrawColor(226, 232, 240);
       doc.setFillColor(248, 250, 252);
       doc.roundedRect(14, 56, 182, 14, 3, 3, 'FD');
@@ -819,6 +768,10 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
       
       doc.setFont('helvetica', 'normal');
       doc.text(`Total de Bens Catalogados: ${totalUnidadesAbsolutas} unidade(s) físicas`, 68, 65);
+      
+      doc.setFontSize(9);
+      doc.setTextColor(100);
+      doc.text(`(${totalTiposDiferentes} registros distintos)`, 148, 65);
       doc.setTextColor(0);
 
       doc.setFontSize(9);
@@ -826,7 +779,6 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
       doc.text('Este documento contém um QR Code DINÂMICO. A leitura em tempo real sempre exibirá a versão mais atualizada.', 14, 76);
       doc.setTextColor(0);
 
-      // Mapeia os dados incluindo a coluna de quantidade de forma explícita
       const tableData = assets?.map(a => [
         a.name,
         a.patrimonyNumber || '-',
@@ -850,7 +802,6 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
         finalY = 25;
       }
 
-      // --- LADO ESQUERDO: QR CODE PERMANENTE ---
       doc.setFontSize(10);
       doc.setFont('helvetica', 'bold');
       doc.text('SELO PERMANENTE DE TRANSPARÊNCIA:', 14, finalY);
@@ -874,7 +825,6 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
         });
       }
 
-      // --- LADO DIREITO: ASSINATURA DO RESPONSÁVEL ---
       if (sectorSignature) {
         doc.setLineWidth(0.5);
         doc.setDrawColor(0, 0, 0);
@@ -904,6 +854,7 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
       setError(`Erro ao gerar PDF: ${err.message || 'Falha desconhecida'}`);
     }
   };
+
   const handlePrintQRCode = (type: 'vistoria' | 'local' = 'local') => {
     try {
       const qrData = type === 'local' 
@@ -962,18 +913,12 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
 
   const isFinalized = inspection.status === 'finalizada';
   const isConcluded = inspection.status === 'concluida';
-  const isLocked = isFinalized || (isConcluded && !isCommittee) || hasSubLocations; // Prevent adding items to parent locations
+  const isLocked = isFinalized || (isConcluded && !isCommittee) || hasSubLocations; 
 
   const handleStartSubInspection = async (subLocId: string) => {
-    // Navigate to a sub-location audit
-    // Need to find existing or create new
     const existing = await db.inspections.where({ locationId: subLocId }).filter(i => !i.deleted && i.status !== 'finalizada').first();
     if (existing) {
-       onBack(); // Go back to trigger selecting another one? 
-       // Better: the app usually manages selecting via ID in Dashboard
-       // For now, let's just use the dashboard's logic by popping back and letting user click?
-       // Actually, we can't easily change the dashboard state from here without props.
-       // Let's just assume navigation happens through Dashboard for now, or just show the links.
+       onBack(); 
     }
   };
 
@@ -1099,8 +1044,8 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
              <div className="flex flex-col gap-1">
                 <span className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Itens {hasSubLocations ? 'Totais' : ''}</span>
                 <span className="font-display text-2xl font-black tracking-tight text-white">
-  {allVisibleAssets.reduce((acc, curr) => acc + (Number(curr.quantity) || 1), 0)}
-</span>
+                  {allVisibleAssets.reduce((acc, curr) => acc + (Number(curr.quantity) || 1), 0)}
+                </span>
              </div>
              <div className="flex flex-col gap-1">
                 <span className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Status</span>
@@ -1116,7 +1061,6 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
         <Building2 className="absolute -bottom-20 -right-20 w-96 h-96 text-white/5 transform rotate-12 pointer-events-none" />
       </div>
 
-      {/* Concluded but not Finalized state */}
       {isConcluded && !isFinalized && (
         <div className="bg-white border border-indigo-100 rounded-[2rem] p-8 flex flex-col md:flex-row items-center gap-8 animate-in slide-in-from-top-4 duration-500 shadow-[0_20px_50px_-15px_rgba(99,102,241,0.1)]">
            <div className="w-20 h-20 bg-indigo-600 rounded-3xl flex items-center justify-center text-white shadow-xl shadow-indigo-600/20 shrink-0">
@@ -1150,7 +1094,6 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
         </div>
       )}
 
-      {/* Sub-locations section if is parent */}
       {hasSubLocations && (
         <div className="flex flex-col gap-6 animate-in slide-in-from-bottom-4 duration-700">
            <div className="flex items-center justify-between ml-2">
@@ -1163,7 +1106,7 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
               {subLocations?.map(sl => (
                 <button 
                   key={sl.id}
-                  onClick={onBack} // Forcing back to dashboard for now as drill-down is reliable there
+                  onClick={onBack}
                   className="bg-white border border-slate-100 p-6 rounded-3xl hover:border-indigo-300 hover:shadow-xl hover:shadow-indigo-600/5 transition-all text-left flex flex-col gap-3 group"
                 >
                    <div className="w-10 h-10 bg-slate-50 rounded-xl flex items-center justify-center text-slate-400 group-hover:bg-indigo-600 group-hover:text-white transition-all">
@@ -1190,7 +1133,7 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
            </div>
         </div>
       )}
-      {/* QR Code section if finalized */}
+
       {isFinalized && (
         <div className="flex flex-col gap-8 animate-in zoom-in-95 duration-700">
           <Card className="flex flex-col lg:flex-row items-center gap-12 p-8 lg:p-12 border-emerald-100 bg-white group hover:shadow-[0_30px_70px_-20px_rgba(16,185,129,0.15)] transition-all duration-700 rounded-[3rem]">
@@ -1210,7 +1153,7 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
                     <h3 className="font-display font-extrabold text-3xl text-slate-900 tracking-tight leading-none uppercase">Selo de Transparência</h3>
                  </div>
                  <p className="text-lg text-slate-500 leading-relaxed font-medium max-w-xl">
-                   terão acesso imediato aos {assets?.reduce((acc, curr) => acc + (Number(curr.quantity) || 1), 0)} itens tombados nesta sala.
+                    Este ambiente foi <span className="text-emerald-600 font-bold">Blindado Digitalmente</span>. Ao escanear este QR Code, a sociedade civil e os auditores terão acesso imediato aos {assets?.reduce((acc, curr) => acc + (Number(curr.quantity) || 1), 0)} itens tombados nesta sala.
                  </p>
                  {sectorSignature && (
                     <div className="mt-2 p-4 bg-emerald-50/50 rounded-2xl border border-emerald-100 flex items-center gap-4">
@@ -1346,7 +1289,6 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
           <div className="fixed inset-0 z-[200] flex flex-col bg-slate-900/40 backdrop-blur-sm md:p-6 md:justify-center md:items-center animate-in fade-in duration-300">
             <Card className="w-full h-full md:h-auto md:max-h-[90vh] md:max-w-4xl flex flex-col overflow-hidden rounded-none md:rounded-[2.5rem] border-none shadow-[0_40px_100px_-20px_rgba(0,0,0,0.3)] relative z-10 p-0 bg-white">
                
-               {/* 1. Header Fixo */}
                <div className="flex items-center justify-between p-8 bg-slate-900 text-white shadow-xl z-20 shrink-0">
                   <div className="flex items-center gap-5">
                     <div className="w-12 h-12 bg-white/10 rounded-2xl flex items-center justify-center border border-white/20">
@@ -1368,7 +1310,6 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
                   </div>
                </div>
                
-               {/* 2. Área do Formulário */}
                <div className="flex-1 overflow-y-auto custom-scrollbar p-8 lg:p-12 flex flex-col gap-10 bg-white pb-32">
                  
                  <div className="flex flex-col gap-4">
@@ -1444,6 +1385,7 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
                       />
                     </div>
 
+                    {/* BLINDAGEM DA QUANTIDADE CONTRA PONTOS (ex: 1.000) */}
                     <div className="flex flex-col gap-4">
                       <div className="flex flex-col">
                        <label className="text-[10px] font-bold text-slate-900 uppercase tracking-widest ml-1">Quantidade</label>
@@ -1451,11 +1393,11 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
                      </div>
                       <Input 
                         ref={quantityRef}
-                        type="number"
-                        value={newItem.quantity?.toString()}
-                        onChange={e => setNewItem({...newItem, quantity: Math.max(1, parseInt(e.target.value) || 1)})}
+                        type="text"
+                        inputMode="numeric"
+                        value={newItem.quantity?.toString() || ''}
+                        onChange={e => setNewItem({...newItem, quantity: Math.max(1, parseInt(e.target.value.replace(/\D/g, '')) || 1)})}
                         onKeyDown={e => handleKeyDown(e, 3)}
-                        min={1}
                         className="text-center font-bold text-lg h-16 shadow-sm"
                       />
                     </div>
@@ -1529,7 +1471,6 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
                  </div>
                </div>
 
-                {/* Footer Fixo */}
                 <div className="absolute bottom-0 inset-x-0 p-8 pt-4 bg-white border-t border-slate-100 flex items-center gap-4 z-30">
                    <Button 
                      variant="secondary" 
@@ -1565,7 +1506,7 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
           </div>
         )}
 
-         {/* Barra de Filtro Semafórico Visual - Zero Digitação */}
+         {/* Barra de Filtro Semafórico Visual - SOMATÓRIOS CORRIGIDOS */}
          <div className="flex flex-wrap items-center justify-between gap-5 bg-white border border-slate-100 p-5 rounded-[2rem] px-8 select-none shadow-sm mb-4">
            <div className="flex items-center gap-3">
              <div className="w-10 h-10 rounded-[1.25rem] bg-indigo-50 border border-indigo-100/40 flex items-center justify-center text-indigo-500">
@@ -1600,7 +1541,7 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
                )}
              >
                <span className={cn("w-2 h-2 rounded-full", conditionFilter === 'bom' ? "bg-white" : "bg-emerald-500")} />
-               Bons ({allVisibleAssets.filter(a => a.condition === 'bom' || a.condition === 'novo').length})
+               Bons ({allVisibleAssets.filter(a => a.condition === 'bom' || a.condition === 'novo').reduce((acc, curr) => acc + (Number(curr.quantity) || 1), 0)})
              </button>
              <button
                type="button"
@@ -1613,7 +1554,7 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
                )}
              >
                <span className={cn("w-2 h-2 rounded-full", conditionFilter === 'regular' ? "bg-white" : "bg-amber-500")} />
-               Regulares/Ruins ({allVisibleAssets.filter(a => a.condition === 'regular' || a.condition === 'ruim').length})
+               Regulares/Ruins ({allVisibleAssets.filter(a => a.condition === 'regular' || a.condition === 'ruim').reduce((acc, curr) => acc + (Number(curr.quantity) || 1), 0)})
              </button>
              <button
                type="button"
@@ -1626,7 +1567,7 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
                )}
              >
                <span className={cn("w-2 h-2 rounded-full", conditionFilter === 'inservivel' ? "bg-white" : "bg-rose-500")} />
-               Inservíveis ({allVisibleAssets.filter(a => a.condition === 'inservivel').length})
+               Inservíveis ({allVisibleAssets.filter(a => a.condition === 'inservivel').reduce((acc, curr) => acc + (Number(curr.quantity) || 1), 0)})
              </button>
            </div>
          </div>
@@ -1792,7 +1733,7 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
                   className="w-full py-6 bg-slate-50 hover:bg-slate-100 text-slate-500 font-bold uppercase tracking-[0.2em] text-[10px] rounded-[2rem] border-2 border-dashed border-slate-200 transition-all flex flex-col items-center gap-2"
                 >
                   Carregar mais itens
-                  <span className="text-[10px] opacity-40 font-black">({assets?.length} totais)</span>
+                  <span className="text-[10px] opacity-40 font-black">({assets?.reduce((acc, curr) => acc + (Number(curr.quantity) || 1), 0)} totais)</span>
                 </button>
              </div>
           )}
@@ -1908,7 +1849,6 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
           </>
         )}
 
-        {/* Action: Reopen - Available for managers in Concluded or Finalized states */}
         {(isConcluded || isFinalized) && isManager && (
           <div className="flex flex-col gap-3">
             <Button 
@@ -1941,7 +1881,6 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
         )}
       </div>
 
-      {/* 🚀 Modal de Transferência */}
       {transferAssetId && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 md:p-10">
           <div className="absolute inset-0 bg-slate-900/60 backdrop-blur-md" onClick={() => setTransferAssetId(null)} />
@@ -1988,7 +1927,6 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
         </div>
       )}
 
-      {/* Modal de Histórico */}
       {historyAsset && (
         <div className="fixed inset-0 z-[110] flex items-center justify-center p-4 md:p-10">
           <div className="absolute inset-0 bg-slate-900/60 backdrop-blur-md" onClick={() => setHistoryAsset(null)} />
@@ -2046,7 +1984,6 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
         </div>
       )}
 
-      {/* ✍️ Modal de Assinatura e Encerramento Setorial */}
       {isSignOffModalOpen && (
         <SectorInspectionSignOffModal
           isOpen={isSignOffModalOpen}
@@ -2056,13 +1993,11 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
           assets={assets || []}
           onComplete={async () => {
              setIsSignOffModalOpen(false);
-             // Trigger internal status update immediately skipping confirmation
              await handleConclude(true);
           }}
         />
       )}
 
-      {/* Lightbox para Visualização de Fotos */}
       {previewPhoto && (
         <div className="fixed inset-0 z-[300] flex items-center justify-center p-4 md:p-10" onClick={() => setPreviewPhoto(null)}>
           <div className="absolute inset-0 bg-slate-900/95 backdrop-blur-sm" />
