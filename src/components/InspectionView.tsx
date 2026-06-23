@@ -91,6 +91,9 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
   const allVisibleAssets = hasSubLocations 
     ? [...(assets || []), ...(aggregatedSubAssets || [])]
     : (assets || []);
+
+  const totalFisicoItens = assets?.reduce((acc, a) => acc + (a.quantity || 1), 0) || 0;
+  const allVisibleTotalFisico = allVisibleAssets?.reduce((acc, a) => acc + (a.quantity || 1), 0) || 0;
   
   const filteredAssets = allVisibleAssets.filter(asset => 
     ((asset.name || '').toLowerCase().includes(searchTermAssets.toLowerCase()) || 
@@ -788,13 +791,14 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
 
       const tableData = assets?.map(a => [
         a.name,
+        String(a.quantity || 1),
         a.patrimonyNumber || '-',
         a.condition,
         a.observations || '-'
       ]);
 
       autoTable(doc, {
-        head: [['Item', 'Patrimônio', 'Estado', 'Obs']],
+        head: [['Item', 'Qtd', 'Patrimônio', 'Estado', 'Obs']],
         body: tableData,
         startY: sectorSignature ? 90 : 60,
         theme: 'grid'
@@ -1047,7 +1051,7 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
              </div>
              <div className="flex flex-col gap-1">
                 <span className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Itens {hasSubLocations ? 'Totais' : ''}</span>
-                <span className="font-display text-2xl font-black tracking-tight text-white">{allVisibleAssets.length}</span>
+                <span className="font-display text-2xl font-black tracking-tight text-white">{allVisibleTotalFisico}</span>
              </div>
              <div className="flex flex-col gap-1">
                 <span className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Status</span>
@@ -1157,7 +1161,7 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
                     <h3 className="font-display font-extrabold text-3xl text-slate-900 tracking-tight leading-none uppercase">Selo de Transparência</h3>
                  </div>
                  <p className="text-lg text-slate-500 leading-relaxed font-medium max-w-xl">
-                    Este ambiente foi <span className="text-emerald-600 font-bold">Blindado Digitalmente</span>. Ao escanear este QR Code, a sociedade civil e os auditores terão acesso imediato aos {assets?.length} itens tombados nesta sala.
+                    Este ambiente foi <span className="text-emerald-600 font-bold">Blindado Digitalmente</span>. Ao escanear este QR Code, a sociedade civil e os auditores terão acesso imediato aos {totalFisicoItens} itens tombados nesta sala.
                  </p>
                  {sectorSignature && (
                     <div className="mt-2 p-4 bg-emerald-50/50 rounded-2xl border border-emerald-100 flex items-center gap-4">
@@ -1534,7 +1538,7 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
                    : "bg-slate-50 border-slate-200 hover:bg-slate-100 text-slate-600"
                )}
              >
-               Todos ({allVisibleAssets.length})
+               Todos ({allVisibleTotalFisico})
              </button>
              <button
                type="button"
@@ -1547,7 +1551,7 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
                )}
              >
                <span className={cn("w-2 h-2 rounded-full", conditionFilter === 'bom' ? "bg-white" : "bg-emerald-500")} />
-               Bons ({allVisibleAssets.filter(a => a.condition === 'bom' || a.condition === 'novo').length})
+               Bons ({allVisibleAssets.filter(a => a.condition === 'bom' || a.condition === 'novo').reduce((acc, a) => acc + (a.quantity || 1), 0)})
              </button>
              <button
                type="button"
@@ -1560,7 +1564,7 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
                )}
              >
                <span className={cn("w-2 h-2 rounded-full", conditionFilter === 'regular' ? "bg-white" : "bg-amber-500")} />
-               Regulares/Ruins ({allVisibleAssets.filter(a => a.condition === 'regular' || a.condition === 'ruim').length})
+               Regulares/Ruins ({allVisibleAssets.filter(a => a.condition === 'regular' || a.condition === 'ruim').reduce((acc, a) => acc + (a.quantity || 1), 0)})
              </button>
              <button
                type="button"
@@ -1573,7 +1577,7 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
                )}
              >
                <span className={cn("w-2 h-2 rounded-full", conditionFilter === 'inservivel' ? "bg-white" : "bg-rose-500")} />
-               Inservíveis ({allVisibleAssets.filter(a => a.condition === 'inservivel').length})
+               Inservíveis ({allVisibleAssets.filter(a => a.condition === 'inservivel').reduce((acc, a) => acc + (a.quantity || 1), 0)})
              </button>
            </div>
          </div>
@@ -1739,7 +1743,7 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
                   className="w-full py-6 bg-slate-50 hover:bg-slate-100 text-slate-500 font-bold uppercase tracking-[0.2em] text-[10px] rounded-[2rem] border-2 border-dashed border-slate-200 transition-all flex flex-col items-center gap-2"
                 >
                   Carregar mais itens
-                  <span className="text-[10px] opacity-40 font-black">({assets?.length} totais)</span>
+                  <span className="text-[10px] opacity-40 font-black">({totalFisicoItens} totais)</span>
                 </button>
              </div>
           )}
