@@ -92,8 +92,8 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
     ? [...(assets || []), ...(aggregatedSubAssets || [])]
     : (assets || []);
 
-  const totalFisicoItens = assets?.reduce((acc, a) => acc + (a.quantity || 1), 0) || 0;
-  const allVisibleTotalFisico = allVisibleAssets?.reduce((acc, a) => acc + (a.quantity || 1), 0) || 0;
+  const totalFisicoItens = assets?.reduce((acc, a) => acc + Number(a.quantity || 1), 0) || 0;
+  const allVisibleTotalFisico = allVisibleAssets?.reduce((acc, a) => acc + Number(a.quantity || 1), 0) || 0;
   
   const filteredAssets = allVisibleAssets.filter(asset => 
     ((asset.name || '').toLowerCase().includes(searchTermAssets.toLowerCase()) || 
@@ -251,7 +251,7 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
             // Optionally update with new details provided in the form
             condition: newItem.condition,
             observations: newItem.observations,
-            quantity: newItem.quantity
+            quantity: Number(newItem.quantity) || 1
           });
           setNewItem({ name: '', patrimonyNumber: '', condition: 'bom', observations: '', photos: [], quantity: 1 });
           setIsAdding(false);
@@ -325,7 +325,7 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
         photos: newItem.photos,
         hash: hash,
         needsSync: 1,
-        quantity: newItem.quantity
+        quantity: Number(newItem.quantity) || 1
       });
       toast("Registro atualizado!", "success", "Item Editado");
     } else {
@@ -342,7 +342,7 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
         createdAt: Date.now(),
         hash: hash,
         needsSync: 1,
-        quantity: newItem.quantity
+        quantity: Number(newItem.quantity) || 1
       });
       toast("Item adicionado à vistoria!", "success", "Novo Patrimônio");
     }
@@ -791,8 +791,8 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
 
       const tableData = assets?.map(a => [
         a.name,
-        String(a.quantity || 1),
-        a.patrimonyNumber || '-',
+        String(Number(a.quantity || 1)),
+        a.patrimonyNumber || (a as any).code || '-',
         a.condition,
         a.observations || '-'
       ]);
