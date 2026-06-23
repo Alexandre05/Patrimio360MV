@@ -62,12 +62,14 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
   }, [allLocations, location]);
   const hasSubLocations = subLocations.length > 0;
 
+  // Aggregate assets from sub-locations if this is a parent
   const aggregatedSubAssets = useLiveQuery(async () => {
     if (!hasSubLocations || !subLocations) return [];
     
     const subLocationIds = subLocations.map(sl => sl.id);
     const latestInspectionIds: string[] = [];
 
+    // Busca apenas a vistoria mais recente (independente do status) para cada sub-local
     for (const subLocId of subLocationIds) {
       const inspectionsForLoc = await db.inspections
         .where('locationId').equals(subLocId)
@@ -75,6 +77,7 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
         .toArray();
 
       if (inspectionsForLoc.length > 0) {
+        // Ordena da mais recente para a mais antiga e pega a primeira
         inspectionsForLoc.sort((a, b) => b.date - a.date);
         latestInspectionIds.push(inspectionsForLoc[0].id);
       }
@@ -105,13 +108,17 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
 
   const unsyncedAssetsCount = assets?.filter(a => a.needsSync === 1 || a.needsSync === true as any).length || 0;
 
+  // Restore Missing logic starts here
+  // Fetch signature data quando a vistoria mudar ou for homologada
   React.useEffect(() => {
     const fetchSignature = async () => {
       if (!id || !isOnline) return;
 
+      // Verificação proativa de permissão para evitar avisos no console
       const isPublic = inspection?.status === 'finalizada';
       const isAuthenticated = !!auth.currentUser;
 
+      // Se não for pública e não estiver autenticado, nem tenta
       if (!isPublic && !isAuthenticated) return;
 
       try {
@@ -125,6 +132,7 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
           });
         }
       } catch (err: any) {
+        // Trata erro de permissão com mensagem amigável em vez de warn agressivo
         if (err.message?.includes('permissions')) {
           console.info("Assinatura restrita: Aguardando homologação do dossiê.");
         } else {
@@ -162,6 +170,7 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
     const isTextarea = e.currentTarget.tagName === 'TEXTAREA';
     const isInput = e.currentTarget.tagName === 'INPUT';
     
+    // For text inputs and textareas, only navigate if cursor is at bounds OR if it's a select/button
     const canMoveRight = !isInput && !isTextarea || (e.currentTarget as any).selectionEnd === (e.currentTarget as any).value?.length;
     const canMoveLeft = !isInput && !isTextarea || (e.currentTarget as any).selectionStart === 0;
 
@@ -178,9 +187,11 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
       }
     }
   };
+  // Restore Missing logic ends here
 
   const [locationNames, setLocationNames] = useState<Record<string, string>>({});
 
+  // Sync location names for display labels
   React.useEffect(() => {
     const fetchLocNames = async () => {
       const inspIds = [...new Set(allVisibleAssets.map(a => a.inspectionId))];
@@ -225,6 +236,7 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
 
     const hash = generateAssetHash(newItem.name, newItem.patrimonyNumber, inspection?.locationId || '');
     
+    // Check if we are transferring an existing asset
     if (transferCandidate && !editingAssetId) {
       try {
         const confirmTransfer = window.confirm(`Deseja TRANSFERIR o patrimônio ${transferCandidate.patrimonyNumber} para esta localização? ele será removido do local original.`);
@@ -233,6 +245,7 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
             inspectionId: id,
             hash: hash,
             needsSync: 1,
+            // Optionally update with new details provided in the form
             condition: newItem.condition,
             observations: newItem.observations,
             quantity: newItem.quantity
@@ -251,8 +264,10 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
       }
     }
 
+    // Duplication Check (only for new items)
     if (!editingAssetId) {
       if (newItem.patrimonyNumber) {
+        // GLOBAL Patrimony check
         let globalExisting = await db.assets.where('patrimonyNumber').equals(newItem.patrimonyNumber).first();
         
         if (!globalExisting && isOnline) {
@@ -278,6 +293,7 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
           return;
         }
       } else {
+        // Local Check (same location, no patrimony)
         let existingHash = await db.assets.where('hash').equals(hash).first();
 
         if (!existingHash && isOnline) {
@@ -328,6 +344,7 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
       toast("Item adicionado à vistoria!", "success", "Novo Patrimônio");
     }
 
+    // Trigger sync
     pushLocalChanges();
 
     setNewItem({ name: '', patrimonyNumber: '', condition: 'bom', observations: '', photos: [], quantity: 1 });
@@ -383,7 +400,7 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
   const handleCloneAsset = (asset: Asset) => {
     setNewItem({
       name: asset.name,
-      patrimonyNumber: '',
+      patrimonyNumber: '', // Deixa em branco para a nova plaqueta
       condition: asset.condition,
       observations: asset.observations,
       photos: asset.photos || [],
@@ -460,10 +477,11 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
       reader.onloadend = async () => {
         try {
           const rawBase64 = reader.result as string;
+          // COMPRESS to avoid storage quota issues (now using 1000px since we hit Storage, not Firestore)
           const compressedBase64 = await compressImage(rawBase64, 1000, 0.7);
           setNewItem(prev => ({
             ...prev,
-            photos: [...prev.photos, compressedBase64].slice(-4)
+            photos: [...prev.photos, compressedBase64].slice(-4) // Limit to 4 photos
           }));
         } catch (err) {
           console.error("Erro ao processar imagem:", err);
@@ -484,6 +502,7 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
   const handleConclude = async (force: boolean = false) => {
     if (!id || isConcluding) return;
     
+    // First click: ask for confirmation in-UI (unless forced by signature modal)
     if (!isConfirmingConclude && !force) {
       setIsConfirmingConclude(true);
       return;
@@ -494,16 +513,19 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
     console.log("Tentando concluir vistoria ID:", id);
     
     try {
+      // 0. Safety check: must have assets
       const assetsCount = await db.assets.where('inspectionId').equals(id).count();
       if (assetsCount === 0) {
         throw new Error("Não é possível concluir uma vistoria sem itens registrados.");
       }
 
+      // 1. Verify existence check
       const current = await db.inspections.get(id);
       if (!current) {
         throw new Error(`Vistoria ${id} não encontrada no banco local.`);
       }
 
+      // 2. Perform update using the most robust method (put)
       await db.inspections.put({
         ...current,
         status: 'concluida',
@@ -517,6 +539,7 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
       await syncInspection(id);
       await pushLocalChanges();
       
+      // Safety delay for reaction
       await new Promise(resolve => setTimeout(resolve, 400));
       setIsConfirmingConclude(false);
       
@@ -536,6 +559,7 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
 
     if (!id || isFinalizing) return;
 
+    // First click: ask for confirmation in-UI
     if (!isConfirmingFinalize) {
       setIsConfirmingFinalize(true);
       setError(null);
@@ -550,6 +574,7 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
       const current = await db.inspections.get(id);
       if (!current) throw new Error("Vistoria não encontrada.");
 
+      // Forçar o uso do domínio de produção para o QR Code
       const qrCodeDataPayload = `https://patrimonio360-75ade.web.app/vistoria/${id}`;
 
       await db.inspections.put({
@@ -561,6 +586,7 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
         needsSync: 1
       });
       
+      // Mark all assets as public for public view without O(N) get() in rules
       const assets = await db.assets.where('inspectionId').equals(id).toArray();
       for (const asset of assets) {
         await db.assets.update(asset.id, { isPublic: true, needsSync: 1 });
@@ -587,27 +613,47 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
     }
     if (!id || isReopening) return;
 
-    if (!isConfirmingReopen) {
-      setIsConfirmingReopen(true);
-      setError(null);
-      return;
-    }
-
-    setIsReopening(true);
-    setError(null);
-    console.log("Reabrindo vistoria:", id);
-
     try {
       const current = await db.inspections.get(id);
       if (!current) throw new Error("Vistoria não encontrada.");
 
+      // --- REGRA DE OURO DA PREFEITURA: TRAVA HISTÓRICA POR ANO ---
+      const currentYear = new Date().getFullYear();
+      const inspectionYear = new Date(current.date).getFullYear();
+
+      if (inspectionYear < currentYear) {
+        setError(`⚠️ Bloqueio de Histórico: Não é permitido reabrir vistorias de anos anteriores (${inspectionYear}). Crie uma nova vistoria para este ano para poder comparar os dados.`);
+        setIsConfirmingReopen(false);
+        return;
+      }
+
+      // Primeiro clique: pede confirmação visual na tela
+      if (!isConfirmingReopen) {
+        setIsConfirmingReopen(true);
+        setError(null);
+        return;
+      }
+
+      setIsReopening(true);
+      setError(null);
+      console.log("Reabrindo e atualizando data da vistoria:", id);
+
+      // --- NOVO REGISTRO DE DATA E HORA ATUALIZADOS ---
+      const now = Date.now();
       await db.inspections.put({
         ...current,
-        status: 'em_andamento'
+        status: 'em_andamento',
+        date: now,         // Seta o relógio para o dia e hora de agora
+        updatedAt: now,    // Grava o momento da modificação
+        needsSync: 1       // Avisa o Firebase que este documento precisa subir atualizado
       });
       
       await new Promise(resolve => setTimeout(resolve, 400));
       setIsConfirmingReopen(false);
+      
+      if (typeof toast === 'function') {
+        toast("Vistoria reaberta com a data e hora atuais!", "success");
+      }
     } catch (err: any) {
       console.error("Erro ao reabrir vistoria:", err);
       setError(`Erro ao reabrir: ${err.message || 'Erro desconhecido'}`);
@@ -629,11 +675,13 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
     setError(null);
     try {
       const now = Date.now();
+      // 1. Soft delete items
       const assetsToSoftDelete = await db.assets.where('inspectionId').equals(id).toArray();
       for (const asset of assetsToSoftDelete) {
         await db.assets.update(asset.id, { deleted: true, needsSync: 1, updatedAt: now });
       }
 
+      // 2. Soft delete inspection
       await db.inspections.update(id, { deleted: true, needsSync: 1, updatedAt: now });
       
       console.log("Vistoria marcada para exclusão:", id);
@@ -664,6 +712,7 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
       
       if (idsToTransfer.length === 0) throw new Error("Nenhum item para transferir");
 
+      // 1. Procurar ou criar vistoria ativa no destino
       let targetInspection = await db.inspections
         .where({ locationId: targetLocationId })
         .filter(i => i.status === 'em_andamento')
@@ -684,12 +733,14 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
 
       if (!targetInspection) throw new Error("Falha ao preparar destino");
 
+      // 2. Transferir itens
       for (const assetId of idsToTransfer) {
         const asset = await db.assets.get(assetId);
         if (!asset) continue;
 
         const newHash = generateAssetHash(asset.name, asset.patrimonyNumber, targetLocationId);
         
+        // Verificar se já existe no destino
         const existingInTarget = await db.assets.where('hash').equals(newHash).first();
         if (existingInTarget) {
           console.warn(`Item ${asset.name} já existe no destino, pulando...`);
@@ -716,16 +767,17 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
     }
   };
 
-  // --- GERADOR DE PDF ELEGANTE E CORRIGIDO ---
-  const generatePDF = async () => {
+ const generatePDF = async () => {
     try {
       setError(null);
       const doc = new jsPDF();
       
+      // --- TÍTULO PRINCIPAL ---
       doc.setFont('helvetica', 'bold');
       doc.setFontSize(18);
       doc.text('Relatório de Vistoria Patrimonial', 14, 22);
       
+      // --- DADOS DE IDENTIFICAÇÃO ---
       doc.setFontSize(10);
       doc.setFont('helvetica', 'normal');
       doc.text(`Local Inspecionado: ${location?.name}`, 14, 32);
@@ -752,11 +804,10 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
         doc.text(`Homologado por: ${inspection.finalizedBy === user?.userId ? user?.name : 'Autoridade Municipal'}`, 14, 50);
       }
 
-      // SOMA REAL DAS QUANTIDADES PARA O PDF
-      const totalUnidadesAbsolutas = assets?.reduce((acc, curr) => acc + (Number(curr.quantity) || 1), 0) || 0;
-      const totalTiposDiferentes = assets?.length || 0;
+      // --- CÁLCULO DOS TOTAIS REALIZANDO O SOMATÓRIO DAS QUANTIDADES ---
+      const totalUnidadesAbsolutas = assets?.reduce((acc, curr) => acc + (curr.quantity || 1), 0) || 0;
 
-      // Painel Elegante
+      // --- PAINEL INDICADOR ELEGANTE ---
       doc.setDrawColor(226, 232, 240);
       doc.setFillColor(248, 250, 252);
       doc.roundedRect(14, 56, 182, 14, 3, 3, 'FD');
@@ -768,10 +819,6 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
       
       doc.setFont('helvetica', 'normal');
       doc.text(`Total de Bens Catalogados: ${totalUnidadesAbsolutas} unidade(s) físicas`, 68, 65);
-      
-      doc.setFontSize(9);
-      doc.setTextColor(100);
-      doc.text(`(${totalTiposDiferentes} registros distintos)`, 148, 65);
       doc.setTextColor(0);
 
       doc.setFontSize(9);
@@ -779,6 +826,7 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
       doc.text('Este documento contém um QR Code DINÂMICO. A leitura em tempo real sempre exibirá a versão mais atualizada.', 14, 76);
       doc.setTextColor(0);
 
+      // Mapeia os dados incluindo a coluna de quantidade de forma explícita
       const tableData = assets?.map(a => [
         a.name,
         a.patrimonyNumber || '-',
@@ -802,6 +850,7 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
         finalY = 25;
       }
 
+      // --- LADO ESQUERDO: QR CODE PERMANENTE ---
       doc.setFontSize(10);
       doc.setFont('helvetica', 'bold');
       doc.text('SELO PERMANENTE DE TRANSPARÊNCIA:', 14, finalY);
@@ -825,6 +874,7 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
         });
       }
 
+      // --- LADO DIREITO: ASSINATURA DO RESPONSÁVEL ---
       if (sectorSignature) {
         doc.setLineWidth(0.5);
         doc.setDrawColor(0, 0, 0);
@@ -854,7 +904,6 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
       setError(`Erro ao gerar PDF: ${err.message || 'Falha desconhecida'}`);
     }
   };
-
   const handlePrintQRCode = (type: 'vistoria' | 'local' = 'local') => {
     try {
       const qrData = type === 'local' 
@@ -913,12 +962,18 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
 
   const isFinalized = inspection.status === 'finalizada';
   const isConcluded = inspection.status === 'concluida';
-  const isLocked = isFinalized || (isConcluded && !isCommittee) || hasSubLocations; 
+  const isLocked = isFinalized || (isConcluded && !isCommittee) || hasSubLocations; // Prevent adding items to parent locations
 
   const handleStartSubInspection = async (subLocId: string) => {
+    // Navigate to a sub-location audit
+    // Need to find existing or create new
     const existing = await db.inspections.where({ locationId: subLocId }).filter(i => !i.deleted && i.status !== 'finalizada').first();
     if (existing) {
-       onBack(); 
+       onBack(); // Go back to trigger selecting another one? 
+       // Better: the app usually manages selecting via ID in Dashboard
+       // For now, let's just use the dashboard's logic by popping back and letting user click?
+       // Actually, we can't easily change the dashboard state from here without props.
+       // Let's just assume navigation happens through Dashboard for now, or just show the links.
     }
   };
 
@@ -1028,4 +1083,1010 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
                <div className="w-16 h-16 bg-white/10 rounded-[2rem] flex items-center justify-center backdrop-blur-md border border-white/10 shadow-xl">
                   <Building2 className="w-8 h-8 text-white" />
                </div>
-               <div className="flex flex
+               <div className="flex flex-col">
+                  <span className="text-[10px] font-black text-indigo-400 uppercase tracking-[0.2em] leading-none mb-2">{hasSubLocations ? 'Visão Consolidada' : 'Local em Auditoria'}</span>
+                  <h1 className="text-4xl lg:text-5xl font-display font-extrabold tracking-tight leading-none">{location.name}</h1>
+               </div>
+            </div>
+            <p className="text-slate-400 text-lg font-medium max-w-lg leading-relaxed">{location.description}</p>
+          </div>
+          
+          <div className="grid grid-cols-3 gap-6 lg:gap-12">
+             <div className="flex flex-col gap-1">
+                <span className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Início</span>
+                <span className="font-display text-2xl font-black tracking-tight text-white">{formatDate(inspection.date).split(',')[0]}</span>
+             </div>
+             <div className="flex flex-col gap-1">
+                <span className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Itens {hasSubLocations ? 'Totais' : ''}</span>
+                <span className="font-display text-2xl font-black tracking-tight text-white">{allVisibleAssets.length}</span>
+             </div>
+             <div className="flex flex-col gap-1">
+                <span className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Status</span>
+                <span className={cn(
+                  "font-display text-2xl font-black tracking-tight uppercase",
+                  isFinalized ? "text-emerald-400" : isConcluded ? "text-indigo-400" : "text-blue-400"
+                )}>
+                  {hasSubLocations ? 'GERAL' : inspection.status.split('_')[0]}
+                </span>
+             </div>
+          </div>
+        </div>
+        <Building2 className="absolute -bottom-20 -right-20 w-96 h-96 text-white/5 transform rotate-12 pointer-events-none" />
+      </div>
+
+      {/* Concluded but not Finalized state */}
+      {isConcluded && !isFinalized && (
+        <div className="bg-white border border-indigo-100 rounded-[2rem] p-8 flex flex-col md:flex-row items-center gap-8 animate-in slide-in-from-top-4 duration-500 shadow-[0_20px_50px_-15px_rgba(99,102,241,0.1)]">
+           <div className="w-20 h-20 bg-indigo-600 rounded-3xl flex items-center justify-center text-white shadow-xl shadow-indigo-600/20 shrink-0">
+              <History className="w-10 h-10" />
+           </div>
+           <div className="flex flex-col gap-2 flex-1 text-center md:text-left">
+              <h3 className="text-2xl font-display font-extrabold text-slate-900 tracking-tight">Dossiê em Aguardo</h3>
+              <p className="text-slate-500 font-medium leading-relaxed">
+                Esta auditoria foi concluída pela comissão de vistoria. Agora, o Prefeito ou Responsável Legal deve homologar o documento para gerar o selo oficial de transparência.
+              </p>
+              {sectorSignature && (
+                <div className="mt-4 p-4 bg-slate-50 rounded-2xl border border-slate-100 flex items-center gap-4">
+                  <div className="w-10 h-10 bg-white rounded-xl shadow-sm flex items-center justify-center text-indigo-600 border border-slate-100">
+                    <Signature className="w-5 h-5" />
+                  </div>
+                  <div className="flex flex-col">
+                    <span className="text-[10px] font-black uppercase text-slate-400 tracking-widest leading-none mb-1">Responsável Setorial</span>
+                    <span className="text-sm font-bold text-slate-700">{sectorSignature.responsibleName}</span>
+                  </div>
+                  <div className="ml-auto">
+                    <img src={sectorSignature.signatureBase64} alt="Assinatura" className="h-10 opacity-70 grayscale hover:grayscale-0 transition-all" />
+                  </div>
+                </div>
+              )}
+           </div>
+           <div className="flex items-center gap-2">
+              <div className="px-4 py-2 bg-indigo-50 text-indigo-600 rounded-full text-[10px] font-black uppercase tracking-[0.2em] border border-indigo-100">
+                Pendente Homologação
+              </div>
+           </div>
+        </div>
+      )}
+
+      {/* Sub-locations section if is parent */}
+      {hasSubLocations && (
+        <div className="flex flex-col gap-6 animate-in slide-in-from-bottom-4 duration-700">
+           <div className="flex items-center justify-between ml-2">
+              <div className="flex flex-col">
+                <h3 className="text-xs font-black text-slate-400 uppercase tracking-[0.2em]">Ambientes Internos</h3>
+                <span className="text-[10px] font-bold text-indigo-600 uppercase tracking-widest mt-1">Gavetas/Salas desta repartição</span>
+              </div>
+           </div>
+           <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-4">
+              {subLocations?.map(sl => (
+                <button 
+                  key={sl.id}
+                  onClick={onBack} // Forcing back to dashboard for now as drill-down is reliable there
+                  className="bg-white border border-slate-100 p-6 rounded-3xl hover:border-indigo-300 hover:shadow-xl hover:shadow-indigo-600/5 transition-all text-left flex flex-col gap-3 group"
+                >
+                   <div className="w-10 h-10 bg-slate-50 rounded-xl flex items-center justify-center text-slate-400 group-hover:bg-indigo-600 group-hover:text-white transition-all">
+                      <Home className="w-5 h-5" />
+                   </div>
+                   <div className="flex flex-col">
+                      <span className="text-xs font-black text-slate-900 group-hover:text-indigo-600 transition-colors uppercase truncate">{sl.name}</span>
+                      <span className="text-[9px] font-bold text-slate-400 uppercase tracking-widest mt-1">Ver Itens</span>
+                   </div>
+                </button>
+              ))}
+           </div>
+           
+           <div className="bg-amber-50 border border-amber-100 p-6 rounded-[2rem] flex flex-col md:flex-row items-center gap-6 shadow-xl shadow-amber-500/5">
+              <div className="w-14 h-14 bg-white rounded-2xl flex items-center justify-center shadow-lg text-amber-500 shrink-0">
+                 <AlertCircle className="w-7 h-7" />
+              </div>
+              <div className="flex flex-col gap-1 text-center md:text-left">
+                <span className="text-sm font-black text-amber-900 uppercase tracking-tight">Bloqueio de Inclusão Direta</span>
+                <p className="text-[11px] font-medium text-amber-600 leading-relaxed uppercase tracking-widest">
+                  Este local é um <span className="font-bold">Agrupador</span>. Para manter a organização, os novos itens devem ser cadastrados dentro das salas/gavetas específicas listadas acima.
+                </p>
+              </div>
+           </div>
+        </div>
+      )}
+      {/* QR Code section if finalized */}
+      {isFinalized && (
+        <div className="flex flex-col gap-8 animate-in zoom-in-95 duration-700">
+          <Card className="flex flex-col lg:flex-row items-center gap-12 p-8 lg:p-12 border-emerald-100 bg-white group hover:shadow-[0_30px_70px_-20px_rgba(16,185,129,0.15)] transition-all duration-700 rounded-[3rem]">
+            <div id="qr-code-container" className="p-8 bg-slate-50 rounded-[3rem] border border-slate-100 shadow-inner group-hover:bg-white transition-all duration-700 flex flex-col items-center gap-4 shrink-0">
+              <QRCodeSVG value={inspection.qrCodeData || ''} size={180} />
+              <div className="flex flex-col items-center">
+                <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest leading-none">Certificado Digital</span>
+                <span className="text-[10px] font-black text-emerald-600 uppercase tracking-widest mt-2">{formatDate(inspection.date).split(',')[0]}</span>
+              </div>
+            </div>
+            <div className="flex flex-col gap-8">
+              <div className="flex flex-col gap-3">
+                 <div className="flex items-center gap-3">
+                    <div className="w-12 h-12 bg-emerald-600 rounded-2xl flex items-center justify-center text-white shadow-xl shadow-emerald-500/20">
+                       <ShieldCheck className="w-7 h-7" />
+                    </div>
+                    <h3 className="font-display font-extrabold text-3xl text-slate-900 tracking-tight leading-none uppercase">Selo de Transparência</h3>
+                 </div>
+                 <p className="text-lg text-slate-500 leading-relaxed font-medium max-w-xl">
+                    Este ambiente foi <span className="text-emerald-600 font-bold">Blindado Digitalmente</span>. Ao escanear este QR Code, a sociedade civil e os auditores terão acesso imediato aos {assets?.reduce((acc, curr) => acc + (curr.quantity || 1), 0)} itens tombados nesta sala.
+                 </p>
+                 {sectorSignature && (
+                    <div className="mt-2 p-4 bg-emerald-50/50 rounded-2xl border border-emerald-100 flex items-center gap-4">
+                      <div className="w-10 h-10 bg-white rounded-xl shadow-sm flex items-center justify-center text-emerald-600">
+                        <Signature className="w-5 h-5" />
+                      </div>
+                      <div className="flex flex-col">
+                        <span className="text-[10px] font-black uppercase text-emerald-700/50 tracking-widest leading-none mb-1">Atestado por</span>
+                        <span className="text-sm font-bold text-slate-700">{sectorSignature.responsibleName}</span>
+                      </div>
+                      <div className="ml-auto bg-white/50 p-1 rounded-lg">
+                        <img src={sectorSignature.signatureBase64} alt="Assinatura" className="h-8" />
+                      </div>
+                    </div>
+                  )}
+              </div>
+              
+              <div className="flex flex-wrap gap-4">
+                 <div id="qr-code-container" className="hidden">
+                   <QRCodeSVG value={inspection.qrCodeData || ''} size={512} level="H" />
+                 </div>
+                 <div id="qr-code-dynamic" className="hidden">
+                   <QRCodeSVG value={`https://patrimonio360-75ade.web.app/local/${location.id}`} size={512} level="H" />
+                 </div>
+
+                 <Button variant="accent" size="sm" onClick={generatePDF} icon={Save} className="px-8 md:px-10 h-16 text-[10px] uppercase tracking-widest rounded-2xl">
+                   Baixar Dossiê (PDF)
+                 </Button>
+                 
+                 <div className="flex flex-1 gap-2">
+                    <Button 
+                      variant="outline" 
+                      onClick={() => handlePrintQRCode('local')}
+                      icon={ImageIcon}
+                      className="flex-1 h-16 border-indigo-100 text-indigo-600 font-black text-[10px] uppercase tracking-widest hover:bg-indigo-50 rounded-2xl bg-white"
+                    >
+                      QR Permanente
+                    </Button>
+                    <Button 
+                      variant="outline" 
+                      onClick={() => handlePrintQRCode('vistoria')}
+                      icon={Database}
+                      className="flex-1 h-16 border-slate-200 text-slate-500 font-black text-[10px] uppercase tracking-widest hover:bg-slate-50 rounded-2xl bg-white"
+                    >
+                      Etiqueta Data
+                    </Button>
+                 </div>
+              </div>
+            </div>
+          </Card>
+        </div>
+      )}
+
+      {/* Assets List */}
+      <div className="flex flex-col gap-6">
+        <div className="flex flex-col md:flex-row md:items-end justify-between gap-4 px-2">
+          <div className="flex flex-col">
+            <h2 className="text-xl font-black text-slate-900 tracking-tight uppercase">Inventário Local</h2>
+            <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest leading-none mt-1">Lista de bens conferidos</span>
+          </div>
+          
+          <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3">
+            <div className="relative group">
+              <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400 group-focus-within:text-slate-900 transition-colors" />
+              <input 
+                type="text" 
+                placeholder="Buscar item ou patrimônio..." 
+                value={searchTermAssets}
+                onChange={e => setSearchTermAssets(e.target.value)}
+                className="pl-11 pr-6 py-2.5 bg-white border border-slate-100 rounded-xl text-sm font-bold text-slate-900 shadow-sm focus:ring-2 focus:ring-slate-900 focus:outline-none transition-all w-full sm:w-64"
+              />
+            </div>
+            {!isLocked && (
+                <div className="flex items-center gap-2">
+                {isCommittee && (
+                  <>
+                    <Button 
+                      variant="outline" 
+                      size="sm" 
+                      icon={Zap}
+                      onClick={() => setTransferAssetId('all')}
+                      className="rounded-xl px-4 h-11 border-amber-100 text-amber-600 bg-amber-50 hover:bg-amber-100 transition-all font-black text-[10px] uppercase tracking-widest"
+                    >
+                      Mover Tudo
+                    </Button>
+                    <Button 
+                      variant="outline" 
+                      size="sm" 
+                      icon={isBatchMode ? X : Copy}
+                      onClick={() => {
+                        setIsBatchMode(!isBatchMode);
+                        setSelectedAssetIds([]);
+                      }}
+                      className={cn(
+                        "rounded-xl px-4 h-11 transition-all",
+                        isBatchMode ? "border-rose-200 text-rose-500 bg-rose-50" : "border-slate-100 text-slate-400"
+                      )}
+                    >
+                      {isBatchMode ? 'Mover Vários' : 'Selecionar'}
+                    </Button>
+                  </>
+                )}
+                <Button variant="accent" size="sm" icon={Plus} onClick={() => setIsAdding(true)} className="rounded-xl px-8 h-11 shadow-xl shadow-blue-600/10">
+                  ADICIONAR ITEM
+                </Button>
+              </div>
+            )}
+          </div>
+        </div>
+
+        {isBatchMode && selectedAssetIds.length > 0 && (
+          <div className="bg-amber-600 p-6 rounded-[2rem] flex items-center justify-between shadow-xl shadow-amber-600/20 animate-in slide-in-from-top-4">
+            <div className="flex items-center gap-4 text-white">
+               <div className="w-12 h-12 bg-white/20 rounded-2xl flex items-center justify-center">
+                  <Zap className="w-6 h-6" />
+               </div>
+               <div className="flex flex-col">
+                  <span className="text-lg font-black tracking-tight leading-none">Transferência em Massa</span>
+                  <span className="text-[10px] font-bold opacity-80 uppercase tracking-widest mt-1">{selectedAssetIds.length} Itens Selecionados</span>
+               </div>
+            </div>
+            <Button 
+              variant="accent" 
+              className="bg-white text-amber-600 hover:bg-slate-50 font-black uppercase text-[10px] px-8 h-12 rounded-xl"
+              onClick={() => setTransferAssetId('batch')}
+            >
+              Escolher Destino
+            </Button>
+          </div>
+        )}
+
+        {isAdding && (
+          <div className="fixed inset-0 z-[200] flex flex-col bg-slate-900/40 backdrop-blur-sm md:p-6 md:justify-center md:items-center animate-in fade-in duration-300">
+            <Card className="w-full h-full md:h-auto md:max-h-[90vh] md:max-w-4xl flex flex-col overflow-hidden rounded-none md:rounded-[2.5rem] border-none shadow-[0_40px_100px_-20px_rgba(0,0,0,0.3)] relative z-10 p-0 bg-white">
+               
+               {/* 1. Header Fixo */}
+               <div className="flex items-center justify-between p-8 bg-slate-900 text-white shadow-xl z-20 shrink-0">
+                  <div className="flex items-center gap-5">
+                    <div className="w-12 h-12 bg-white/10 rounded-2xl flex items-center justify-center border border-white/20">
+                      <Plus className="w-6 h-6 text-white" />
+                    </div>
+                    <div className="flex flex-col">
+                       <h3 className="font-display font-bold text-2xl uppercase tracking-tight text-white leading-none">
+                        {editingAssetId ? 'Editar Detalhes' : 'Novo Registro'}
+                       </h3>
+                       <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mt-2">
+                        Inventário Digital • Manoel Viana
+                       </span>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-3">
+                     <button type="button" onClick={() => { setIsAdding(false); setEditingAssetId(null); setDuplicateWarning(null); }} className="p-3 rounded-2xl bg-white/5 text-slate-400 hover:text-white hover:bg-white/10 transition-all border border-white/10">
+                       <X className="w-6 h-6" />
+                     </button>
+                  </div>
+               </div>
+               
+               {/* 2. Área do Formulário */}
+               <div className="flex-1 overflow-y-auto custom-scrollbar p-8 lg:p-12 flex flex-col gap-10 bg-white pb-32">
+                 
+                 <div className="flex flex-col gap-4">
+                    <div className="flex flex-col">
+                      <label className="text-[10px] font-bold text-slate-900 uppercase tracking-widest ml-1">Descrição do Patrimônio</label>
+                      <span className="text-slate-400 text-[9px] ml-1 mb-2 font-medium">O que é este item? Ex: Cadeira giratória preta</span>
+                    </div>
+                   <Input 
+                     ref={nameRef}
+                     placeholder="Ex: Mesa de Escritório, Cadeira de Rodas..." 
+                     value={newItem.name}
+                     onChange={e => {
+                       setNewItem({...newItem, name: e.target.value});
+                       if (duplicateWarning) { setDuplicateWarning(null); setTransferCandidate(null); }
+                     }}
+                     onKeyDown={e => handleKeyDown(e, 0)}
+                     error={duplicateWarning || undefined}
+                     autoFocus
+                     className="text-xl h-16 px-6"
+                   />
+                   {duplicateWarning && (
+                     <div className="flex flex-col gap-4 p-6 bg-rose-50 border border-rose-100 rounded-[1.5rem] animate-in fade-in slide-in-from-top-2">
+                       <div className="flex items-center gap-3 text-rose-600 font-bold text-sm">
+                          <AlertCircle className="w-6 h-6 shrink-0"/> 
+                          <span className="leading-tight">{duplicateWarning}</span>
+                       </div>
+                       {transferCandidate && (
+                         <Button 
+                           variant="accent" 
+                           onClick={handleAddItem}
+                           className="bg-rose-600 hover:bg-rose-700 h-14 rounded-xl text-[10px] font-black uppercase tracking-widest"
+                         >
+                            Confirmar Transferência para este Local
+                         </Button>
+                       )}
+                     </div>
+                   )}
+                 </div>
+                 
+                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-10">
+                    <div className="flex flex-col gap-4">
+                      <div className="flex flex-col">
+                       <label className="text-[10px] font-bold text-slate-900 uppercase tracking-widest ml-1">Etiq. Patrimônio</label>
+                       <span className="text-slate-400 text-[9px] ml-1 mb-2 font-medium">Número da plaqueta de tombo (se houver)</span>
+                     </div>
+                      <Input 
+                        ref={patrimonyRef}
+                        placeholder="Nº de Registro" 
+                        value={newItem.patrimonyNumber}
+                        onChange={e => setNewItem({...newItem, patrimonyNumber: e.target.value})}
+                        onKeyDown={e => handleKeyDown(e, 1)}
+                        className="text-lg h-16 px-6 font-mono tracking-widest"
+                      />
+                    </div>
+
+                    <div className="flex flex-col gap-4">
+                      <div className="flex flex-col">
+                       <label className="text-[10px] font-bold text-slate-900 uppercase tracking-widest ml-1">Estado Físico</label>
+                       <span className="text-slate-400 text-[9px] ml-1 mb-2 font-medium">Qual a condição de uso atual do bem?</span>
+                     </div>
+                      <Select 
+                        ref={conditionRef}
+                        value={newItem.condition}
+                        onChange={e => setNewItem({...newItem, condition: e.target.value as any})}
+                        onKeyDown={e => handleKeyDown(e, 2)}
+                        className="h-16 px-6 text-sm"
+                        options={[
+                          { value: 'bom', label: 'Bom Estado' },
+                          { value: 'regular', label: 'Regular' },
+                          { value: 'ruim', label: 'Ruim (Requer Manutenção)' },
+                          { value: 'inservivel', label: 'Inservível (Descarte)' }
+                        ]}
+                      />
+                    </div>
+
+                    <div className="flex flex-col gap-4">
+                      <div className="flex flex-col">
+                       <label className="text-[10px] font-bold text-slate-900 uppercase tracking-widest ml-1">Quantidade</label>
+                       <span className="text-slate-400 text-[9px] ml-1 mb-2 font-medium">Quantos itens idênticos no local?</span>
+                     </div>
+                      <Input 
+                        ref={quantityRef}
+                        type="number"
+                        value={newItem.quantity?.toString()}
+                        onChange={e => setNewItem({...newItem, quantity: Math.max(1, parseInt(e.target.value) || 1)})}
+                        onKeyDown={e => handleKeyDown(e, 3)}
+                        min={1}
+                        className="text-center font-bold text-lg h-16 shadow-sm"
+                      />
+                    </div>
+                 </div>
+
+                 <div className="flex flex-col gap-4">
+                    <div className="flex flex-col">
+                        <div className="flex items-center justify-between pb-1 pr-1 w-full">
+                          <label className="text-[10px] font-bold text-slate-900 uppercase tracking-widest ml-1">Observações Técnicas</label>
+                          <button
+                            type="button"
+                            onClick={handleVoiceDictation}
+                            className={cn(
+                              "flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[9px] font-black uppercase tracking-widest border transition-all cursor-pointer",
+                              isListening 
+                                ? "bg-rose-500 border-rose-500 text-white animate-pulse" 
+                                : "bg-slate-50 hover:bg-slate-100 border-slate-200 text-slate-600"
+                            )}
+                            title="Digitar por voz (API Web Speech)"
+                          >
+                            <Mic className={cn("w-3.5 h-3.5", isListening && "text-white animate-bounce")} />
+                            {isListening ? "Ouvindo..." : "Ditado por Voz"}
+                          </button>
+                        </div>
+                        <span className="text-slate-400 text-[9px] ml-1 mb-2 font-medium">Anote avarias, faltas de peças ou necessidade de descarte.</span>
+                     </div>
+                    <Textarea 
+                      ref={obsRef}
+                      placeholder="Identificou avarias ou detalhes específicos? Descreva aqui..." 
+                      value={newItem.observations}
+                      onChange={e => setNewItem({...newItem, observations: e.target.value})}
+                      onKeyDown={e => handleKeyDown(e, 4)}
+                      className="text-base p-6 min-h-[160px] resize-none"
+                    />
+                 </div>
+
+                 <div className="flex flex-col gap-6">
+                    <input type="file" hidden ref={fileInputRef} accept="image/*" multiple onChange={handlePhotoCapture} />
+                    <div className="flex items-center justify-between">
+                       <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Evidências Fotográficas ({newItem.photos.length}/4)</label>
+                       <button 
+                        onClick={() => fileInputRef.current?.click()}
+                        className="flex items-center gap-2 text-[10px] font-black text-indigo-600 uppercase tracking-widest hover:text-indigo-700 transition-colors"
+                       >
+                          <Camera className="w-5 h-5" /> Adicionar Foto
+                       </button>
+                    </div>
+                    {newItem.photos.length > 0 ? (
+                      <div className="flex flex-wrap gap-6">
+                        {newItem.photos.map((photo, index) => (
+                          <div key={index} className="relative w-32 h-32 rounded-[1.5rem] overflow-hidden border-2 border-slate-100 shadow-sm group cursor-pointer" onClick={() => setPreviewPhoto(photo)}>
+                             <img src={photo} alt="" className="w-full h-full object-cover hover:opacity-80 transition-all" />
+                             <button 
+                                onClick={(e) => { e.stopPropagation(); removePhoto(index); }}
+                                className="absolute top-2 right-2 bg-rose-600 text-white p-2 rounded-xl shadow-lg opacity-0 group-hover:opacity-100 transition-all transform translate-y-2 group-hover:translate-y-0"
+                              >
+                                <Trash2 className="w-4 h-4" />
+                             </button>
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <button 
+                        onClick={() => fileInputRef.current?.click()}
+                        className="w-full py-12 border-2 border-dashed border-slate-100 rounded-[2rem] flex flex-col items-center gap-3 text-slate-400 hover:border-indigo-200 hover:text-indigo-400 transition-all group"
+                      >
+                         <Camera className="w-10 h-10 transition-transform group-hover:scale-110" />
+                         <span className="text-[10px] font-black uppercase tracking-widest">Toque para capturar imagem</span>
+                      </button>
+                    )}
+                 </div>
+               </div>
+
+                {/* Footer Fixo */}
+                <div className="absolute bottom-0 inset-x-0 p-8 pt-4 bg-white border-t border-slate-100 flex items-center gap-4 z-30">
+                   <Button 
+                     variant="secondary" 
+                     onClick={() => { setIsAdding(false); setEditingAssetId(null); setDuplicateWarning(null); }}
+                     className="flex-1 h-16 rounded-2xl text-[10px] uppercase font-black tracking-widest"
+                   >
+                     Cancelar
+                   </Button>
+                   
+                   <Button 
+                     ref={addButtonRef}
+                     variant={editingAssetId ? "accent" : "outline"}
+                     onClick={handleAddItem}
+                     onKeyDown={e => handleKeyDown(e, 5)}
+                     disabled={!newItem.name}
+                     className="flex-1 h-16 rounded-2xl text-[10px] uppercase font-black tracking-widest border-slate-200"
+                   >
+                     {editingAssetId ? 'Salvar Alterações' : 'Salvar e Fechar'}
+                   </Button>
+
+                   {!editingAssetId && (
+                     <Button 
+                       variant="accent" 
+                       onClick={handleSaveAndContinue}
+                       disabled={!newItem.name}
+                       className="flex-1 h-16 rounded-2xl text-[10px] uppercase font-black tracking-widest shadow-xl shadow-indigo-500/20"
+                     >
+                       <Plus className="w-4 h-4 mr-2" /> Salvar e Novo
+                     </Button>
+                   )}
+                </div>
+            </Card>
+          </div>
+        )}
+
+         {/* Barra de Filtro Semafórico Visual - Zero Digitação */}
+         <div className="flex flex-wrap items-center justify-between gap-5 bg-white border border-slate-100 p-5 rounded-[2rem] px-8 select-none shadow-sm mb-4">
+           <div className="flex items-center gap-3">
+             <div className="w-10 h-10 rounded-[1.25rem] bg-indigo-50 border border-indigo-100/40 flex items-center justify-center text-indigo-500">
+               <Filter className="w-5 h-5" />
+             </div>
+             <div className="flex flex-col">
+               <span className="text-[10px] font-black text-slate-800 uppercase tracking-widest leading-none">Filtro Rápido Estado</span>
+               <span className="text-slate-400 text-[8px] font-bold uppercase tracking-widest mt-1">Conformidade do Acervo</span>
+             </div>
+           </div>
+           <div className="flex flex-wrap gap-2">
+             <button
+               type="button"
+               onClick={() => setConditionFilter('all')}
+               className={cn(
+                 "px-5 py-3 rounded-2xl text-[10px] font-black uppercase tracking-widest border transition-all cursor-pointer",
+                 conditionFilter === 'all'
+                   ? "bg-slate-900 border-slate-900 text-white shadow-xl shadow-slate-900/15"
+                   : "bg-slate-50 border-slate-200 hover:bg-slate-100 text-slate-600"
+               )}
+             >
+               Todos ({allVisibleAssets.length})
+             </button>
+             <button
+               type="button"
+               onClick={() => setConditionFilter('bom')}
+               className={cn(
+                 "px-5 py-3 rounded-2xl text-[10px] font-black uppercase tracking-widest border flex items-center gap-2.5 transition-all cursor-pointer",
+                 conditionFilter === 'bom'
+                   ? "bg-emerald-600 border-emerald-600 text-white shadow-xl"
+                   : "bg-emerald-50/50 border-emerald-100 hover:bg-emerald-50 text-emerald-600"
+               )}
+             >
+               <span className={cn("w-2 h-2 rounded-full", conditionFilter === 'bom' ? "bg-white" : "bg-emerald-500")} />
+               Bons ({allVisibleAssets.filter(a => a.condition === 'bom' || a.condition === 'novo').length})
+             </button>
+             <button
+               type="button"
+               onClick={() => setConditionFilter('regular')}
+               className={cn(
+                 "px-5 py-3 rounded-2xl text-[10px] font-black uppercase tracking-widest border flex items-center gap-2.5 transition-all cursor-pointer",
+                 conditionFilter === 'regular'
+                   ? "bg-amber-500 border-amber-500 text-white shadow-xl"
+                   : "bg-amber-50/50 border-amber-100 hover:bg-amber-50 text-amber-600"
+               )}
+             >
+               <span className={cn("w-2 h-2 rounded-full", conditionFilter === 'regular' ? "bg-white" : "bg-amber-500")} />
+               Regulares/Ruins ({allVisibleAssets.filter(a => a.condition === 'regular' || a.condition === 'ruim').length})
+             </button>
+             <button
+               type="button"
+               onClick={() => setConditionFilter('inservivel')}
+               className={cn(
+                 "px-5 py-3 rounded-2xl text-[10px] font-black uppercase tracking-widest border flex items-center gap-2.5 transition-all cursor-pointer",
+                 conditionFilter === 'inservivel'
+                   ? "bg-rose-500 border-rose-500 text-white shadow-xl"
+                   : "bg-rose-50/50 border-rose-100 hover:bg-rose-50 text-rose-600"
+               )}
+             >
+               <span className={cn("w-2 h-2 rounded-full", conditionFilter === 'inservivel' ? "bg-white" : "bg-rose-500")} />
+               Inservíveis ({allVisibleAssets.filter(a => a.condition === 'inservivel').length})
+             </button>
+           </div>
+         </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+          {displayedAssets?.map(asset => (
+            <Card key={asset.id} className={cn(
+              "flex flex-col gap-6 group hover:shadow-2xl hover:-translate-y-1 transition-all duration-500 rounded-[2rem] p-8 border-slate-100 bg-white relative",
+              isBatchMode && selectedAssetIds.includes(asset.id) && "ring-4 ring-amber-500 border-amber-200"
+            )}>
+              {isBatchMode && (
+                <div className="absolute top-6 left-6 z-10">
+                  <input 
+                    type="checkbox" 
+                    className="w-8 h-8 rounded-lg text-amber-600 focus:ring-amber-500 border-slate-300 transition-all cursor-pointer shadow-sm"
+                    checked={selectedAssetIds.includes(asset.id)}
+                    onChange={(e) => {
+                      if (e.target.checked) {
+                        setSelectedAssetIds(prev => [...prev, asset.id]);
+                      } else {
+                        setSelectedAssetIds(prev => prev.filter(id => id !== asset.id));
+                      }
+                    }}
+                  />
+                </div>
+              )}
+              <div className={cn("flex items-start justify-between", isBatchMode && "pl-10")}>
+                <div className="flex flex-col gap-1 pr-12">
+                  <h4 className="font-display font-extrabold text-xl text-slate-900 group-hover:text-indigo-600 transition-colors tracking-tight leading-tight">{asset.name}</h4>
+                  <div className="flex flex-wrap items-center gap-3 mt-2">
+                     <div className="flex items-center gap-2 px-2 py-1 bg-slate-50 border border-slate-100 rounded-lg">
+                        <span className="text-[9px] text-slate-400 font-bold uppercase tracking-widest">Patr.</span>
+                        <span className="text-xs text-slate-700 font-mono font-black">{asset.patrimonyNumber || 'N/A'}</span>
+                     </div>
+                     <div className="flex items-center gap-2 px-2 py-1 bg-slate-50 border border-slate-100 rounded-lg">
+                        <span className="text-[9px] text-slate-400 font-bold uppercase tracking-widest">Qtd</span>
+                        <span className="text-xs text-slate-700 font-black">{asset.quantity || 1}</span>
+                     </div>
+                     {hasSubLocations && locationNames[asset.inspectionId] && (
+                        <div className="flex items-center gap-2 px-2 py-1 bg-indigo-50 border border-indigo-100 rounded-lg">
+                           <Home className="w-3 h-3 text-indigo-400" />
+                           <span className="text-[9px] text-indigo-600 font-black uppercase tracking-widest">{locationNames[asset.inspectionId]}</span>
+                        </div>
+                     )}
+                  </div>
+                </div>
+                <div className={cn(
+                  "px-3 py-1.5 rounded-xl text-[9px] font-black uppercase tracking-widest border transition-all",
+                  asset.condition === 'bom' ? "bg-emerald-50 text-emerald-600 border-emerald-100 shadow-sm" :
+                  asset.condition === 'regular' ? "bg-amber-50 text-amber-600 border-amber-100 shadow-sm" :
+                  "bg-rose-50 text-rose-600 border-rose-100 shadow-sm"
+                )}>
+                  {asset.condition || 'Não Inf.'}
+                </div>
+              </div>
+              
+              <div className="h-px bg-slate-50" />
+              
+              <div className="flex flex-col md:flex-row md:items-end justify-between gap-6">
+                <p className="text-sm text-slate-500 font-medium leading-relaxed flex-1">
+                  {asset.observations || "Sem detalhes adicionais registrados."}
+                </p>
+                <div className="flex flex-col gap-4">
+                  <div className="flex -space-x-3 justify-end">
+                    {(asset.photos && asset.photos.length > 0) ? (
+                      asset.photos.map((photo, i) => (
+                        <div key={i} className="w-14 h-14 rounded-2xl bg-white border-2 border-slate-50 flex items-center justify-center overflow-hidden shadow-lg transform hover:scale-110 hover:z-30 transition-all cursor-pointer" onClick={() => setPreviewPhoto(photo)}>
+                           <img src={photo} alt="" className="w-full h-full object-cover hover:opacity-80 transition-all" />
+                        </div>
+                      ))
+                    ) : (
+                      <div className="w-14 h-14 rounded-2xl bg-slate-50 border-2 border-white flex items-center justify-center shadow-sm">
+                         <ImageIcon className="w-5 h-5 text-slate-300" />
+                      </div>
+                    )}
+                  </div>
+                  
+                  <div className="flex items-center justify-end gap-2">
+                    {isBatchMode ? (
+                      <div className="h-11 flex items-center">
+                        <span className="text-[10px] font-black text-slate-300 uppercase tracking-widest">Em Seleção</span>
+                      </div>
+                    ) : (
+                      <>
+                        <button 
+                          onClick={() => loadHistory(asset)}
+                          className="p-3 bg-white text-slate-400 hover:text-indigo-600 rounded-2xl border border-slate-100 hover:border-indigo-100 shadow-sm transition-all"
+                          title="Histórico"
+                        >
+                          <History className="w-5 h-5" />
+                        </button>
+                        {!isLocked && (
+                          <>
+                            <button 
+                              onClick={() => handleCloneAsset(asset)}
+                              className="p-3 bg-white text-slate-400 hover:text-emerald-600 rounded-2xl border border-slate-100 hover:border-emerald-100 shadow-sm transition-all"
+                              title="Clonagem Rápida (Zero Digitação)"
+                            >
+                              <Copy className="w-5 h-5" />
+                            </button>
+                            <button 
+                              onClick={() => handleEditAsset(asset)}
+                              className="p-3 bg-white text-slate-400 hover:text-blue-600 rounded-2xl border border-slate-100 hover:border-blue-100 shadow-sm transition-all"
+                            >
+                              <Edit2 className="w-5 h-5" />
+                            </button>
+                            <button 
+                              onClick={() => setConfirmDeleteId(asset.id)}
+                              className="p-3 bg-white text-slate-400 hover:text-rose-600 rounded-2xl border border-slate-100 hover:border-rose-100 shadow-sm transition-all"
+                            >
+                              <Trash2 className="w-5 h-5" />
+                            </button>
+                            {isCommittee && (
+                              <button 
+                                onClick={() => setTransferAssetId(asset.id)}
+                                className="p-3 bg-white text-slate-400 hover:text-amber-600 rounded-2xl border border-slate-100 hover:border-amber-100 shadow-sm transition-all"
+                                title="Mover"
+                              >
+                                <Zap className="w-5 h-5" />
+                              </button>
+                            )}
+                          </>
+                        )}
+                      </>
+                    )}
+                  </div>
+                </div>
+              </div>
+
+              {confirmDeleteId === asset.id && (
+                <div className="absolute inset-0 z-40 bg-white/90 backdrop-blur-sm rounded-[2rem] flex flex-col items-center justify-center p-8 animate-in fade-in duration-300">
+                  <div className="flex flex-col items-center text-center gap-4">
+                    <div className="w-16 h-16 bg-rose-50 text-rose-600 rounded-3xl flex items-center justify-center">
+                      <Trash2 className="w-8 h-8" />
+                    </div>
+                    <div className="flex flex-col">
+                      <h5 className="font-bold text-slate-900">Excluir este item?</h5>
+                      <p className="text-sm text-slate-500">Esta ação não pode ser desfeita no inventário local.</p>
+                    </div>
+                    <div className="flex items-center gap-3 w-full mt-2">
+                       <button 
+                        onClick={() => handleDeleteAsset(asset.id)}
+                        className="flex-1 bg-rose-600 text-white font-black text-xs uppercase tracking-widest h-12 rounded-xl shadow-lg shadow-rose-600/20"
+                       >
+                         Excluir
+                       </button>
+                       <button 
+                        onClick={() => setConfirmDeleteId(null)}
+                        className="flex-1 bg-slate-100 text-slate-700 font-black text-xs uppercase tracking-widest h-12 rounded-xl"
+                       >
+                         Manter
+                       </button>
+                    </div>
+                  </div>
+                </div>
+              )}
+            </Card>
+          ))}
+          {filteredAssets && filteredAssets.length > (displayedAssets?.length || 0) && !searchTermAssets && (
+             <div className="col-span-full pt-4">
+                <button 
+                  onClick={() => setDisplayLimit(prev => prev + 20)}
+                  className="w-full py-6 bg-slate-50 hover:bg-slate-100 text-slate-500 font-bold uppercase tracking-[0.2em] text-[10px] rounded-[2rem] border-2 border-dashed border-slate-200 transition-all flex flex-col items-center gap-2"
+                >
+                  Carregar mais itens
+                  <span className="text-[10px] opacity-40 font-black">({assets?.length} totais)</span>
+                </button>
+             </div>
+          )}
+          {assets?.length === 0 && !isAdding && (
+             <div className="col-span-full py-16 px-8 lg:py-24 lg:px-16 flex flex-col items-center justify-center border-2 border-dashed border-slate-100 rounded-[3.5rem] bg-slate-50/20 group animate-in fade-in duration-1000">
+                <div className="max-w-2xl w-full flex flex-col items-center gap-10">
+                  <div className="flex flex-col items-center text-center gap-4">
+                    <div className="w-20 h-20 bg-indigo-600 rounded-[2rem] flex items-center justify-center shadow-2xl shadow-indigo-600/20 mb-2 transform group-hover:scale-110 group-hover:rotate-6 transition-all duration-700">
+                      <ShieldCheck className="w-10 h-10 text-white" />
+                    </div>
+                    <h3 className="font-display font-black text-3xl lg:text-4xl text-slate-900 tracking-tight leading-tight">
+                      Pronto para iniciar a auditoria?
+                    </h3>
+                    <p className="text-slate-500 font-medium text-lg leading-relaxed">
+                      Siga os passos abaixo para catalogar os bens deste ambiente com precisão.
+                    </p>
+                  </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-6 w-full">
+                    {[
+                      { icon: Plus, title: "Adicionar Item", desc: "Toque no botão e descreva o objeto." },
+                      { icon: Database, title: "Identificar", desc: "Informe a etiqueta e o estado do bem." },
+                      { icon: Camera, title: "Fotografar", desc: "Registre avarias ou faltas de peças." }
+                    ].map((step, idx) => (
+                      <div key={idx} className="bg-white p-8 rounded-[2rem] border border-slate-100 shadow-sm flex flex-col items-center text-center gap-4 hover:shadow-xl hover:border-indigo-100 transition-all duration-500">
+                        <div className="w-12 h-12 bg-slate-50 text-indigo-600 rounded-2xl flex items-center justify-center">
+                          <step.icon className="w-6 h-6" />
+                        </div>
+                        <div className="flex flex-col gap-1">
+                          <h4 className="font-black text-[10px] uppercase tracking-widest text-slate-900">{step.title}</h4>
+                          <p className="text-xs text-slate-400 font-medium leading-relaxed">{step.desc}</p>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+
+                  <Button 
+                    variant="accent" 
+                    size="lg" 
+                    onClick={() => setIsAdding(true)} 
+                    className="w-full max-w-sm h-20 rounded-[1.5rem] font-display font-black text-lg lg:text-xl uppercase tracking-[0.2em] shadow-2xl shadow-indigo-600/30 hover:scale-[1.02] transition-all"
+                  >
+                    COMEÇAR AGORA
+                  </Button>
+                </div>
+             </div>
+          )}
+        </div>
+      </div>
+
+      {/* Footer Controls */}
+      <div className="mt-16 flex flex-col gap-6 max-w-xl mx-auto w-full">
+        {!isFinalized && (
+          <>
+            {inspection.status === 'em_andamento' ? (
+              <div className="flex flex-col gap-4">
+                {(assets?.length || 0) === 0 && (
+                  <div className="bg-amber-50 border border-amber-100 p-6 rounded-[1.5rem] flex items-center gap-4 text-amber-700 animate-in slide-in-from-bottom-4 duration-500 shadow-xl shadow-amber-900/5">
+                     <AlertCircle className="w-6 h-6 shrink-0" />
+                     <p className="text-xs font-bold uppercase tracking-widest leading-relaxed">Adicione ao menos um item válido para habilitar a conclusão da vistoria.</p>
+                  </div>
+                )}
+                <div className="flex flex-col gap-3">
+                  <Button 
+                    disabled={(assets?.length || 0) === 0}
+                    className={cn(
+                      "h-24 text-xl font-display font-black uppercase tracking-[0.2em] shadow-[0_30px_60px_-15px_rgba(79,70,229,0.3)] rounded-[2rem] transition-all duration-700",
+                      (assets?.length || 0) === 0 
+                        ? "bg-slate-100 text-slate-400 border-slate-200 grayscale shadow-none" 
+                        : "bg-indigo-600 hover:bg-indigo-700 shadow-indigo-600/30 hover:scale-[1.02]"
+                    )} 
+                    icon={Signature} 
+                    onClick={() => setIsSignOffModalOpen(true)}
+                  >
+                    Encerrar Vistoria do Setor
+                  </Button>
+                  <div className="bg-slate-50 p-4 rounded-xl border border-slate-100 mt-2">
+                    <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest leading-relaxed text-center">
+                      Ao encerrar, o responsável pelo setor assinará o Termo de Responsabilidade digitalmente.
+                    </p>
+                  </div>
+                </div>
+              </div>
+            ) : (
+              <div className="flex flex-col gap-6">
+                {(user?.role === 'prefeito' || user?.role === 'responsavel' || user?.role === 'administrador') && (
+                  <div className="flex flex-col gap-3">
+                    <Button 
+                      className={cn(
+                        "h-24 text-xl font-display font-black uppercase tracking-[0.2em] shadow-[10px_30px_80px_-20px_rgba(99,102,241,0.4)] rounded-[2rem] transition-all duration-700 animate-pulse",
+                        isConfirmingFinalize
+                          ? "bg-emerald-600 hover:bg-emerald-700 shadow-emerald-500/20 animate-none ring-8 ring-emerald-500/10"
+                          : "bg-slate-900 border-none hover:scale-[1.02]"
+                      )} 
+                      icon={isConfirmingFinalize ? ShieldCheck : Save} 
+                      onClick={handleFinalize}
+                      loading={isFinalizing}
+                    >
+                      {isConfirmingFinalize ? "Protocolar Homologação?" : "Homologar Dossiê"}
+                    </Button>
+                    {isConfirmingFinalize && (
+                      <button 
+                        onClick={() => setIsConfirmingFinalize(false)}
+                        className="text-[10px] font-black text-slate-400 uppercase tracking-widest hover:text-rose-500 transition-colors py-2"
+                      >
+                        Manter apenas Concluída
+                      </button>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
+          </>
+        )}
+
+        {/* Action: Reopen - Available for managers in Concluded or Finalized states */}
+        {(isConcluded || isFinalized) && isManager && (
+          <div className="flex flex-col gap-3">
+            <Button 
+              variant="outline"
+              className={cn(
+                "h-16 font-bold uppercase tracking-widest rounded-2xl transition-all duration-500 bg-white border-2",
+                isConfirmingReopen ? "bg-rose-50 border-rose-600 text-rose-600 ring-4 ring-rose-500/5 text-[10px]" : "border-slate-100 text-slate-900 text-[10px]"
+              )} 
+              icon={isConfirmingReopen ? AlertCircle : History} 
+              onClick={handleReopen}
+              loading={isReopening}
+            >
+              {isConfirmingReopen ? "Reabrir para Novas Vistorias?" : "Reabrir Edição do Inventário"}
+            </Button>
+            {isConfirmingReopen && (
+              <button 
+                onClick={() => setIsConfirmingReopen(false)}
+                className="text-[10px] font-black text-slate-400 uppercase tracking-widest hover:text-slate-900 transition-colors py-1"
+              >
+                Cancelar
+              </button>
+            )}
+          </div>
+        )}
+
+        {!isFinalized && (
+          <p className="text-[10px] font-bold text-center text-slate-400 uppercase tracking-widest px-12 leading-relaxed opacity-60">
+            O encerramento imobiliza os registros locais. A homologação autentica o dossiê perante o controle interno municipal.
+          </p>
+        )}
+      </div>
+
+      {/* 🚀 Modal de Transferência */}
+      {transferAssetId && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 md:p-10">
+          <div className="absolute inset-0 bg-slate-900/60 backdrop-blur-md" onClick={() => setTransferAssetId(null)} />
+          <Card className="w-full max-w-lg flex flex-col p-8 overflow-hidden shadow-2xl animate-in zoom-in-95 duration-300 rounded-[3rem] border-none bg-white relative z-10 text-slate-900">
+             <div className="flex items-center justify-between mb-8">
+                <div className="flex items-center gap-4">
+                   <div className="w-12 h-12 bg-amber-100 rounded-2xl flex items-center justify-center">
+                      <Zap className="w-6 h-6 text-amber-600" />
+                   </div>
+                   <div className="flex flex-col">
+                      <h3 className="font-black text-xl uppercase tracking-tight">Transferir Item</h3>
+                      <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest leading-none mt-1">Mudar de localização</span>
+                   </div>
+                </div>
+                <button onClick={() => setTransferAssetId(null)} className="p-2 hover:bg-slate-100 rounded-xl transition-colors">
+                   <X className="w-6 h-6 text-slate-400" />
+                </button>
+             </div>
+
+             <div className="flex flex-col gap-3 max-h-[50vh] overflow-y-auto pr-2 custom-scrollbar">
+                <p className="text-xs font-bold text-slate-500 mb-2 uppercase tracking-widest">Selecione o Destino:</p>
+                {allLocations?.filter(l => l.id !== location.id).map(loc => (
+                  <button 
+                    key={loc.id}
+                    onClick={() => handleTransfer(loc.id)}
+                    disabled={isTransferring}
+                    className="flex flex-col p-5 bg-slate-50 border border-slate-100 rounded-2xl hover:bg-slate-900 hover:text-white group transition-all text-left"
+                  >
+                     <span className="font-black text-sm uppercase tracking-tight transition-colors">{loc.name}</span>
+                     <span className="text-[10px] text-slate-400 group-hover:text-slate-500 transition-colors mt-1">{loc.description}</span>
+                  </button>
+                ))}
+             </div>
+
+             {isTransferring && (
+               <div className="absolute inset-0 bg-white/80 backdrop-blur-sm flex items-center justify-center rounded-[3rem]">
+                  <div className="flex flex-col items-center gap-3">
+                     <div className="w-10 h-10 border-4 border-slate-900 border-t-transparent rounded-full animate-spin"></div>
+                     <span className="text-[10px] font-black text-slate-900 uppercase tracking-[0.2em]">Processando...</span>
+                  </div>
+               </div>
+             )}
+          </Card>
+        </div>
+      )}
+
+      {/* Modal de Histórico */}
+      {historyAsset && (
+        <div className="fixed inset-0 z-[110] flex items-center justify-center p-4 md:p-10">
+          <div className="absolute inset-0 bg-slate-900/60 backdrop-blur-md" onClick={() => setHistoryAsset(null)} />
+          <Card className="w-full max-w-2xl flex flex-col p-8 md:p-10 overflow-hidden shadow-2xl animate-in zoom-in-95 duration-300 rounded-[3rem] border-none bg-white relative z-10 text-slate-900 max-h-[90vh]">
+            <div className="flex items-center justify-between mb-8 pb-6 border-b border-slate-100">
+               <div className="flex items-center gap-4">
+                  <div className="w-14 h-14 bg-emerald-100 rounded-[1.5rem] flex items-center justify-center border border-emerald-200">
+                     <History className="w-7 h-7 text-emerald-600" />
+                  </div>
+                  <div className="flex flex-col">
+                     <h3 className="font-black text-2xl uppercase tracking-tight text-slate-900 leading-none">Histórico</h3>
+                     <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest leading-none mt-2">{historyAsset.name} {historyAsset.patrimonyNumber ? `(Nº ${historyAsset.patrimonyNumber})` : ''}</span>
+                  </div>
+               </div>
+               <button onClick={() => setHistoryAsset(null)} className="p-3 hover:bg-slate-100 rounded-2xl transition-colors border border-transparent hover:border-slate-200">
+                  <X className="w-6 h-6 text-slate-400" />
+               </button>
+            </div>
+
+            <div className="flex flex-col gap-4 overflow-y-auto custom-scrollbar flex-1 pr-2">
+               {isLoadingHistory ? (
+                 <div className="py-20 flex flex-col items-center justify-center">
+                    <div className="w-8 h-8 border-4 border-slate-200 border-t-emerald-500 rounded-full animate-spin"></div>
+                    <span className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] mt-4">Carregando histórico...</span>
+                 </div>
+               ) : !assetHistory || assetHistory.length === 0 ? (
+                 <div className="py-20 flex flex-col items-center justify-center text-slate-300">
+                    <History className="w-12 h-12 opacity-20 mb-4" />
+                    <p className="font-bold tracking-widest text-xs uppercase text-slate-400">Nenhum registro anterior encontrado</p>
+                 </div>
+               ) : (
+                 <div className="relative border-l-2 border-slate-100 ml-4 py-2 space-y-8">
+                   {assetHistory.map((entry, idx) => (
+                     <div key={idx} className="relative pl-6">
+                       <div className="absolute -left-[9px] top-1 w-4 h-4 bg-white border-2 border-slate-300 rounded-full z-10"></div>
+                       <div className="flex flex-col gap-1">
+                         <span className="text-[10px] font-black uppercase tracking-widest text-emerald-600 bg-emerald-50 self-start px-2 py-0.5 rounded-lg mb-1">{formatDate(entry.inspection.date)}</span>
+                         <h4 className="font-black text-base text-slate-900 tracking-tight leading-tight">{entry.location.name}</h4>
+                         <span className="text-sm font-semibold text-slate-500">Condição: <span className="uppercase text-slate-700">{entry.asset.condition}</span></span>
+                         {(entry.asset.quantity && entry.asset.quantity > 1) ? (
+                            <span className="text-xs font-semibold text-slate-400">Qtd: {entry.asset.quantity}</span>
+                         ) : null}
+                         {entry.asset.observations && (
+                           <p className="text-xs text-slate-500 bg-slate-50 p-3 rounded-xl mt-2 border border-slate-100 italic">
+                             "{entry.asset.observations}"
+                           </p>
+                         )}
+                       </div>
+                     </div>
+                   ))}
+                 </div>
+               )}
+            </div>
+          </Card>
+        </div>
+      )}
+
+      {/* ✍️ Modal de Assinatura e Encerramento Setorial */}
+      {isSignOffModalOpen && (
+        <SectorInspectionSignOffModal
+          isOpen={isSignOffModalOpen}
+          onClose={() => setIsSignOffModalOpen(false)}
+          inspection={inspection}
+          location={location}
+          assets={assets || []}
+          onComplete={async () => {
+             setIsSignOffModalOpen(false);
+             // Trigger internal status update immediately skipping confirmation
+             await handleConclude(true);
+          }}
+        />
+      )}
+
+      {/* Lightbox para Visualização de Fotos */}
+      {previewPhoto && (
+        <div className="fixed inset-0 z-[300] flex items-center justify-center p-4 md:p-10" onClick={() => setPreviewPhoto(null)}>
+          <div className="absolute inset-0 bg-slate-900/95 backdrop-blur-sm" />
+          <div className="relative z-10 w-full max-w-4xl flex items-center justify-center">
+            <button 
+              onClick={(e) => { e.stopPropagation(); setPreviewPhoto(null); }}
+              className="absolute -top-12 right-0 md:-right-12 p-2 bg-white/10 hover:bg-rose-500 text-white rounded-full transition-colors"
+            >
+              <X className="w-6 h-6" />
+            </button>
+            <img src={previewPhoto} alt="Visualização ampliada" className="max-w-full max-h-[85vh] object-contain rounded-xl shadow-2xl" onClick={e => e.stopPropagation()} />
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function Building2(props: any) {
+  return (
+    <svg 
+      {...props}
+      xmlns="http://www.w3.org/2000/svg" 
+      viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" 
+    >
+      <path d="M6 22V4a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v18Z"/><path d="M6 12H4a2 2 0 0 0-2 2v6a2 2 0 0 0 2 2h2"/><path d="M18 9h2a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2h-2"/><path d="M10 6h4"/><path d="M10 10h4"/><path d="M10 14h4"/><path d="M10 18h4"/>
+    </svg>
+  );
+}
