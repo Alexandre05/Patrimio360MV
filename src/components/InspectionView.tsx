@@ -722,10 +722,12 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
       setError(null);
       const doc = new jsPDF();
       
+      // --- TÍTULO PRINCIPAL ---
       doc.setFont('helvetica', 'bold');
       doc.setFontSize(18);
       doc.text('Relatório de Vistoria Patrimonial', 14, 22);
       
+      // --- DADOS DE IDENTIFICAÇÃO ---
       doc.setFontSize(10);
       doc.setFont('helvetica', 'normal');
       doc.text(`Local Inspecionado: ${location?.name}`, 14, 32);
@@ -752,11 +754,11 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
         doc.text(`Homologado por: ${inspection.finalizedBy === user?.userId ? user?.name : 'Autoridade Municipal'}`, 14, 50);
       }
 
-      // SOMA REAL DAS QUANTIDADES PARA O PDF
+      // --- CÁLCULO DOS TOTAIS REALIZANDO O SOMATÓRIO DAS QUANTIDADES ---
       const totalUnidadesAbsolutas = assets?.reduce((acc, curr) => acc + (Number(curr.quantity) || 1), 0) || 0;
       const totalTiposDiferentes = assets?.length || 0;
 
-      // Painel Elegante
+      // --- PAINEL INDICADOR ELEGANTE ---
       doc.setDrawColor(226, 232, 240);
       doc.setFillColor(248, 250, 252);
       doc.roundedRect(14, 56, 182, 14, 3, 3, 'FD');
@@ -768,10 +770,11 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
       
       doc.setFont('helvetica', 'normal');
       doc.text(`Total de Bens Catalogados: ${totalUnidadesAbsolutas} unidade(s) físicas`, 68, 65);
-      
+      doc.setTextColor(0);
+
       doc.setFontSize(9);
       doc.setTextColor(100);
-      doc.text(`(${totalTiposDiferentes} registros distintos)`, 148, 65);
+      doc.text(`(${totalTiposDiferentes} registros distintos na sala)`, 140, 65);
       doc.setTextColor(0);
 
       doc.setFontSize(9);
@@ -779,6 +782,7 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
       doc.text('Este documento contém um QR Code DINÂMICO. A leitura em tempo real sempre exibirá a versão mais atualizada.', 14, 76);
       doc.setTextColor(0);
 
+      // --- TABELA COM COLUNA DE QUANTIDADE E CABEÇALHO ESCURO ---
       const tableData = assets?.map(a => [
         a.name,
         a.patrimonyNumber || '-',
@@ -790,7 +794,7 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
       autoTable(doc, {
         head: [['Item', 'Patrimônio', 'Estado', 'Qtd', 'Obs']],
         body: tableData,
-        startY: 84,
+        startY: 84, // A tabela começa abaixo do painel de resumo
         theme: 'grid',
         headStyles: { fillColor: [15, 23, 42], fontStyle: 'bold' }
       });
@@ -802,6 +806,7 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
         finalY = 25;
       }
 
+      // --- LADO ESQUERDO: QR CODE PERMANENTE ---
       doc.setFontSize(10);
       doc.setFont('helvetica', 'bold');
       doc.text('SELO PERMANENTE DE TRANSPARÊNCIA:', 14, finalY);
@@ -825,6 +830,7 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
         });
       }
 
+      // --- LADO DIREITO: ASSINATURA DO RESPONSÁVEL ---
       if (sectorSignature) {
         doc.setLineWidth(0.5);
         doc.setDrawColor(0, 0, 0);
@@ -1385,7 +1391,6 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
                       />
                     </div>
 
-                    {/* BLINDAGEM DA QUANTIDADE CONTRA PONTOS (ex: 1.000) */}
                     <div className="flex flex-col gap-4">
                       <div className="flex flex-col">
                        <label className="text-[10px] font-bold text-slate-900 uppercase tracking-widest ml-1">Quantidade</label>
