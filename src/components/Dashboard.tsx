@@ -44,7 +44,7 @@ import { UsersView } from './UsersView';
 import { NotificationsView } from './NotificationsView';
 import { checkAndGenerateNotifications } from '../lib/NotificationService';
 import { cn } from '../lib/utils';
-import { setupSync, pushLocalChanges, forceFullSyncRecovery } from '../lib/syncService';
+import { setupSync, pushLocalChanges, forceFullSyncRecovery, hardResetAndRescue } from '../lib/syncService';
 import { db as firestore, auth } from '../lib/firebase';
 import { doc, deleteDoc, getDoc } from 'firebase/firestore';
 import { ScannerView } from './ScannerView';
@@ -407,19 +407,18 @@ export function Dashboard() {
                     <Button variant="outline" icon={Search} onClick={() => setActiveTab('scanner')} className="px-10 h-16 text-xs uppercase tracking-widest bg-white">
                       Escanear QR
                     </Button>
-
-                    {/* BOTÃO LIBERADO PARA A COMISSÃO E ADMIN */}
+{/* BOTÃO LIBERADO PARA A COMISSÃO E ADMIN */}
                     <button 
                       onClick={() => {
-                        if (window.confirm("Isso irá forçar a atualização dos seus dados baixando as informações mais recentes da nuvem. Deseja continuar?")) {
-                          forceFullSyncRecovery();
+                        if (window.confirm("Isso irá limpar o cache preso do tablet e forçar o download completo da nuvem. Deseja continuar?")) {
+                          hardResetAndRescue();
                         }
                       }}
                       className="text-[10px] font-bold uppercase text-slate-400 hover:text-indigo-600 transition-colors flex items-center gap-1 ml-4"
                     >
                       <Database className="w-3 h-3" />
                       Sincronização Forçada
-                    </button>
+                    </button>  
                     
                     {isManager && (
                       <div className="flex items-center gap-4 ml-4 border-l border-slate-200 pl-4">
