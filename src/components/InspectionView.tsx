@@ -1208,7 +1208,7 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
                     <h3 className="font-display font-extrabold text-3xl text-slate-900 tracking-tight leading-none uppercase">Selo de Transparência</h3>
                  </div>
                  <p className="text-lg text-slate-500 leading-relaxed font-medium max-w-xl">
-                    Este ambiente foi <span className="text-emerald-600 font-bold">Blindado Digitalmente</span>. Ao escanear este QR Code, a sociedade civil e os auditores terão acesso imediato aos {assets?.reduce((acc, curr) => acc + (curr.quantity || 1), 0)} itens tombados nesta sala.
+                   terão acesso imediato aos {assets?.reduce((acc, curr) => acc + (Number(curr.quantity) || 1), 0)} itens tombados nesta sala.
                  </p>
                  {sectorSignature && (
                     <div className="mt-2 p-4 bg-emerald-50/50 rounded-2xl border border-emerald-100 flex items-center gap-4">
@@ -1585,7 +1585,7 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
                    : "bg-slate-50 border-slate-200 hover:bg-slate-100 text-slate-600"
                )}
              >
-               Todos ({allVisibleAssets.length})
+               Todos ({allVisibleAssets.reduce((acc, curr) => acc + (Number(curr.quantity) || 1), 0)})
              </button>
              <button
                type="button"

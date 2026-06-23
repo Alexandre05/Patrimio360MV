@@ -120,9 +120,9 @@ export function Dashboard() {
   const concludedInspectionsCount = useLiveQuery(() => db.inspections.where('status').anyOf('concluida', 'finalizada').count());
   
   // SOMA REAL DAS QUANTIDADES NO DASHBOARD
-  const totalAssetsCount = useLiveQuery(async () => {
+const totalAssetsCount = useLiveQuery(async () => {
     const todosItens = await db.assets.toArray();
-    return todosItens.reduce((acc, curr) => acc + (curr.quantity || 1), 0);
+    return todosItens.reduce((acc, curr) => acc + (Number(curr.quantity) || 1), 0);
   });
 
   const unreadNotifications = useLiveQuery(() => user ? db.notifications.where('targetUserId').equals(user.userId).and(n => !n.read).count() : 0, [user]);
@@ -1001,7 +1001,7 @@ function RecentInspectionRow({ inspection, locationName, onClick }: { inspection
   // SOMA REAL DAS QUANTIDADES NA LISTA DE VISTORIAS
   const assetCount = useLiveQuery(async () => {
     const itensDaVistoria = await db.assets.where('inspectionId').equals(inspection.id).toArray();
-    return itensDaVistoria.reduce((acc, curr) => acc + (curr.quantity || 1), 0);
+    return itensDaVistoria.reduce((acc, curr) => acc + (Number(curr.quantity) || 1), 0);
   }, [inspection.id]);
 
   return (
