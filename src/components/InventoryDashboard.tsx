@@ -17,11 +17,11 @@ export function InventoryDashboard() {
 
   // 1. Data per condition
   const conditionData = [
-    { name: 'Novo', value: assets.filter(a => a.condition === 'novo').length, color: '#10b981' },
-    { name: 'Bom', value: assets.filter(a => a.condition === 'bom').length, color: '#3b82f6' },
-    { name: 'Regular', value: assets.filter(a => a.condition === 'regular').length, color: '#f59e0b' },
-    { name: 'Ruim', value: assets.filter(a => a.condition === 'ruim').length, color: '#f97316' },
-    { name: 'Inservivel', value: assets.filter(a => a.condition === 'inservivel').length, color: '#ef4444' },
+    { name: 'Novo', value: assets.filter(a => a.condition === 'novo').reduce((acc, item) => acc + (item.quantity || 1), 0), color: '#10b981' },
+    { name: 'Bom', value: assets.filter(a => a.condition === 'bom').reduce((acc, item) => acc + (item.quantity || 1), 0), color: '#3b82f6' },
+    { name: 'Regular', value: assets.filter(a => a.condition === 'regular').reduce((acc, item) => acc + (item.quantity || 1), 0), color: '#f59e0b' },
+    { name: 'Ruim', value: assets.filter(a => a.condition === 'ruim').reduce((acc, item) => acc + (item.quantity || 1), 0), color: '#f97316' },
+    { name: 'Inservivel', value: assets.filter(a => a.condition === 'inservivel').reduce((acc, item) => acc + (item.quantity || 1), 0), color: '#ef4444' },
   ].filter(d => d.value > 0);
 
   // 2. Assets per Location (Top 5)
@@ -29,7 +29,7 @@ export function InventoryDashboard() {
     // Find latest inspection for this location
     const locInspections = inspections?.filter(i => i.locationId === loc.id);
     const latestInsp = locInspections?.sort((a, b) => b.date - a.date)[0];
-    const locAssetsCount = assets.filter(a => a.inspectionId === latestInsp?.id).length;
+    const locAssetsCount = assets.filter(a => a.inspectionId === latestInsp?.id).reduce((acc, item) => acc + (item.quantity || 1), 0);
     
     return {
       name: loc.name,
@@ -37,9 +37,9 @@ export function InventoryDashboard() {
     };
   }).sort((a, b) => b.count - a.count).slice(0, 5);
 
-  const totalAssets = assets.length;
-  const criticalAssets = assets.filter(a => a.condition === 'ruim' || a.condition === 'inservivel').length;
-  const goodAssets = assets.filter(a => a.condition === 'novo' || a.condition === 'bom').length;
+  const totalAssets = assets.reduce((acc, item) => acc + (item.quantity || 1), 0);
+  const criticalAssets = assets.filter(a => a.condition === 'ruim' || a.condition === 'inservivel').reduce((acc, item) => acc + (item.quantity || 1), 0);
+  const goodAssets = assets.filter(a => a.condition === 'novo' || a.condition === 'bom').reduce((acc, item) => acc + (item.quantity || 1), 0);
   const healthScore = totalAssets > 0 ? Math.round((goodAssets / totalAssets) * 100) : 0;
 
   return (

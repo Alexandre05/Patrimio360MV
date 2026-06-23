@@ -406,7 +406,7 @@ export function PublicInspectionView({ inspectionId: propId, locationId: propLoc
                             Nº {asset.patrimonyNumber}
                          </div>
                        )}
-                       <div className="inline-flex items-center px-2.5 py-1 bg-blue-50 text-blue-700 rounded-lg text-[11px] font-semibold border border-blue-100">
+                       <div className="inline-flex items-center px-3 py-1 bg-indigo-50 text-indigo-700 rounded-lg text-[11px] font-black border border-indigo-200 shadow-sm">
                           {asset.quantity || 1} unid.
                        </div>
                     </div>

@@ -17,10 +17,10 @@ export function ReportsView() {
   const locations = useLiveQuery(() => db.locations.toArray());
 
   const stats = {
-    totalItens: assets?.length || 0,
-    ruins: assets?.filter(a => a.condition === 'ruim' || a.condition === 'inservivel').length || 0,
+    totalItens: assets?.reduce((acc, a) => acc + (a.quantity || 1), 0) || 0,
+    ruins: assets?.filter(a => a.condition === 'ruim' || a.condition === 'inservivel').reduce((acc, a) => acc + (a.quantity || 1), 0) || 0,
     finalizadas: inspections?.filter(i => i.status === 'finalizada').length || 0,
-    semPatrimonio: assets?.filter(a => !a.patrimonyNumber).length || 0
+    semPatrimonio: assets?.filter(a => !a.patrimonyNumber).reduce((acc, a) => acc + (a.quantity || 1), 0) || 0
   };
 
   const inspectorWork = (inspections || [])
@@ -44,7 +44,7 @@ export function ReportsView() {
     const locAssets = assets?.filter(a => locInspections.some(i => i.id === a.inspectionId)) || [];
     return {
       ...loc,
-      itemCount: locAssets.length
+      itemCount: locAssets.reduce((acc, a) => acc + (a.quantity || 1), 0)
     };
   }).sort((a, b) => b.itemCount - a.itemCount) || [];
 
@@ -101,13 +101,14 @@ A manutenção dos bens atuais tornou-se antieconômica. A substituição imedia
 
     const tableData = locAssets.map(a => [
       a.name,
+      String(a.quantity || 1),
       a.patrimonyNumber || '-',
       a.condition.toUpperCase(),
       a.observations || '-'
     ]);
 
     autoTable(doc, {
-      head: [['Item', 'Nº Patrimônio', 'Estado', 'Obs']],
+      head: [['Item', 'Qtd', 'Nº Patrimônio', 'Estado', 'Obs']],
       body: tableData,
       startY: 45,
       theme: 'grid'
@@ -128,6 +129,7 @@ A manutenção dos bens atuais tornou-se antieconômica. A substituição imedia
     const items = assets?.filter(a => a.condition === 'ruim' || a.condition === 'inservivel') || [];
     const tableData = items.map(a => [
       a.name,
+      String(a.quantity || 1),
       a.patrimonyNumber || '-',
       a.condition.toUpperCase(),
       locations?.find(l => {
@@ -137,7 +139,7 @@ A manutenção dos bens atuais tornou-se antieconômica. A substituição imedia
     ]);
 
     autoTable(doc, {
-      head: [['Item', 'Nº Patrimônio', 'Estado', 'Localização']],
+      head: [['Item', 'Qtd', 'Nº Patrimônio', 'Estado', 'Localização']],
       body: tableData,
       startY: 45,
       theme: 'striped'
@@ -174,13 +176,14 @@ A manutenção dos bens atuais tornou-se antieconômica. A substituição imedia
 
       const tableData = locAssets.map(a => [
         a.name,
+        String(a.quantity || 1),
         a.patrimonyNumber || '-',
         a.condition,
         a.observations || '-'
       ]);
 
       autoTable(doc, {
-        head: [['Item', 'Nº Patrimônio', 'Estado', 'Obs']],
+        head: [['Item', 'Qtd', 'Nº Patrimônio', 'Estado', 'Obs']],
         body: tableData,
         startY: currentY + 5,
         theme: 'grid',
