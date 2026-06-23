@@ -49,6 +49,7 @@ export function LocationsView({ onSelectInspection }: { onSelectInspection: (id:
   const [newLoc, setNewLoc] = useState({ name: '', description: '', latitude: '', longitude: '', parentId: '' });
   const [editingLocationId, setEditingLocationId] = useState<string | null>(null);
   const [activeParentId, setActiveParentId] = useState<string | null>(null);
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   const activeParentLocation = useLiveQuery(() => activeParentId ? db.locations.get(activeParentId) : undefined, [activeParentId]);
 
@@ -207,34 +208,80 @@ export function LocationsView({ onSelectInspection }: { onSelectInspection: (id:
 
   const handleSaveLocation = async () => {
     if (!newLoc.name.trim()) return;
-    
-    const lat = newLoc.latitude ? parseFloat(newLoc.latitude) : undefined;
-    const lng = newLoc.longitude ? parseFloat(newLoc.longitude) : undefined;
-    
-    const locationData = {
-      name: newLoc.name,
-      description: newLoc.description,
-      needsSync: 1,
-      ...(newLoc.parentId ? { parentId: newLoc.parentId } : {}),
-      ...(lat && lng ? { latitude: lat, longitude: lng } : {})
-    };
+    if (isSubmitting) return;
 
-    if (editingLocationId) {
-      await db.locations.update(editingLocationId, locationData);
-      try { await syncLocation(editingLocationId); } catch(e) { console.error("Sync error", e) }
-    } else {
-      const locId = generateId();
-      await db.locations.add({
-        id: locId,
-        ...locationData
-      });
-      try { await syncLocation(locId); } catch(e) { console.error("Sync error", e) }
+    setIsSubmitting(true);
+
+    try {
+      const targetName = newLoc.name.trim().toLowerCase();
+
+      // 1. Verificação local (Dexie) - Instantânea, suporta offline e cobre totalmente case-insensitive + trim
+      const localDuplicate = await db.locations
+        .filter(l => !l.deleted && l.id !== editingLocationId && l.name.trim().toLowerCase() === targetName)
+        .first();
+
+      if (localDuplicate) {
+        alert(`Já existe um ambiente ou secretaria cadastrada com o nome "${newLoc.name.trim()}".`);
+        return;
+      }
+
+      // 2. Consulta ao Firestore - Robustez online caso outro usuário tenha cadastrado concorrentemente
+      try {
+        const { collection, getDocs } = await import('firebase/firestore');
+        const querySnapshot = await getDocs(collection(firestore, 'locations'));
+        
+        let fireduplicate = false;
+        querySnapshot.forEach((doc) => {
+          const data = doc.data();
+          if (doc.id !== editingLocationId && !data.deleted) {
+            const name = data.name || '';
+            if (name.trim().toLowerCase() === targetName) {
+              fireduplicate = true;
+            }
+          }
+        });
+
+        if (fireduplicate) {
+          alert(`Atenção: Já existe um ambiente cadastrado na nuvem com o nome "${newLoc.name.trim()}".`);
+          return;
+        }
+      } catch (e) {
+        console.warn("Não foi possível consultar o Firestore no momento (modo offline). A validação prosseguirá com o banco local:", e);
+      }
+
+      const lat = newLoc.latitude ? parseFloat(newLoc.latitude) : undefined;
+      const lng = newLoc.longitude ? parseFloat(newLoc.longitude) : undefined;
+      
+      const locationData = {
+        name: newLoc.name.trim(),
+        description: newLoc.description,
+        needsSync: 1,
+        ...(newLoc.parentId ? { parentId: newLoc.parentId } : {}),
+        ...(lat && lng ? { latitude: lat, longitude: lng } : {})
+      };
+
+      if (editingLocationId) {
+        await db.locations.update(editingLocationId, locationData);
+        try { await syncLocation(editingLocationId); } catch(e) { console.error("Sync error", e) }
+      } else {
+        const locId = generateId();
+        await db.locations.add({
+          id: locId,
+          ...locationData
+        });
+        try { await syncLocation(locId); } catch(e) { console.error("Sync error", e) }
+      }
+      
+      pushLocalChanges();
+      setNewLoc({ name: '', description: '', latitude: '', longitude: '', parentId: '' });
+      setEditingLocationId(null);
+      setIsAdding(false);
+    } catch (err: any) {
+      console.error("Erro ao salvar localização:", err);
+      alert(`Ocorreu um erro ao salvar o local: ${err.message || err}`);
+    } finally {
+      setIsSubmitting(false);
     }
-    
-    pushLocalChanges();
-    setNewLoc({ name: '', description: '', latitude: '', longitude: '', parentId: '' });
-    setEditingLocationId(null);
-    setIsAdding(false);
   };
 
   const handleDeleteLocation = async (locId: string, locName: string) => {
@@ -1050,8 +1097,21 @@ export function LocationsView({ onSelectInspection }: { onSelectInspection: (id:
                 <Input label="Longitude (Opcional)" placeholder="-55.4828" type="number" step="any" value={newLoc.longitude} onChange={e => setNewLoc({...newLoc, longitude: e.target.value})} />
               </div>
             </div>
-            <Button onClick={handleSaveLocation} icon={ShieldCheck} className="h-16 font-black tracking-[0.2em] text-sm rounded-2xl shadow-xl shadow-indigo-600/20" variant="accent">
-               {editingLocationId ? 'ATUALIZAR UNIDADE' : 'SALVAR UNIDADE'}
+            <Button 
+              onClick={handleSaveLocation} 
+              disabled={isSubmitting || !newLoc.name.trim()} 
+              icon={ShieldCheck} 
+              className={cn(
+                "h-16 font-black tracking-[0.2em] text-sm rounded-2xl shadow-xl shadow-indigo-600/20",
+                (isSubmitting || !newLoc.name.trim()) && "opacity-60 cursor-not-allowed"
+              )} 
+              variant="accent"
+            >
+               {isSubmitting 
+                 ? 'SALVANDO...' 
+                 : editingLocationId 
+                   ? 'ATUALIZAR UNIDADE' 
+                   : 'SALVAR UNIDADE'}
             </Button>
           </Card>
         )}
