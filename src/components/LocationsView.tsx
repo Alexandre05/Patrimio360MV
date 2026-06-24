@@ -49,6 +49,7 @@ export function LocationsView({ onSelectInspection }: { onSelectInspection: (id:
   const [newLoc, setNewLoc] = useState({ name: '', description: '', latitude: '', longitude: '', parentId: '' });
   const [editingLocationId, setEditingLocationId] = useState<string | null>(null);
   const [activeParentId, setActiveParentId] = useState<string | null>(null);
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   const activeParentLocation = useLiveQuery(() => activeParentId ? db.locations.get(activeParentId) : undefined, [activeParentId]);
 
@@ -78,15 +79,11 @@ export function LocationsView({ onSelectInspection }: { onSelectInspection: (id:
     const children = locations?.filter(l => l.parentId === parentId) || [];
     const directChildrenIds = children.map(c => c.id);
     
-    // Recursive or multi-level? The current system seems to favor one level deep based on drill-down, 
-    // but let's just use direct children for stats for now.
-    
     let totalAssets = 0;
     let emAndamento = 0;
     let concluidas = 0;
     let finalizadas = 0;
 
-    // Get stats for parent itself
     const parentStatus = getLatestStatusCount(parentId);
     if (parentStatus) {
       totalAssets += parentStatus.assetCount;
@@ -95,7 +92,6 @@ export function LocationsView({ onSelectInspection }: { onSelectInspection: (id:
       else if (parentStatus.status === 'finalizada') finalizadas++;
     }
 
-    // Get stats for children
     children.forEach(c => {
       const s = getLatestStatusCount(c.id);
       if (s) {
@@ -122,12 +118,9 @@ export function LocationsView({ onSelectInspection }: { onSelectInspection: (id:
     
     if (searchTerm) return matchesSearch;
     
-    // NAVEGAÇÃO POR NÍVEIS (DRILL-DOWN)
     if (!activeParentId) {
-      // Se estamos na raiz, mostramos APENAS as Secretarias (Pais)
       return !loc.parentId;
     } else {
-      // Se estamos dentro de um local, mostramos APENAS os filhos diretos dele
       return loc.parentId === activeParentId;
     }
   });
@@ -137,7 +130,6 @@ export function LocationsView({ onSelectInspection }: { onSelectInspection: (id:
     : allFilteredLocations?.slice(0, displayLimit);
 
   const handleStartInspection = async (locationId: string) => {
-    // 1. Procurar vistoria pendente (qualquer uma que não esteja finalizada)
     const existing = await db.inspections
       .where({ locationId })
       .filter(i => i.status !== 'finalizada')
@@ -166,13 +158,11 @@ export function LocationsView({ onSelectInspection }: { onSelectInspection: (id:
       }
     }
 
-    // 2. Clone assets from the last "finalizada" inspection for this location
     const history = await db.inspections.where('locationId').equals(locationId).toArray();
     const lastFinalized = history
       .filter(i => i.status === 'finalizada')
       .sort((a, b) => b.date - a.date)[0];
 
-    // 3. Criar nova única v2
     const id = generateId();
     await db.inspections.add({
       id,
@@ -184,20 +174,18 @@ export function LocationsView({ onSelectInspection }: { onSelectInspection: (id:
     });
     try { await syncInspection(id); } catch(e) { console.error(e) }
 
-    // 4. Herança de Patrimônio: Inject assets into the new inspection
     if (lastFinalized) {
       const previousAssets = await db.assets.where('inspectionId').equals(lastFinalized.id).toArray();
       if (previousAssets.length > 0) {
         const clonedAssets = previousAssets.map(asset => ({
-          ...asset, // Copy general properties
+          ...asset, 
           id: generateId(),
-          inspectionId: id, // Point to the new inspection
+          inspectionId: id, 
           createdBy: user?.userId || 'sistema',
           createdAt: Date.now(),
           needsSync: 1
         }));
         await db.assets.bulkAdd(clonedAssets);
-        // Trigger background sync for these new assets
         pushLocalChanges();
       }
     }
@@ -207,41 +195,83 @@ export function LocationsView({ onSelectInspection }: { onSelectInspection: (id:
 
   const handleSaveLocation = async () => {
     if (!newLoc.name.trim()) return;
-    
-    const lat = newLoc.latitude ? parseFloat(newLoc.latitude) : undefined;
-    const lng = newLoc.longitude ? parseFloat(newLoc.longitude) : undefined;
-    
-    const locationData = {
-      name: newLoc.name,
-      description: newLoc.description,
-      needsSync: 1,
-      ...(newLoc.parentId ? { parentId: newLoc.parentId } : {}),
-      ...(lat && lng ? { latitude: lat, longitude: lng } : {})
-    };
+    if (isSubmitting) return;
 
-    if (editingLocationId) {
-      await db.locations.update(editingLocationId, locationData);
-      try { await syncLocation(editingLocationId); } catch(e) { console.error("Sync error", e) }
-    } else {
-      const locId = generateId();
-      await db.locations.add({
-        id: locId,
-        ...locationData
-      });
-      try { await syncLocation(locId); } catch(e) { console.error("Sync error", e) }
+    setIsSubmitting(true);
+
+    try {
+      const targetName = newLoc.name.trim().toLowerCase();
+
+      const localDuplicate = await db.locations
+        .filter(l => !l.deleted && l.id !== editingLocationId && l.name.trim().toLowerCase() === targetName)
+        .first();
+
+      if (localDuplicate) {
+        alert(`Já existe um ambiente ou secretaria cadastrada com o nome "${newLoc.name.trim()}".`);
+        return;
+      }
+
+      try {
+        const { collection, getDocs } = await import('firebase/firestore');
+        const querySnapshot = await getDocs(collection(firestore, 'locations'));
+        
+        let fireduplicate = false;
+        querySnapshot.forEach((doc) => {
+          const data = doc.data();
+          if (doc.id !== editingLocationId && !data.deleted) {
+            const name = data.name || '';
+            if (name.trim().toLowerCase() === targetName) {
+              fireduplicate = true;
+            }
+          }
+        });
+
+        if (fireduplicate) {
+          alert(`Atenção: Já existe um ambiente cadastrado na nuvem com o nome "${newLoc.name.trim()}".`);
+          return;
+        }
+      } catch (e) {
+        console.warn("Não foi possível consultar o Firestore no momento (modo offline). A validação prosseguirá com o banco local:", e);
+      }
+
+      const lat = newLoc.latitude ? parseFloat(newLoc.latitude) : undefined;
+      const lng = newLoc.longitude ? parseFloat(newLoc.longitude) : undefined;
+      
+      const locationData = {
+        name: newLoc.name.trim(),
+        description: newLoc.description,
+        needsSync: 1,
+        ...(newLoc.parentId ? { parentId: newLoc.parentId } : {}),
+        ...(lat && lng ? { latitude: lat, longitude: lng } : {})
+      };
+
+      if (editingLocationId) {
+        await db.locations.update(editingLocationId, locationData);
+        try { await syncLocation(editingLocationId); } catch(e) { console.error("Sync error", e) }
+      } else {
+        const locId = generateId();
+        await db.locations.add({
+          id: locId,
+          ...locationData
+        });
+        try { await syncLocation(locId); } catch(e) { console.error("Sync error", e) }
+      }
+      
+      pushLocalChanges();
+      setNewLoc({ name: '', description: '', latitude: '', longitude: '', parentId: '' });
+      setEditingLocationId(null);
+      setIsAdding(false);
+    } catch (err: any) {
+      console.error("Erro ao salvar localização:", err);
+      alert(`Ocorreu um erro ao salvar o local: ${err.message || err}`);
+    } finally {
+      setIsSubmitting(false);
     }
-    
-    pushLocalChanges();
-    setNewLoc({ name: '', description: '', latitude: '', longitude: '', parentId: '' });
-    setEditingLocationId(null);
-    setIsAdding(false);
   };
 
   const handleDeleteLocation = async (locId: string, locName: string) => {
-    // 1. Encontrar todas as vistorias deste local (reais, ignorando deletadas)
     const inspectionIds = (await db.inspections.where('locationId').equals(locId).filter(i => !i.deleted).toArray()).map(i => i.id);
     
-    // 2. Verificar se existe algum item
     let assetCount = 0;
     if (inspectionIds.length > 0) {
       assetCount = await db.assets.where('inspectionId').anyOf(inspectionIds).filter(a => !a.deleted).count();
@@ -258,14 +288,12 @@ export function LocationsView({ onSelectInspection }: { onSelectInspection: (id:
     }
 
     const now = Date.now();
-    // Soft delete vistorias vazias
     if (inspectionIds.length > 0) {
       for (const invId of inspectionIds) {
         await db.inspections.update(invId, { deleted: true, needsSync: 1, updatedAt: now });
       }
     }
     
-    // Soft delete local
     await db.locations.update(locId, { deleted: true, needsSync: 1, updatedAt: now });
     
     setDeleteConfirmId(null);
@@ -594,7 +622,6 @@ export function LocationsView({ onSelectInspection }: { onSelectInspection: (id:
                 </button>
              </div>
 
-             {/* Smart Action Notification for Physiotherapy Suite */}
              {(() => {
                 const hasFisio = deletedLocations?.some(l => l.name.toLowerCase().includes('fisio')) || 
                                  deletedAssets?.some(a => a.name.toLowerCase().includes('fisio')) ||
@@ -638,7 +665,6 @@ export function LocationsView({ onSelectInspection }: { onSelectInspection: (id:
                 );
              })()}
 
-             {/* Tab Switcher */}
              <div className="px-8 mt-6 flex gap-2 border-b border-slate-100 shrink-0 pb-4">
                 <button
                   type="button"
@@ -678,7 +704,6 @@ export function LocationsView({ onSelectInspection }: { onSelectInspection: (id:
                 </button>
              </div>
 
-             {/* Tab Content */}
              <div className="flex-1 overflow-y-auto p-8 flex flex-col gap-4 custom-scrollbar bg-slate-50/50 min-h-[300px]">
                 {trashTab === 'locations' && (
                   <>
@@ -872,10 +897,6 @@ export function LocationsView({ onSelectInspection }: { onSelectInspection: (id:
                      {getDepartmentStats(activeParentId).totalAssets} Itens Totais
                    </div>
                 </div>
-                {/* 
-                   Se tiver filhos, removemos o botão de auditar DIRETAMENTE o pai, 
-                   forçando o usuário a entrar nos filhos.
-                */}
                 {locations?.some(l => l.parentId === activeParentId) ? (
                   <div className="bg-amber-400 text-amber-900 px-6 py-4 rounded-2xl flex items-center gap-2 shadow-lg animate-in fade-in duration-500">
                      <AlertCircle className="w-5 h-5" />
@@ -996,8 +1017,8 @@ export function LocationsView({ onSelectInspection }: { onSelectInspection: (id:
                            variant={hasChildren ? "secondary" : "primary"}
                            onClick={() => {
                              if (hasChildren) {
-                               setViewMode('list'); // Volta para a lista
-                               setActiveParentId(loc.id); // Entra na pasta
+                               setViewMode('list');
+                               setActiveParentId(loc.id);
                              } else {
                                handleStartInspection(loc.id);
                              }
@@ -1032,26 +1053,44 @@ export function LocationsView({ onSelectInspection }: { onSelectInspection: (id:
               <Input label="Nome da Unidade" placeholder="Ex: Secretaria de Saúde" value={newLoc.name} onChange={e => setNewLoc({...newLoc, name: e.target.value})} />
               <Input label="Endereço / Descrição" placeholder="Rua Central, nº 123" value={newLoc.description} onChange={e => setNewLoc({...newLoc, description: e.target.value})} />
               
-              <Select 
-                label="Departamento Pai / Vínculo (Opcional)"
-                value={newLoc.parentId}
-                onChange={e => setNewLoc({...newLoc, parentId: e.target.value})}
-                disabled={!!activeParentId && !editingLocationId}
-                options={[
-                  { value: '', label: 'Nenhum (Raiz)' },
-                  ...(locations || [])
-                    .filter(l => l.id !== editingLocationId)
-                    .map(l => ({ value: l.id, label: l.name }))
-                ]}
-              />
+              <div className="flex flex-col gap-1">
+                <Select 
+                  label="Vínculo / Onde este local fica? (Opcional)"
+                  value={newLoc.parentId}
+                  onChange={e => setNewLoc({...newLoc, parentId: e.target.value})}
+                  disabled={!!activeParentId && !editingLocationId}
+                  options={[
+                    { value: '', label: '🏢 É um LOCAL MÃE (Agrupador Principal)' },
+                    ...(locations || [])
+                      .filter(l => l.id !== editingLocationId)
+                      .map(l => ({ value: l.id, label: `↳ Fica dentro de: ${l.name}` }))
+                  ]}
+                />
+                <span className="text-[9px] text-slate-400 font-bold uppercase ml-2">
+                  * Locais "Mãe" servem apenas para organizar e não recebem itens diretos.
+                </span>
+              </div>
 
               <div className="flex gap-4">
                 <Input label="Latitude (Opcional)" placeholder="-29.5878" type="number" step="any" value={newLoc.latitude} onChange={e => setNewLoc({...newLoc, latitude: e.target.value})} />
                 <Input label="Longitude (Opcional)" placeholder="-55.4828" type="number" step="any" value={newLoc.longitude} onChange={e => setNewLoc({...newLoc, longitude: e.target.value})} />
               </div>
             </div>
-            <Button onClick={handleSaveLocation} icon={ShieldCheck} className="h-16 font-black tracking-[0.2em] text-sm rounded-2xl shadow-xl shadow-indigo-600/20" variant="accent">
-               {editingLocationId ? 'ATUALIZAR UNIDADE' : 'SALVAR UNIDADE'}
+            <Button 
+              onClick={handleSaveLocation} 
+              disabled={isSubmitting || !newLoc.name.trim()} 
+              icon={ShieldCheck} 
+              className={cn(
+                "h-16 font-black tracking-[0.2em] text-sm rounded-2xl shadow-xl shadow-indigo-600/20",
+                (isSubmitting || !newLoc.name.trim()) && "opacity-60 cursor-not-allowed"
+              )} 
+              variant="accent"
+            >
+               {isSubmitting 
+                 ? 'SALVANDO...' 
+                 : editingLocationId 
+                   ? 'ATUALIZAR UNIDADE' 
+                   : 'SALVAR UNIDADE'}
             </Button>
           </Card>
         )}
@@ -1070,10 +1109,11 @@ export function LocationsView({ onSelectInspection }: { onSelectInspection: (id:
                 : "bg-white border-2 border-slate-100 hover:border-indigo-300 hover:shadow-slate-900/10"
             )}>
               {/* Parent badge indicator */}
-              {hasChildren && (
-                <div className="absolute top-0 right-0">
-                  <div className="bg-indigo-600 text-white text-[9px] font-black uppercase tracking-[0.2em] px-6 py-2 rounded-bl-3xl shadow-lg">
-                    Secretaria / Depto
+              {isParent && (
+                <div className="absolute top-0 right-0 z-10">
+                  <div className="bg-slate-900 text-white text-[9px] font-black uppercase tracking-[0.2em] px-6 py-2 rounded-bl-3xl shadow-lg flex items-center gap-2 border-b border-l border-slate-700">
+                    <Building2 className="w-3 h-3 text-amber-400" />
+                    LOCAL MÃE (AGRUPADOR)
                   </div>
                 </div>
               )}
@@ -1088,7 +1128,6 @@ export function LocationsView({ onSelectInspection }: { onSelectInspection: (id:
                   {isParent ? <Building2 className="w-8 h-8" /> : <MapPin className="w-7 h-7" />}
                 </div>
                 <div className="flex flex-col items-end gap-3">
-                  {/* Para Salas (Filhos): Mostra o status normal */}
                   {!hasChildren && status && (
                     <div className={cn(
                       "text-[9px] font-black uppercase tracking-[0.15em] px-4 py-1.5 rounded-full border shadow-sm transition-all",
@@ -1100,7 +1139,6 @@ export function LocationsView({ onSelectInspection }: { onSelectInspection: (id:
                     </div>
                   )}
 
-                  {/* Para Departamentos (Pais): Mostra o progresso consolidado de todas as salas */}
                   {hasChildren && deptStats?.hasAny && (
                     <div className="flex flex-col items-end gap-1.5">
                       <span className="text-[8px] font-black text-slate-400 uppercase tracking-widest">Resumo Consolidado</span>
@@ -1112,7 +1150,6 @@ export function LocationsView({ onSelectInspection }: { onSelectInspection: (id:
                     </div>
                   )}
 
-                  {/* Se o Pai tiver salas mas nenhuma vistoria iniciada */}
                   {hasChildren && !deptStats?.hasAny && deptStats && deptStats.childrenCount > 0 && (
                     <div className="text-[9px] px-3 py-1.5 rounded-full border border-slate-200 bg-slate-50 text-slate-400 font-black uppercase tracking-widest shadow-sm">
                       {deptStats.childrenCount} Ambientes Internos
@@ -1201,8 +1238,6 @@ export function LocationsView({ onSelectInspection }: { onSelectInspection: (id:
                     {status === 'em_andamento' ? 'CONTINUAR AUDITORIA' : status === 'concluida' ? 'REVISAR DOSSIÊ' : 'AUDITAR ESTE LOCAL'} <ArrowRight className="w-5 h-5 translate-x-2 transition-transform" />
                   </Button>
                 )}
-
-                {/* Auditoria do Departamento agora no Header Card */}
                 
                 <div className="flex flex-col gap-2">
                   <button 
@@ -1253,7 +1288,6 @@ export function LocationsView({ onSelectInspection }: { onSelectInspection: (id:
   );
 }
 
-// Re-using local Lucide icon wrapper just in case
 function CheckCircle2(props: any) {
   return (
     <svg {...props} xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
