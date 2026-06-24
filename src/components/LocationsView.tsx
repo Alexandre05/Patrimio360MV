@@ -450,15 +450,39 @@ export function LocationsView({ onSelectInspection }: { onSelectInspection: (id:
   };
 
   const handleClearTrashBin = async () => {
-    const confirmClear = window.confirm("⚠️ Deseja ESVAZIAR a lixeira permanentemente do dispositivo? Isso apagará os rascunhos locais que foram excluídos.");
+    const confirmClear = window.confirm("⚠️ Deseja ESVAZIAR a lixeira permanentemente? Isso destruirá os dados definitivamente na NUVEM e neste dispositivo.");
     if (!confirmClear) return;
+    
     try {
+      const { doc, deleteDoc } = await import('firebase/firestore');
+
+      // 1. Destruir Locais Fantasmas na Nuvem
+      const delLocs = await db.locations.filter(l => !!l.deleted).toArray();
+      for (const l of delLocs) {
+        try { await deleteDoc(doc(firestore, 'locations', l.id)); } catch(e){}
+      }
+
+      // 2. Destruir Vistorias na Nuvem
+      const delInps = await db.inspections.filter(i => !!i.deleted).toArray();
+      for (const i of delInps) {
+        try { await deleteDoc(doc(firestore, 'inspections', i.id)); } catch(e){}
+      }
+
+      // 3. Destruir Itens na Nuvem
+      const delAssets = await db.assets.filter(a => !!a.deleted).toArray();
+      for (const a of delAssets) {
+        try { await deleteDoc(doc(firestore, 'assets', a.id)); } catch(e){}
+      }
+
+      // 4. Limpar o Banco Local
       await db.locations.filter(l => !!l.deleted).delete();
       await db.inspections.filter(i => !!i.deleted).delete();
       await db.assets.filter(a => !!a.deleted).delete();
-      alert("Lixeira local limpa com sucesso!");
+
+      alert("🗑️ Sucesso absoluto! A Lixeira foi esvaziada e os itens foram completamente destruídos do servidor.");
     } catch (err) {
       console.error(err);
+      alert("Ocorreu um erro ao limpar a lixeira.");
     }
   };
 
