@@ -1103,7 +1103,7 @@ const handleAddItem = async () => {
              </div>
              <div className="flex flex-col gap-1">
                 <span className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Itens {hasSubLocations ? 'Totais' : ''}</span>
-                <span className="font-display text-2xl font-black tracking-tight text-white">{allVisibleAssets.length}</span>
+                <span className="font-display text-2xl font-black tracking-tight text-white">{allVisibleAssets.reduce((acc, curr) => acc + (Number(curr.quantity) || 1), 0)}</span>
              </div>
              <div className="flex flex-col gap-1">
                 <span className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Status</span>
@@ -1580,7 +1580,7 @@ const handleAddItem = async () => {
                <span className="text-slate-400 text-[8px] font-bold uppercase tracking-widest mt-1">Conformidade do Acervo</span>
              </div>
            </div>
-           <div className="flex flex-wrap gap-2">
+            <div className="flex flex-wrap gap-2">
              <button
                type="button"
                onClick={() => setConditionFilter('all')}
@@ -1591,7 +1591,7 @@ const handleAddItem = async () => {
                    : "bg-slate-50 border-slate-200 hover:bg-slate-100 text-slate-600"
                )}
              >
-               Todos ({allVisibleAssets.length})
+               Todos ({allVisibleAssets.reduce((acc, curr) => acc + (Number(curr.quantity) || 1), 0)})
              </button>
              <button
                type="button"
@@ -1604,7 +1604,7 @@ const handleAddItem = async () => {
                )}
              >
                <span className={cn("w-2 h-2 rounded-full", conditionFilter === 'bom' ? "bg-white" : "bg-emerald-500")} />
-               Bons ({allVisibleAssets.filter(a => a.condition === 'bom' || a.condition === 'novo').length})
+               Bons ({allVisibleAssets.filter(a => a.condition === 'bom' || a.condition === 'novo').reduce((acc, curr) => acc + (Number(curr.quantity) || 1), 0)})
              </button>
              <button
                type="button"
@@ -1617,7 +1617,7 @@ const handleAddItem = async () => {
                )}
              >
                <span className={cn("w-2 h-2 rounded-full", conditionFilter === 'regular' ? "bg-white" : "bg-amber-500")} />
-               Regulares/Ruins ({allVisibleAssets.filter(a => a.condition === 'regular' || a.condition === 'ruim').length})
+               Regulares/Ruins ({allVisibleAssets.filter(a => a.condition === 'regular' || a.condition === 'ruim').reduce((acc, curr) => acc + (Number(curr.quantity) || 1), 0)})
              </button>
              <button
                type="button"
@@ -1630,7 +1630,7 @@ const handleAddItem = async () => {
                )}
              >
                <span className={cn("w-2 h-2 rounded-full", conditionFilter === 'inservivel' ? "bg-white" : "bg-rose-500")} />
-               Inservíveis ({allVisibleAssets.filter(a => a.condition === 'inservivel').length})
+               Inservíveis ({allVisibleAssets.filter(a => a.condition === 'inservivel').reduce((acc, curr) => acc + (Number(curr.quantity) || 1), 0)})
              </button>
            </div>
          </div>
@@ -1796,7 +1796,7 @@ const handleAddItem = async () => {
                   className="w-full py-6 bg-slate-50 hover:bg-slate-100 text-slate-500 font-bold uppercase tracking-[0.2em] text-[10px] rounded-[2rem] border-2 border-dashed border-slate-200 transition-all flex flex-col items-center gap-2"
                 >
                   Carregar mais itens
-                  <span className="text-[10px] opacity-40 font-black">({assets?.length} totais)</span>
+                 <span className="text-[10px] opacity-40 font-black">({assets?.reduce((acc, curr) => acc + (Number(curr.quantity) || 1), 0)} totais)</span>
                 </button>
              </div>
           )}
