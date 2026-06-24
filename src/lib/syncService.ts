@@ -20,6 +20,29 @@ export function setupSync() {
 
   unsubscribers.forEach(unsub => unsub());
   unsubscribers = [];
+  // 🚀 NOVIDADE 100% SYNC: O Vigilante do Comando Global do Administrador
+  try {
+    const sysRef = doc(firestore, 'system', 'sync_control');
+    const unsubSys = onSnapshot(sysRef, async (snap) => {
+      if (snap.exists()) {
+        const data = snap.data();
+        const localReset = localStorage.getItem('global_reset_time');
+        const remoteReset = data.reset_timestamp?.toString();
+        
+        // Se a nuvem tem uma data de reset mais nova que a do tablet, o tablet obedece e zera!
+        if (remoteReset && localReset !== remoteReset) {
+          console.warn("🚨 COMANDO DE RESET GLOBAL RECEBIDO DA NUVEM!");
+          localStorage.clear(); // Limpa a memória
+          localStorage.setItem('global_reset_time', remoteReset); // Grava a nova data de segurança
+          await dexie.delete(); // Destrói o banco local fantasma
+          window.location.reload(); // Recarrega para baixar o banco limpo
+        }
+      }
+    });
+    unsubscribers.push(unsubSys);
+  } catch (err) {
+    console.warn("Escuta de sistema offline", err);
+  }
 
   const collections = [
     { name: 'locations', dexie: dexie.locations, pk: 'id' },

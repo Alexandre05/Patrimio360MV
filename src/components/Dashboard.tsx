@@ -125,6 +125,9 @@ export function Dashboard() {
     return todosItens.reduce((acc, curr) => acc + (Number(curr.quantity) || 1), 0);
   });
 
+  // 🚀 NOVIDADE: Busca vistorias prontas para o Administrador homologar
+  const pendingHomologation = useLiveQuery(() => db.inspections.where('status').equals('concluida').toArray());
+
   const unreadNotifications = useLiveQuery(() => user ? db.notifications.where('targetUserId').equals(user.userId).and(n => !n.read).count() : 0, [user]);
   const unsyncedCount = useLiveQuery(() => 
     db.assets.filter(a => 
@@ -249,6 +252,12 @@ export function Dashboard() {
           for (const d of notificationsSnap.docs) {
             await deleteDoc(doc(firestore, 'notifications', d.id));
           }
+
+          // 🚀 NOVIDADE 100% SYNC: Dispara o pulso eletromagnético para todos os tablets!
+          const { setDoc } = await import('firebase/firestore');
+          await setDoc(doc(firestore, 'system', 'sync_control'), {
+            reset_timestamp: Date.now()
+          });
 
         } catch (firestoreErr) {
           console.error("Erro ao limpar dados remotos do Firestore:", firestoreErr);
@@ -385,6 +394,25 @@ export function Dashboard() {
                 </div>
               </div>
             )}
+
+            {/* 🚀 NOVIDADE: Card de Homologação Pendente para Administradores */}
+            {isAdmin && pendingHomologation && pendingHomologation.length > 0 && (
+              <div className="bg-emerald-50 border border-emerald-200 p-6 rounded-[2.5rem] flex flex-col md:flex-row items-center gap-6 shadow-xl shadow-emerald-500/5 animate-in slide-in-from-top-4 duration-500">
+                 <div className="w-16 h-16 bg-white rounded-3xl flex items-center justify-center shadow-lg shrink-0">
+                    <ShieldCheck className="w-8 h-8 text-emerald-600" />
+                 </div>
+                 <div className="flex flex-col gap-1 text-center md:text-left flex-1">
+                    <span className="text-lg font-black text-emerald-900 tracking-tight uppercase">Homologação Pendente</span>
+                    <span className="text-xs font-bold text-emerald-700/70">
+                       Existem <strong>{pendingHomologation.length} vistoria(s)</strong> concluídas pela comissão aguardando sua revisão e homologação.
+                    </span>
+                 </div>
+                 <Button onClick={() => setActiveTab('inspections')} className="bg-emerald-600 hover:bg-emerald-700 h-14 px-8 text-[10px] font-black uppercase tracking-widest rounded-xl">
+                    Revisar Agora
+                 </Button>
+              </div>
+            )}
+
              {/* 🏰 Hero Moderno */}
             <div className="relative overflow-hidden rounded-[2.5rem] bg-white border border-slate-100 p-8 lg:p-12 text-slate-900 shadow-[0_20px_60px_-15px_rgba(0,0,0,0.03)] group">
               <div className="relative z-10 flex flex-col lg:flex-row items-center justify-between gap-12">
