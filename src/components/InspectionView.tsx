@@ -230,8 +230,13 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
       return () => clearTimeout(timer);
     }
   }, [successMessage]);
+const handleAddItem = async () => {
+    // 🚀 NOVIDADE: Bloqueio de Inclusão em Agrupadores (Locais "Pai")
+    if (hasSubLocations) {
+      toast("Este local é apenas um agrupador. Adicione itens dentro das salas/gavetas específicas.", "error", "Bloqueado");
+      return;
+    }
 
-  const handleAddItem = async () => {
     if (!newItem.name || !user || isLocked) return;
 
     const hash = generateAssetHash(newItem.name, newItem.patrimonyNumber, inspection?.locationId || '');
@@ -1281,7 +1286,7 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
                 className="pl-11 pr-6 py-2.5 bg-white border border-slate-100 rounded-xl text-sm font-bold text-slate-900 shadow-sm focus:ring-2 focus:ring-slate-900 focus:outline-none transition-all w-full sm:w-64"
               />
             </div>
-            {!isLocked && (
+            {!isLocked && !hasSubLocations && (
                 <div className="flex items-center gap-2">
                 {isCommittee && (
                   <>
@@ -1311,6 +1316,7 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
                     </Button>
                   </>
                 )}
+                
                 <Button variant="accent" size="sm" icon={Plus} onClick={() => setIsAdding(true)} className="rounded-xl px-8 h-11 shadow-xl shadow-blue-600/10">
                   ADICIONAR ITEM
                 </Button>
@@ -1794,7 +1800,7 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
                 </button>
              </div>
           )}
-          {assets?.length === 0 && !isAdding && (
+         {assets?.length === 0 && !isAdding && !hasSubLocations && (
              <div className="col-span-full py-16 px-8 lg:py-24 lg:px-16 flex flex-col items-center justify-center border-2 border-dashed border-slate-100 rounded-[3.5rem] bg-slate-50/20 group animate-in fade-in duration-1000">
                 <div className="max-w-2xl w-full flex flex-col items-center gap-10">
                   <div className="flex flex-col items-center text-center gap-4">
