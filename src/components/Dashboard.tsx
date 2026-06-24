@@ -44,7 +44,7 @@ import { UsersView } from './UsersView';
 import { NotificationsView } from './NotificationsView';
 import { checkAndGenerateNotifications } from '../lib/NotificationService';
 import { cn } from '../lib/utils';
-import { setupSync, pushLocalChanges, forceFullSyncRecovery } from '../lib/syncService';
+import { setupSync, pushLocalChanges, forceFullSyncRecovery, hardResetAndRescue } from '../lib/syncService';
 import { db as firestore, auth } from '../lib/firebase';
 import { doc, deleteDoc, getDoc } from 'firebase/firestore';
 import { ScannerView } from './ScannerView';
@@ -118,7 +118,13 @@ export function Dashboard() {
   const locations = useLiveQuery(() => db.locations.toArray());
   const activeInspectionsCount = useLiveQuery(() => db.inspections.where('status').equals('em_andamento').count());
   const concludedInspectionsCount = useLiveQuery(() => db.inspections.where('status').anyOf('concluida', 'finalizada').count());
-  const totalAssetsCount = useLiveQuery(() => db.assets.count());
+  
+  // SOMA REAL DAS QUANTIDADES NO DASHBOARD
+  const totalAssetsCount = useLiveQuery(async () => {
+    const todosItens = await db.assets.toArray();
+    return todosItens.reduce((acc, curr) => acc + (Number(curr.quantity) || 1), 0);
+  });
+
   const unreadNotifications = useLiveQuery(() => user ? db.notifications.where('targetUserId').equals(user.userId).and(n => !n.read).count() : 0, [user]);
   const unsyncedCount = useLiveQuery(() => 
     db.assets.filter(a => 
@@ -402,8 +408,21 @@ export function Dashboard() {
                       Escanear QR
                     </Button>
                     
+                    {/* BOTÃO LIBERADO PARA A COMISSÃO E ADMIN */}
+                    <button 
+                      onClick={() => {
+                        if (window.confirm("Isso irá limpar o cache preso do tablet e forçar o download completo da nuvem. Deseja continuar?")) {
+                          hardResetAndRescue();
+                        }
+                      }}
+                      className="text-[10px] font-bold uppercase text-slate-400 hover:text-indigo-600 transition-colors flex items-center gap-1 ml-4"
+                    >
+                      <Database className="w-3 h-3" />
+                      Sincronização Forçada
+                    </button>  
+                    
                     {isManager && (
-                      <div className="flex items-center gap-4 ml-2">
+                      <div className="flex items-center gap-4 ml-4 border-l border-slate-200 pl-4">
                         <button onClick={async () => {
                           const confirmCleanup = window.confirm("Isso irá remover vistorias sem itens e locais sem vistorias. Deseja prosseguir?");
                           if (!confirmCleanup) return;
@@ -453,24 +472,12 @@ export function Dashboard() {
                         }} className="text-[10px] font-bold uppercase text-slate-400 hover:text-indigo-600 transition-colors">Higienizar</button>
 
                         <button 
-                          onClick={() => {
-                            if (window.confirm("Isso irá limpar o cache local e baixar todos os dados da nuvem novamente. Deseja continuar?")) {
-                              forceFullSyncRecovery();
-                            }
-                          }}
-                          className="text-[10px] font-bold uppercase text-slate-400 hover:text-indigo-600 transition-colors flex items-center gap-1"
-                        >
-                          <Database className="w-3 h-3" />
-                          Sincronização Forçada
-                        </button>
-
-                        <button 
                           onClick={handleResetSystem}
                           disabled={isResetting}
-                          className="text-[10px] font-black uppercase text-rose-500 hover:text-rose-700 transition-all flex items-center gap-1 bg-rose-50/40 hover:bg-rose-50 border border-rose-100/50 hover:border-rose-200 px-3 py-1.5 rounded-xl ml-2 shadow-sm"
+                          className="text-[10px] font-black uppercase text-rose-500 hover:text-rose-700 transition-all flex items-center gap-1 bg-rose-50/40 hover:bg-rose-50 border border-rose-100/50 hover:border-rose-200 px-3 py-1.5 rounded-xl shadow-sm"
                         >
                           <Trash2 className="w-3.5 h-3.5" />
-                          {isResetting ? "Zerando..." : "Zerar Banco & Vistorias (Testes)"}
+                          {isResetting ? "Zerando..." : "Zerar Banco (Testes)"}
                         </button>
                       </div>
                     )}
@@ -555,25 +562,11 @@ export function Dashboard() {
                 )}
               </div>
             </div>
-
-            {/* 📡 5. Status Offline/Sync (Removed as per user request to avoid persistent messages) */}
-            {!isOnline && (
-              <div className="bg-rose-50 border border-rose-100 rounded-[2.5rem] p-6 flex flex-col md:flex-row items-center gap-6 animate-in zoom-in-95 duration-500 shadow-xl shadow-rose-500/5">
-                <div className="w-20 h-20 bg-white rounded-3xl flex items-center justify-center shadow-lg shadow-rose-500/10 shrink-0">
-                  <AlertCircle className="w-10 h-10 text-rose-500" />
-                </div>
-                <div className="flex flex-col gap-1 text-center md:text-left">
-                  <span className="text-lg font-black text-rose-900 tracking-tight uppercase leading-none">Conectividade Interrompida</span>
-                  <span className="text-xs font-bold text-rose-600/70">O modo offline-first está mantendo seus dados salvos localmente. {unsyncedCount > 0 ? `Existem ${unsyncedCount} itens pendentes de sincronização.` : 'Tudo pronto para subir assim que a internet voltar.'}</span>
-                </div>
-              </div>
-            )}
           </div>
         );
       case 'locations':
         return <LocationsView onSelectInspection={(id) => setSelectedInspectionId(id)} />;
       case 'inspections':
-        // Reuse similar structure or pass setTab
         return (
           <div className="flex flex-col gap-6 animate-in fade-in duration-500">
              <div className="flex items-center justify-between">
@@ -615,7 +608,6 @@ export function Dashboard() {
               <div className="h-px bg-slate-100 w-full" />
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                {/* Card Zerar Banco */}
                 <div className="border border-rose-100 bg-rose-50/20 p-6 rounded-[2rem] flex flex-col justify-between gap-6">
                   <div className="flex flex-col gap-2">
                     <span className="text-xs font-black text-rose-600 uppercase tracking-widest">Zona de Perigo</span>
@@ -634,7 +626,6 @@ export function Dashboard() {
                   </Button>
                 </div>
 
-                {/* Card Backup */}
                 <div className="border border-indigo-100/30 bg-slate-50/40 p-6 rounded-[2rem] flex flex-col justify-between gap-6">
                   <div className="flex flex-col gap-2">
                     <span className="text-xs font-black text-indigo-600 uppercase tracking-widest">Preservação de Dados</span>
@@ -675,7 +666,6 @@ export function Dashboard() {
 
   return (
     <div className="flex flex-col lg:flex-row min-h-screen bg-bg">
-      {/* 📱 Mobile Header */}
       <div className="lg:hidden flex items-center justify-between p-4 bg-card border-b border-border sticky top-0 z-50">
         <div className="flex items-center gap-3">
            <button 
@@ -709,7 +699,6 @@ export function Dashboard() {
         </div>
       </div>
 
-      {/* 🎭 Mobile Overlay */}
       {isMobileMenuOpen && (
         <div 
           className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[60] lg:hidden animate-in fade-in duration-300"
@@ -717,7 +706,6 @@ export function Dashboard() {
         />
       )}
 
-      {/* 🖥️ Integrated Responsive Sidebar */}
       <aside className={cn(
         "fixed lg:sticky inset-y-0 left-0 flex flex-col bg-white border-r border-slate-100 transition-all duration-500 ease-in-out z-[70] h-screen top-0",
         isMobileMenuOpen ? "translate-x-0 w-80 px-8" : "-translate-x-full lg:translate-x-0",
@@ -815,9 +803,7 @@ export function Dashboard() {
         </div>
       </aside>
 
-      {/* 🚀 Main Content */}
       <main className="flex-1 flex flex-col min-w-0">
-        {/* 🗺️ Universal Header with Breadcrumbs */}
         <header className={cn(
           "flex items-center justify-between px-6 lg:px-10 py-6 lg:py-7 bg-bg/80 backdrop-blur-xl sticky top-0 z-30 transition-all",
           selectedInspectionId ? "pb-4" : ""
@@ -907,7 +893,6 @@ export function Dashboard() {
         </section>
       </main>
 
-      {/* 🤳 Mobile Bottom Tab Bar */}
       <nav className="fixed bottom-0 left-0 right-0 lg:hidden bg-card/90 backdrop-blur-xl border-t border-border flex items-center justify-around p-4 pb-6 z-50">
         <MobileNavItem active={activeTab === 'home' && !selectedInspectionId} icon={LayoutGrid} onClick={() => handleTabChange('home')} />
         <MobileNavItem active={activeTab === 'training'} icon={GraduationCap} onClick={() => handleTabChange('training')} />
@@ -933,8 +918,6 @@ export function Dashboard() {
     </div>
   );
 }
-
-// 🧩 Componentes Auxiliares Locais
 
 function SummaryCard({ label, value, icon: Icon, onClick, variant = 'default' }: { label: string, value: number | string, icon: any, onClick: () => void, variant?: 'default' | 'accent' }) {
   return (
@@ -993,10 +976,11 @@ function RecentInspectionRow({ inspection, locationName, onClick }: { inspection
   const isFinalized = inspection.status === 'finalizada';
   const isInProgress = inspection.status === 'em_andamento';
   
-  const assetCount = useLiveQuery(
-    () => db.assets.where('inspectionId').equals(inspection.id).count(),
-    [inspection.id]
-  );
+  // SOMA REAL DAS QUANTIDADES NA LISTA DE VISTORIAS
+  const assetCount = useLiveQuery(async () => {
+    const itensDaVistoria = await db.assets.where('inspectionId').equals(inspection.id).toArray();
+    return itensDaVistoria.reduce((acc, curr) => acc + (Number(curr.quantity) || 1), 0);
+  }, [inspection.id]);
 
   return (
     <Card 
