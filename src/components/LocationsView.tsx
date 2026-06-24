@@ -129,53 +129,62 @@ export function LocationsView({ onSelectInspection }: { onSelectInspection: (id:
     ? allFilteredLocations 
     : allFilteredLocations?.slice(0, displayLimit);
 
-  const handleStartInspection = async (locationId: string) => {
+ const handleStartInspection = async (locationId: string) => {
+    // 1. Procurar se já existe alguma vistoria aberta ou concluída (não finalizada)
     const existing = await db.inspections
       .where({ locationId })
-      .filter(i => i.status !== 'finalizada')
+      .filter(i => !i.deleted && i.status !== 'finalizada')
       .reverse()
       .first();
 
     if (existing) {
-      const confirmContinue = window.confirm("Existe uma vistoria pendente neste local. Deseja CONTINUAR de onde parou?\n\n(Clique em CANCELAR se quiser excluir a atual e começar uma NOVA do zero)");
-      if (confirmContinue) {
-        onSelectInspection(existing.id);
-        return;
-      } else {
-        const confirmClear = window.confirm("🗑️ ATENÇÃO: Deseja apagar permanentemente a vistoria pendente para iniciar uma nova?");
-        if (confirmClear) {
-           const now = Date.now();
-           const assetsToClear = await db.assets.where('inspectionId').equals(existing.id).toArray();
-           for (const asset of assetsToClear) {
-             await db.assets.update(asset.id, { deleted: true, needsSync: 1, updatedAt: now });
-           }
-           await db.inspections.update(existing.id, { deleted: true, needsSync: 1, updatedAt: now });
-           pushLocalChanges();
-           console.log("Vistoria pendente marcada para exclusão");
-        } else {
-           return;
-        }
-      }
+      onSelectInspection(existing.id);
+      return;
     }
 
-    const history = await db.inspections.where('locationId').equals(locationId).toArray();
+    // 2. Buscar a última vistoria homologada (finalizada) deste local
+    const history = await db.inspections.where('locationId').equals(locationId).filter(i => !i.deleted).toArray();
     const lastFinalized = history
       .filter(i => i.status === 'finalizada')
       .sort((a, b) => b.date - a.date)[0];
 
+    const currentYear = new Date().getFullYear();
+
+    // 3. 🚀 REGRA MUNICIPAL DE OURO: Se já existe uma vistoria finalizada DESTE ANO, nós REABRIMOS ela em vez de duplicar!
+    if (lastFinalized) {
+      const lastFinalizedYear = new Date(lastFinalized.date).getFullYear();
+      if (lastFinalizedYear === currentYear) {
+        const confirmReopen = window.confirm(`A vistoria do ano de ${currentYear} para este local já foi homologada. Deseja reabri-la para anexar, editar ou excluir novos itens comprados este ano?`);
+        if (confirmReopen) {
+          await db.inspections.update(lastFinalized.id, {
+            status: 'em_andamento',
+            updatedAt: Date.now(),
+            needsSync: 1
+          });
+          pushLocalChanges();
+          onSelectInspection(lastFinalized.id);
+          return;
+        } else {
+          return; 
+        }
+      }
+    }
+
+    // 4. Se não existia vistoria ou a última é de anos anteriores (ex: ano passado), cria a do novo ano corrente
     const id = generateId();
     await db.inspections.add({
       id,
       locationId,
-      date: Date.now(),
+      date: Date.now(), // Grava a data de abertura original fixa
       participants: [],
       status: 'em_andamento',
       needsSync: 1
     });
     try { await syncInspection(id); } catch(e) { console.error(e) }
 
+    // Traz a herança dos itens antigos se for transição de ano
     if (lastFinalized) {
-      const previousAssets = await db.assets.where('inspectionId').equals(lastFinalized.id).toArray();
+      const previousAssets = await db.assets.where('inspectionId').equals(lastFinalized.id).filter(a => !a.deleted).toArray();
       if (previousAssets.length > 0) {
         const clonedAssets = previousAssets.map(asset => ({
           ...asset, 
