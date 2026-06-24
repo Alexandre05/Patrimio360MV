@@ -13,16 +13,9 @@ function sanitizeForFirestore(obj: any) {
   return newObj;
 }
 
-// 🚀 NOVIDADE: Guarda os "escutadores" para não travar o tablet com escutas repetidas
-let unsubscribers: (() => void)[] = [];
-
 // Synchronize simple collections (Delta Sync: Cloud -> Local)
 export function setupSync() {
   if (!auth.currentUser) return;
-
-  // Limpa as escutas antigas antes de ligar as novas (Economiza RAM do tablet)
-  unsubscribers.forEach(unsub => unsub());
-  unsubscribers = [];
 
   const collections = [
     { name: 'locations', dexie: dexie.locations, pk: 'id' },
@@ -36,20 +29,19 @@ export function setupSync() {
     const lastTimeStr = localStorage.getItem(storageKey);
     const lastSyncTime = parseInt(lastTimeStr || '0');
     
-    // 🚀 NOVIDADE: Recua o relógio do tablet em 1 hora (3.600.000 ms) para "pescar" os itens que o Admin enviou enquanto a tela estava apagada
-    const safeSyncTime = lastSyncTime > 3600000 ? lastSyncTime - 3600000 : 0;
-    
-    console.log(`[Sync Automático] Ligando antena para ${name}. Puxando desde: ${new Date(safeSyncTime).toLocaleTimeString()}`);
+    console.log(`[Sync] Configurando escuta para ${name}. Último sync: ${new Date(lastSyncTime).toLocaleString()}`);
 
-    const q = safeSyncTime > 0 
-      ? query(collection(firestore, name), where('updatedAt', '>', safeSyncTime))
+    const q = lastSyncTime > 0 
+      ? query(collection(firestore, name), where('updatedAt', '>', lastSyncTime))
       : query(collection(firestore, name));
 
-    const unsub = onSnapshot(q, async (snapshot) => {
-      if (snapshot.empty && safeSyncTime > 0) return;
+    onSnapshot(q, async (snapshot) => {
+      if (snapshot.empty && lastSyncTime > 0) return;
       
+      console.log(`[Sync] Recebidas ${snapshot.size} atualizações de ${name}`);
       let maxUpdatedAt = lastSyncTime;
 
+      // Usar uma transação para performance se houver muitos registros
       await dexie.transaction('rw', table as any, async () => {
         for (const change of snapshot.docChanges()) {
           const data = change.doc.data() as any;
@@ -59,6 +51,8 @@ export function setupSync() {
           if (change.type === 'removed' || data.deleted === true) {
             await table.delete(change.doc.id);
           } else {
+            // Preserva o status needsSync local se o item ainda não subiu
+            // mas aqui estamos recebendo do servidor, então o do servidor é mais novo
             await table.put({ [pk]: change.doc.id, ...data, needsSync: 0 });
           }
         }
@@ -70,8 +64,6 @@ export function setupSync() {
     }, (error) => {
       console.error(`[Sync] Erro no stream de ${name}:`, error);
     });
-
-    unsubscribers.push(unsub);
   });
 }
 
@@ -89,6 +81,8 @@ export async function pushLocalChanges() {
     const unsyncedLocations = await dexie.locations
       .filter(loc => loc.needsSync === 1 || loc.needsSync === true as any || String(loc.needsSync) === 'true')
       .toArray();
+    
+    if (unsyncedLocations.length > 0) console.log(`[Sync] Encontrados ${unsyncedLocations.length} locais pendentes.`);
     
     for (const loc of unsyncedLocations) {
       const locRef = doc(firestore, 'locations', loc.id);
@@ -112,6 +106,8 @@ export async function pushLocalChanges() {
       .filter(insp => insp.needsSync === 1 || insp.needsSync === true as any || String(insp.needsSync) === 'true')
       .toArray();
     
+    if (unsyncedInspections.length > 0) console.log(`[Sync] Encontradas ${unsyncedInspections.length} vistorias pendentes.`);
+    
     for (const insp of unsyncedInspections) {
       const inspRef = doc(firestore, 'inspections', insp.id);
       try {
@@ -134,6 +130,8 @@ export async function pushLocalChanges() {
       .filter(asset => asset.needsSync === 1 || asset.needsSync === true as any || String(asset.needsSync) === 'true')
       .toArray();
     
+    if (unsyncedAssets.length > 0) console.log(`[Sync] Encontrados ${unsyncedAssets.length} itens pendentes.`);
+    
     for (const asset of unsyncedAssets) {
       const assetRef = doc(firestore, 'assets', asset.id);
 
@@ -146,6 +144,7 @@ export async function pushLocalChanges() {
       const { needsSync, ...data } = asset;
       data.updatedAt = Date.now();
       
+      // Interceptação para Storage (Evita estouro de 1MB no Firestore)
       const processedPhotos: string[] = [];
       if (asset.photos) {
         for (let index = 0; index < asset.photos.length; index++) {
@@ -156,10 +155,10 @@ export async function pushLocalChanges() {
               processedPhotos.push(url);
             } catch (err) {
               console.error(`[Sync] Falha no upload da foto ${index} do item ${asset.id}:`, err);
-              processedPhotos.push(photo);
+              processedPhotos.push(photo); // Fallback para manter o dado se o upload falhar
             }
           } else {
-            processedPhotos.push(photo);
+            processedPhotos.push(photo); // Já é um link de Storage
           }
         }
       }
@@ -169,6 +168,7 @@ export async function pushLocalChanges() {
       
       await setDoc(assetRef, sanitizeForFirestore(data));
 
+      // Otimização do Banco Local (Dexie): Salva as URLs leves no lugar do Base64 pesado
       await dexie.assets.update(asset.id, { 
         needsSync: 0, 
         updatedAt: data.updatedAt, 
@@ -184,6 +184,7 @@ export async function pushLocalChanges() {
   }
 }
 
+// Specific push helpers
 export async function syncInspection(inspectionId: string) {
   const inspection = await dexie.inspections.get(inspectionId);
   if (!inspection) return;
@@ -233,15 +234,18 @@ export async function syncLocation(locationId: string) {
 export async function forceFullSyncRecovery() {
   console.log("[Recovery] Iniciando recuperação total...");
   
+  // 1. Tenta enviar mudanças pendentes antes de qualquer coisa
   try {
     const pendingCount = await dexie.assets.filter(a => a.needsSync === 1).count();
     if (pendingCount > 0) {
+      console.log(`[Recovery] Tentando sincronizar ${pendingCount} itens pendentes antes do reset...`);
       await pushLocalChanges();
     }
   } catch (e) {
     console.error("[Recovery] Falha ao sincronizar antes do reset:", e);
   }
 
+  // 2. Limpa os marcadores de tempo
   const keys = [
     'lastSyncTime_locations',
     'lastSyncTime_inspections',
@@ -252,14 +256,20 @@ export async function forceFullSyncRecovery() {
   
   keys.forEach(key => localStorage.removeItem(key));
   
+  // 3. Limpa os dados locais que JÁ ESTÃO sincronizados
+  // Isso garante que dados excluídos no Firestore sumam do Dexie local
   try {
     await dexie.locations.filter(l => !l.needsSync).delete();
     await dexie.inspections.filter(i => !i.needsSync).delete();
     await dexie.assets.filter(a => a.needsSync !== 1).delete();
+    console.log("[Recovery] Dados locais sincronizados foram limpos.");
   } catch (e) {
     console.error("[Recovery] Erro ao limpar tabelas locais:", e);
+    // Se falhar em limpar seletivamente, podemos tentar limpar tudo se o usuário confirmar
+    // mas por hora apenas logamos.
   }
 
+  console.log("[Recovery] Cache de sincronização limpo. Recarregando página...");
   window.location.reload();
 }
 
@@ -267,13 +277,19 @@ export async function hardResetAndRescue() {
   const confirm = window.confirm("Isso fará o download de TUDO do Firebase novamente. Deseja continuar?");
   if (!confirm) return;
 
+  // Envia qualquer coisa pendente por segurança
   try {
     await pushLocalChanges(); 
   } catch (e) {
     console.error("[Rescue] Erro ao sincronizar antes do reset:", e);
   }
 
+  // Limpa o controle do Delta Sync
   localStorage.clear();
+
+  // Destrói o banco local para forçar a recriação limpa baseada na nuvem
   await dexie.delete();
+
+  // Recarrega o aplicativo
   window.location.reload();
 }

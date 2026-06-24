@@ -102,6 +102,7 @@ export function Dashboard() {
             return;
          }
 
+         // If it's a location ID
          const locRef = doc(firestore, 'locations', scanned);
          const locSnap = await getDoc(locRef);
          if (locSnap.exists()) {
@@ -118,6 +119,7 @@ export function Dashboard() {
   const activeInspectionsCount = useLiveQuery(() => db.inspections.where('status').equals('em_andamento').count());
   const concludedInspectionsCount = useLiveQuery(() => db.inspections.where('status').anyOf('concluida', 'finalizada').count());
   
+  // SOMA REAL DAS QUANTIDADES NO DASHBOARD
   const totalAssetsCount = useLiveQuery(async () => {
     const todosItens = await db.assets.toArray();
     return todosItens.reduce((acc, curr) => acc + (Number(curr.quantity) || 1), 0);
@@ -160,32 +162,10 @@ export function Dashboard() {
 
       syncAndNotify();
 
-      let interval: any;
       if (isOnline) {
-        interval = setInterval(syncAndNotify, 30000);
+        const interval = setInterval(syncAndNotify, 30000);
+        return () => clearInterval(interval);
       }
-
-      // 🚀 NOVIDADE: Despertador Automático! Quando a tela acende, ele puxa as novidades instantaneamente
-      const handleWakeUp = () => {
-        if (isOnline) {
-          console.log("[Despertador] Tablet acordou! Forçando a busca das cadeiras enviadas pelo admin...");
-          setupSync(); 
-          syncAndNotify(); 
-        }
-      };
-
-      const handleVisibilityChange = () => {
-        if (document.visibilityState === 'visible') handleWakeUp();
-      };
-
-      window.addEventListener('focus', handleWakeUp);
-      document.addEventListener('visibilitychange', handleVisibilityChange);
-
-      return () => {
-        if (interval) clearInterval(interval);
-        window.removeEventListener('focus', handleWakeUp);
-        document.removeEventListener('visibilitychange', handleVisibilityChange);
-      };
     }
   }, [user, isOnline]);
 
@@ -195,6 +175,7 @@ export function Dashboard() {
   });
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
 
+  // Persistence and auto-collapse
   useEffect(() => {
     localStorage.setItem('sidebar_collapsed', JSON.stringify(isSidebarCollapsed));
   }, [isSidebarCollapsed]);
@@ -232,6 +213,7 @@ export function Dashboard() {
 
     setIsResetting(true);
     try {
+      // 1. Limpar banco local Dexie
       await Promise.all([
         db.assets.clear(),
         db.inspections.clear(),
@@ -239,25 +221,30 @@ export function Dashboard() {
         db.notifications.clear()
       ]);
 
+      // 2. Limpar do Firestore se estiver conectado
       if (isOnline) {
         try {
           const { getDocs, collection, deleteDoc, doc } = await import('firebase/firestore');
           
+          // Limpa Bens (assets)
           const assetsSnap = await getDocs(collection(firestore, 'assets'));
           for (const d of assetsSnap.docs) {
             await deleteDoc(doc(firestore, 'assets', d.id));
           }
 
+          // Limpa Vistorias (inspections)
           const inspectionsSnap = await getDocs(collection(firestore, 'inspections'));
           for (const d of inspectionsSnap.docs) {
             await deleteDoc(doc(firestore, 'inspections', d.id));
           }
 
+          // Limpa Ambientes/Locais (locations)
           const locationsSnap = await getDocs(collection(firestore, 'locations'));
           for (const d of locationsSnap.docs) {
             await deleteDoc(doc(firestore, 'locations', d.id));
           }
 
+          // Limpa Alertas (notifications)
           const notificationsSnap = await getDocs(collection(firestore, 'notifications'));
           for (const d of notificationsSnap.docs) {
             await deleteDoc(doc(firestore, 'notifications', d.id));
@@ -268,6 +255,7 @@ export function Dashboard() {
         }
       }
 
+      // 3. Limpa os marcadores de tempo do Delta Sync no localStorage para não sincronizar lixo
       const keys = [
         'lastSyncTime_locations',
         'lastSyncTime_inspections',
@@ -280,7 +268,7 @@ export function Dashboard() {
       alert("✅ SUCESSO: O banco de dados (locais, vistorias, bens e alertas) local e na nuvem foi zerado com sucesso para fins de testes.");
       
       setTimeout(() => {
-        window.location.href = '/'; 
+        window.location.href = '/'; // Recarregar a aplicação na Home
       }, 500);
     } catch (err) {
       console.error("Erro ao zerar sistema:", err);
@@ -336,6 +324,8 @@ export function Dashboard() {
         const confirm = window.confirm("Deseja importar estes dados? Os dados atuais em conflito podem ser substituídos.");
         if (!confirm) return;
 
+        // Limpar bancos para importação limpa (opcional, aqui vamos mesclar)
+        // Usando bulkPut para mesclar
         await Promise.all([
           db.users.bulkPut(data.users || []),
           db.locations.bulkPut(data.locations || []),
@@ -381,6 +371,7 @@ export function Dashboard() {
       case 'home':
         return (
           <div className="flex flex-col gap-10 animate-in fade-in slide-in-from-bottom-4 duration-700">
+            {/* 🚨 Alerta de Cota Excedida */}
             {quotaExceeded && (
               <div className="bg-amber-50 border border-amber-200 rounded-[2.5rem] p-6 flex flex-col md:flex-row items-center gap-6 animate-in slide-in-from-top-4 duration-500 shadow-xl shadow-amber-500/5">
                 <div className="w-16 h-16 bg-white rounded-3xl flex items-center justify-center shadow-lg shadow-amber-500/10 shrink-0">
@@ -389,11 +380,12 @@ export function Dashboard() {
                 <div className="flex flex-col gap-1 text-center md:text-left">
                   <span className="text-lg font-black text-amber-900 tracking-tight uppercase leading-none">Limite de Sincronização Atingido</span>
                   <span className="text-xs font-bold text-amber-600/70 leading-relaxed">
-                    O Google Cloud atingiu o limite gratuito de hoje. <strong>Suas vistorias continuam sendo salvas normalmente neste dispositivo</strong> e serão enviadas para a nuvem automaticamente assim que a cota for reiniciada.
+                    O Google Cloud atingiu o limite gratuito de hoje. <strong>Suas vistorias continuam sendo salvas normalmente neste dispositivo</strong> e serão enviadas para a nuvem automaticamente assim que a cota for reiniciada (geralmente à meia-noite).
                   </span>
                 </div>
               </div>
             )}
+             {/* 🏰 Hero Moderno */}
             <div className="relative overflow-hidden rounded-[2.5rem] bg-white border border-slate-100 p-8 lg:p-12 text-slate-900 shadow-[0_20px_60px_-15px_rgba(0,0,0,0.03)] group">
               <div className="relative z-10 flex flex-col lg:flex-row items-center justify-between gap-12">
                 <div className="flex flex-col gap-6 text-center lg:text-left max-w-2xl">
@@ -416,6 +408,7 @@ export function Dashboard() {
                       Escanear QR
                     </Button>
                     
+                    {/* BOTÃO LIBERADO PARA A COMISSÃO E ADMIN */}
                     <button 
                       onClick={() => {
                         if (window.confirm("Isso irá limpar o cache preso do tablet e forçar o download completo da nuvem. Deseja continuar?")) {
@@ -434,6 +427,7 @@ export function Dashboard() {
                           const confirmCleanup = window.confirm("Isso irá remover vistorias sem itens e locais sem vistorias. Deseja prosseguir?");
                           if (!confirmCleanup) return;
 
+                          // Tenta sincronizar antes de limpar
                           try { await pushLocalChanges(); } catch (e) {}
 
                           const allInspections = await db.inspections.toArray();
@@ -509,6 +503,7 @@ export function Dashboard() {
               <Building2 className="absolute -bottom-24 -right-16 w-80 h-80 text-slate-100 opacity-20 transform -rotate-12 pointer-events-none group-hover:scale-110 transition-transform duration-1000" />
             </div>
 
+            {/* 📊 2. Cards de Resumo */}
             <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
               <SummaryCard 
                 label="Localizações" 
@@ -537,6 +532,7 @@ export function Dashboard() {
               />
             </div>
 
+            {/* 📋 4. Lista de Vistorias Recentes */}
             <div className="flex flex-col gap-6">
               <div className="flex items-center justify-between ml-1 leading-none">
                 <div className="flex flex-col">
@@ -980,6 +976,7 @@ function RecentInspectionRow({ inspection, locationName, onClick }: { inspection
   const isFinalized = inspection.status === 'finalizada';
   const isInProgress = inspection.status === 'em_andamento';
   
+  // SOMA REAL DAS QUANTIDADES NA LISTA DE VISTORIAS
   const assetCount = useLiveQuery(async () => {
     const itensDaVistoria = await db.assets.where('inspectionId').equals(inspection.id).toArray();
     return itensDaVistoria.reduce((acc, curr) => acc + (Number(curr.quantity) || 1), 0);
