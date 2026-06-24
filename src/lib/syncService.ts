@@ -20,22 +20,25 @@ export function setupSync() {
 
   unsubscribers.forEach(unsub => unsub());
   unsubscribers = [];
-  // 🚀 NOVIDADE 100% SYNC: O Vigilante do Comando Global do Administrador
+
+  // 🚀 VIGILANTE DE RESET (À prova de bloqueios de segurança)
   try {
-    const sysRef = doc(firestore, 'system', 'sync_control');
+    const sysRef = doc(firestore, 'locations', 'GLOBAL_RESET_COMMAND');
     const unsubSys = onSnapshot(sysRef, async (snap) => {
       if (snap.exists()) {
         const data = snap.data();
         const localReset = localStorage.getItem('global_reset_time');
         const remoteReset = data.reset_timestamp?.toString();
         
-        // Se a nuvem tem uma data de reset mais nova que a do tablet, o tablet obedece e zera!
+        // Se a nuvem tiver um sinal de Reset mais recente, o tablet obedece e limpa-se sozinho
         if (remoteReset && localReset !== remoteReset) {
           console.warn("🚨 COMANDO DE RESET GLOBAL RECEBIDO DA NUVEM!");
-          localStorage.clear(); // Limpa a memória
-          localStorage.setItem('global_reset_time', remoteReset); // Grava a nova data de segurança
-          await dexie.delete(); // Destrói o banco local fantasma
-          window.location.reload(); // Recarrega para baixar o banco limpo
+          localStorage.clear();
+          localStorage.setItem('global_reset_time', remoteReset);
+          await dexie.locations.clear();
+          await dexie.inspections.clear();
+          await dexie.assets.clear();
+          window.location.reload();
         }
       }
     });
@@ -101,11 +104,7 @@ export async function pushLocalChanges() {
   window.dispatchEvent(new CustomEvent('app-sync-start'));
 
   try {
-    // 1. Sync Locations
-    const unsyncedLocations = await dexie.locations
-      .filter(loc => loc.needsSync === 1 || loc.needsSync === true as any || String(loc.needsSync) === 'true')
-      .toArray();
-    
+    const unsyncedLocations = await dexie.locations.filter(loc => loc.needsSync === 1 || loc.needsSync === true as any).toArray();
     for (const loc of unsyncedLocations) {
       try {
         const locRef = doc(firestore, 'locations', loc.id);
@@ -119,15 +118,11 @@ export async function pushLocalChanges() {
           await dexie.locations.update(loc.id, { needsSync: 0, updatedAt: data.updatedAt });
         }
       } catch (e) {
-        console.error(`[Sync] Falha isolada ao sincronizar local ${loc.id}:`, e);
+        console.error(`[Sync] Falha ao sincronizar local:`, e);
       }
     }
 
-    // 2. Sync Inspections
-    const unsyncedInspections = await dexie.inspections
-      .filter(insp => insp.needsSync === 1 || insp.needsSync === true as any || String(insp.needsSync) === 'true')
-      .toArray();
-    
+    const unsyncedInspections = await dexie.inspections.filter(insp => insp.needsSync === 1 || insp.needsSync === true as any).toArray();
     for (const insp of unsyncedInspections) {
       try {
         const inspRef = doc(firestore, 'inspections', insp.id);
@@ -141,17 +136,12 @@ export async function pushLocalChanges() {
           await dexie.inspections.update(insp.id, { needsSync: 0, updatedAt: data.updatedAt });
         }
       } catch (e) {
-        console.error(`[Sync] Falha isolada ao sincronizar vistoria ${insp.id}:`, e);
+        console.error(`[Sync] Falha ao sincronizar vistoria:`, e);
       }
     }
 
-    // 3. Sync Assets (O PONTO CRÍTICO DA CORREÇÃO)
-    const unsyncedAssets = await dexie.assets
-      .filter(asset => asset.needsSync === 1 || asset.needsSync === true as any || String(asset.needsSync) === 'true')
-      .toArray();
-    
+    const unsyncedAssets = await dexie.assets.filter(asset => asset.needsSync === 1 || asset.needsSync === true as any).toArray();
     for (const asset of unsyncedAssets) {
-      // 🚀 NOVIDADE: Try/Catch isolado para CADA item. Se um falhar, a fila não quebra!
       try {
         const assetRef = doc(firestore, 'assets', asset.id);
 
@@ -175,9 +165,8 @@ export async function pushLocalChanges() {
                 const url = await uploadAssetPhoto(photo, `assets/${asset.id}/photo_${Date.now()}_${index}.jpg`);
                 processedPhotos.push(url);
               } catch (err) {
-                console.error(`[Sync] Falha no upload da foto ${index} do item ${asset.id}:`, err);
                 photoUploadFailed = true;
-                processedPhotos.push(photo); // Mantém base64 localmente para tentar de novo
+                processedPhotos.push(photo);
               }
             } else {
               processedPhotos.push(photo);
@@ -185,27 +174,19 @@ export async function pushLocalChanges() {
           }
         }
 
-        // Se a foto falhou, abortamos O ENVIO DESTE ITEM ESPECÍFICO para não dar erro de limite da Google
         if (photoUploadFailed) {
-          throw new Error("Falha de internet ao subir fotos. Pulando este item temporariamente.");
+          throw new Error("Falha na foto");
         }
 
         data.photos = processedPhotos;
         if (data.isPublic === undefined) data.isPublic = true;
         
         await setDoc(assetRef, sanitizeForFirestore(data));
-
-        await dexie.assets.update(asset.id, { 
-          needsSync: 0, 
-          updatedAt: data.updatedAt, 
-          photos: processedPhotos 
-        });
+        await dexie.assets.update(asset.id, { needsSync: 0, updatedAt: data.updatedAt, photos: processedPhotos });
       } catch (assetErr) {
-        console.error(`[Sync] Erro isolado ao sincronizar o item ${asset.id}:`, assetErr);
-        // Continua rodando o FOR loop para o próximo item
+        console.error(`[Sync] Erro no item:`, assetErr);
       }
     }
-  
     window.dispatchEvent(new CustomEvent('app-sync-end', { detail: { success: true } }));
   } catch (error) {
     window.dispatchEvent(new CustomEvent('app-sync-end', { detail: { success: false } }));
@@ -217,7 +198,6 @@ export async function pushLocalChanges() {
 export async function syncInspection(inspectionId: string) {
   const inspection = await dexie.inspections.get(inspectionId);
   if (!inspection) return;
-
   window.dispatchEvent(new CustomEvent('app-sync-start'));
   try {
     const inspectionRef = doc(firestore, 'inspections', inspection.id);
@@ -240,7 +220,6 @@ export async function syncInspection(inspectionId: string) {
 export async function syncLocation(locationId: string) {
   const location = await dexie.locations.get(locationId);
   if (!location) return;
-
   window.dispatchEvent(new CustomEvent('app-sync-start'));
   try {
     const locationRef = doc(firestore, 'locations', location.id);
@@ -261,62 +240,25 @@ export async function syncLocation(locationId: string) {
 }
 
 export async function forceFullSyncRecovery() {
-  console.log("[Recovery] Iniciando recuperação total...");
-  
-  try {
-    const pendingCount = await dexie.assets.filter(a => a.needsSync === 1).count();
-    if (pendingCount > 0) {
-      await pushLocalChanges();
-    }
-  } catch (e) {
-    console.error("[Recovery] Falha ao sincronizar antes do reset:", e);
-  }
-
-  // 🚀 NOVIDADE: Trava de Segurança
   const stillPending = await dexie.assets.filter(a => a.needsSync === 1).count();
   if (stillPending > 0) {
     alert("⚠️ ALERTA: Há itens pendentes que não subiram por falha de conexão. O processo foi cancelado para não perder dados.");
     return;
   }
-
-  const keys = [
-    'lastSyncTime_locations',
-    'lastSyncTime_inspections',
-    'lastSyncTime_assets',
-    'lastSyncTime_users',
-    'lastSyncTime_sector_inspections'
-  ];
-  
+  const keys = ['lastSyncTime_locations', 'lastSyncTime_inspections', 'lastSyncTime_assets', 'lastSyncTime_users', 'lastSyncTime_sector_inspections'];
   keys.forEach(key => localStorage.removeItem(key));
-  
-  try {
-    await dexie.locations.filter(l => !l.needsSync).delete();
-    await dexie.inspections.filter(i => !i.needsSync).delete();
-    await dexie.assets.filter(a => a.needsSync !== 1).delete();
-  } catch (e) {
-    console.error("[Recovery] Erro ao limpar tabelas locais:", e);
-  }
-
+  await dexie.locations.filter(l => !l.needsSync).delete();
+  await dexie.inspections.filter(i => !i.needsSync).delete();
+  await dexie.assets.filter(a => a.needsSync !== 1).delete();
   window.location.reload();
 }
 
 export async function hardResetAndRescue() {
-  const confirm = window.confirm("Isso fará o download de TUDO do Firebase novamente. Deseja continuar?");
-  if (!confirm) return;
-
-  try {
-    await pushLocalChanges(); 
-  } catch (e) {
-    console.error("[Rescue] Erro ao sincronizar antes do reset:", e);
-  }
-
-  // 🚀 NOVIDADE: Trava de Segurança Nuclear
   const stillPending = await dexie.assets.filter(a => a.needsSync === 1).count();
   if (stillPending > 0) {
     alert("⚠️ CRÍTICO: Não foi possível enviar todos os seus dados para a nuvem. O Reset foi bloqueado para você não perder itens.");
     return;
   }
-
   localStorage.clear();
   await dexie.delete();
   window.location.reload();
