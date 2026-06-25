@@ -405,19 +405,17 @@ export function Dashboard() {
                       variant="outline" 
                       icon={Database} 
                       onClick={async () => {
-                        if (window.confirm("Isso irá limpar o cache local e baixar todos os dados da nuvem novamente. Deseja continuar?")) {
+                        if (window.confirm("Isso irá limpar apenas os dados locais (vistorias e locais) e baixar tudo da nuvem novamente. Seu login será mantido. Deseja continuar?")) {
                           try {
-                            // Limpa todas as tabelas do Dexie sem afetar o IndexedDB do Firebase Auth ou o localStorage
-                            await db.transaction('rw', db.tables, async () => {
-                              for (const table of db.tables) {
-                                await table.clear();
-                              }
-                            });
-                            // Recarrega a página para forçar a sincronização limpa
+                            // Pega o nome de todas as tabelas do Dexie no app e limpa uma por uma.
+                            // Isso garante que o banco do Firebase Auth NÃO seja tocado.
+                            await Promise.all(db.tables.map(table => table.clear()));
+                            
+                            // Recarrega a página para puxar os dados do zero
                             window.location.reload();
                           } catch (error) {
-                            console.error("Erro ao limpar cache local:", error);
-                            alert("Erro ao sincronizar. Tente novamente.");
+                            console.error("Erro ao limpar tabelas:", error);
+                            alert("Ocorreu um erro ao limpar o cache. Tente novamente.");
                           }
                         }
                       }} 
