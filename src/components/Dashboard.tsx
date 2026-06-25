@@ -404,9 +404,21 @@ export function Dashboard() {
                     <Button 
                       variant="outline" 
                       icon={Database} 
-                      onClick={() => {
+                      onClick={async () => {
                         if (window.confirm("Isso irá limpar o cache local e baixar todos os dados da nuvem novamente. Deseja continuar?")) {
-                          forceFullSyncRecovery();
+                          try {
+                            // Limpa todas as tabelas do Dexie sem afetar o IndexedDB do Firebase Auth ou o localStorage
+                            await db.transaction('rw', db.tables, async () => {
+                              for (const table of db.tables) {
+                                await table.clear();
+                              }
+                            });
+                            // Recarrega a página para forçar a sincronização limpa
+                            window.location.reload();
+                          } catch (error) {
+                            console.error("Erro ao limpar cache local:", error);
+                            alert("Erro ao sincronizar. Tente novamente.");
+                          }
                         }
                       }} 
                       className="px-10 h-16 text-xs uppercase tracking-widest bg-white"
