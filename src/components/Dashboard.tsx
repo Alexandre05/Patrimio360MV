@@ -115,7 +115,7 @@ export function Dashboard() {
   }, []);
 
   const inspections = useLiveQuery(() => db.inspections.orderBy('date').reverse().limit(10).toArray());
-  const locations = useLiveQuery(() => db.locations.toArray());
+  const locations = useLiveQuery(() => db.locations.filter(l => !l.deleted).toArray());
   const activeInspectionsCount = useLiveQuery(() => db.inspections.where('status').equals('em_andamento').count());
   const concludedInspectionsCount = useLiveQuery(() => db.inspections.where('status').anyOf('concluida', 'finalizada').count());
   const totalAssetsCount = useLiveQuery(() => db.assets.count());
@@ -401,6 +401,18 @@ export function Dashboard() {
                     <Button variant="outline" icon={Search} onClick={() => setActiveTab('scanner')} className="px-10 h-16 text-xs uppercase tracking-widest bg-white">
                       Escanear QR
                     </Button>
+                    <Button 
+                      variant="outline" 
+                      icon={Database} 
+                      onClick={() => {
+                        if (window.confirm("Isso irá limpar o cache local e baixar todos os dados da nuvem novamente. Deseja continuar?")) {
+                          forceFullSyncRecovery();
+                        }
+                      }} 
+                      className="px-10 h-16 text-xs uppercase tracking-widest bg-white"
+                    >
+                      Sincronização Forçada
+                    </Button>
                     
                     {isManager && (
                       <div className="flex items-center gap-4 ml-2">
@@ -451,18 +463,6 @@ export function Dashboard() {
                           }
                           else alert('Tudo em ordem.');
                         }} className="text-[10px] font-bold uppercase text-slate-400 hover:text-indigo-600 transition-colors">Higienizar</button>
-
-                        <button 
-                          onClick={() => {
-                            if (window.confirm("Isso irá limpar o cache local e baixar todos os dados da nuvem novamente. Deseja continuar?")) {
-                              forceFullSyncRecovery();
-                            }
-                          }}
-                          className="text-[10px] font-bold uppercase text-slate-400 hover:text-indigo-600 transition-colors flex items-center gap-1"
-                        >
-                          <Database className="w-3 h-3" />
-                          Sincronização Forçada
-                        </button>
 
                         <button 
                           onClick={handleResetSystem}
