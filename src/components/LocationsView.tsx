@@ -919,24 +919,10 @@ export function LocationsView({ onSelectInspection }: { onSelectInspection: (id:
                      {getDepartmentStats(activeParentId).totalAssets} Itens Totais
                    </div>
                 </div>
-                {/* 
-                   Se tiver filhos, removemos o botão de auditar DIRETAMENTE o pai, 
-                   forçando o usuário a entrar nos filhos.
-                */}
-                {locations?.some(l => l.parentId === activeParentId) ? (
-                  <div className="bg-amber-400 text-amber-900 px-6 py-4 rounded-2xl flex items-center gap-2 shadow-lg animate-in fade-in duration-500">
-                     <AlertCircle className="w-5 h-5" />
-                     <span className="text-[9px] font-black uppercase tracking-widest">Abra as salas abaixo para auditar</span>
-                  </div>
-                ) : (
-                  <Button 
-                    variant="accent" 
-                    onClick={() => handleStartInspection(activeParentId)}
-                    className="rounded-2xl h-14 px-8 bg-white text-indigo-600 hover:bg-indigo-50 border-none shadow-xl shadow-black/10 font-black uppercase tracking-widest text-[9px]"
-                  >
-                    Auditar Local <Plus className="w-4 h-4 ml-2" />
-                  </Button>
-                )}
+                <div className="bg-amber-400 text-amber-900 px-6 py-4 rounded-2xl flex items-center gap-2 shadow-lg animate-in fade-in duration-500">
+                  <AlertCircle className="w-5 h-5" />
+                  <span className="text-[9px] font-black uppercase tracking-widest">Abra as salas abaixo para auditar</span>
+                </div>
               </div>
             </Card>
           )}
@@ -1030,6 +1016,7 @@ export function LocationsView({ onSelectInspection }: { onSelectInspection: (id:
             />
             {allFilteredLocations?.filter(loc => loc.latitude && loc.longitude).map(loc => {
                 const hasChildren = locations?.some(l => l.parentId === loc.id);
+                const isParent = !loc.parentId || hasChildren;
                 return (
                   <Marker key={loc.id} position={[loc.latitude!, loc.longitude!]}>
                     <Popup className="custom-popup">
@@ -1040,9 +1027,9 @@ export function LocationsView({ onSelectInspection }: { onSelectInspection: (id:
                          </div>
                          <Button 
                            size="sm"
-                           variant={hasChildren ? "secondary" : "primary"}
+                           variant={isParent ? "secondary" : "primary"}
                            onClick={() => {
-                             if (hasChildren) {
+                             if (isParent) {
                                setViewMode('list'); // Volta para a lista
                                setActiveParentId(loc.id); // Entra na pasta
                              } else {
@@ -1051,7 +1038,7 @@ export function LocationsView({ onSelectInspection }: { onSelectInspection: (id:
                            }}
                            className="mt-2 w-full text-[10px] font-black uppercase tracking-[0.2em] h-10 rounded-xl"
                          >
-                           {hasChildren 
+                           {isParent 
                              ? 'VER DEPARTAMENTOS' 
                              : (getLatestStatusCount(loc.id)?.status === 'em_andamento' ? 'CONTINUAR' : 'AUDITAR')}
                          </Button>
@@ -1149,7 +1136,7 @@ export function LocationsView({ onSelectInspection }: { onSelectInspection: (id:
                 </div>
                 <div className="flex flex-col items-end gap-3">
                   {/* Para Salas (Filhos): Mostra o status normal */}
-                  {!hasChildren && status && (
+                  {!isParent && status && (
                     <div className={cn(
                       "text-[9px] font-black uppercase tracking-[0.15em] px-4 py-1.5 rounded-full border shadow-sm transition-all",
                       status === 'em_andamento' ? "bg-indigo-50 text-indigo-600 border-indigo-100 ring-4 ring-indigo-500/5" :
@@ -1161,7 +1148,7 @@ export function LocationsView({ onSelectInspection }: { onSelectInspection: (id:
                   )}
 
                   {/* Para Departamentos (Pais): Mostra o progresso consolidado de todas as salas */}
-                  {hasChildren && deptStats?.hasAny && (
+                  {isParent && deptStats?.hasAny && (
                     <div className="flex flex-col items-end gap-1.5">
                       <span className="text-[8px] font-black text-slate-400 uppercase tracking-widest">Resumo Consolidado</span>
                       <div className="flex flex-wrap items-center justify-end gap-2">
@@ -1173,7 +1160,7 @@ export function LocationsView({ onSelectInspection }: { onSelectInspection: (id:
                   )}
 
                   {/* Se o Pai tiver salas mas nenhuma vistoria iniciada */}
-                  {hasChildren && !deptStats?.hasAny && deptStats && deptStats.childrenCount > 0 && (
+                  {isParent && !deptStats?.hasAny && deptStats && deptStats.childrenCount >= 0 && (
                     <div className="text-[9px] px-3 py-1.5 rounded-full border border-slate-200 bg-slate-50 text-slate-400 font-black uppercase tracking-widest shadow-sm">
                       {deptStats.childrenCount} Ambientes Internos
                     </div>
@@ -1242,7 +1229,7 @@ export function LocationsView({ onSelectInspection }: { onSelectInspection: (id:
               </div>
 
               <div className="pt-2 flex flex-col gap-4">
-                {hasChildren ? (
+                {isParent ? (
                   <Button 
                     variant="accent" 
                     size="sm" 
