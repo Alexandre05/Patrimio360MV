@@ -1,3 +1,14 @@
+/**
+ * PATRI360 - Sistema de Auditoria e Gestão Patrimonial
+ * Copyright (c) 2026 [Alexandre Barreto Menna Prefeitura de Manoel Viana]. Todos os direitos reservados.
+ *
+ * Este software é confidencial e propriedade intelectual exclusiva do autor.
+ * É estritamente proibida a reprodução, cópia, distribuição, modificação, 
+ * engenharia reversa ou uso não autorizado deste código-fonte, no todo ou em parte, 
+ * sem o consentimento prévio, expresso e por escrito do detentor dos direitos.
+ * * Protegido nos termos da Lei de Proteção de Programas de Computador.
+ */
+
 import React, { useState, useRef } from 'react';
 import { Card, Button, Input, Select, Textarea } from './UI';
 import { useOnlineStatus } from '../lib/hooks';
@@ -344,6 +355,7 @@ const handleAddItem = async () => {
         createdAt: Date.now(),
         hash: hash,
         needsSync: 1,
+        isPublic: true, // 🚀 ADICIONE ESTA LINHA PARA QUE A COMISSÃO VEJA,
         quantity: newItem.quantity
       });
       toast("Item adicionado à vistoria!", "success", "Novo Patrimônio");

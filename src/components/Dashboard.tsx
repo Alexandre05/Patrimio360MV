@@ -118,11 +118,13 @@ export function Dashboard() {
   const locations = useLiveQuery(() => db.locations.toArray());
   const activeInspectionsCount = useLiveQuery(() => db.inspections.where('status').equals('em_andamento').count());
   const concludedInspectionsCount = useLiveQuery(() => db.inspections.where('status').anyOf('concluida', 'finalizada').count());
-  
-  // SOMA REAL DAS QUANTIDADES NO DASHBOARD
+  // SOMA REAL DAS QUANTIDADES NO DASHBOARD (Corrigida)
   const totalAssetsCount = useLiveQuery(async () => {
-    const todosItens = await db.assets.toArray();
-    return todosItens.reduce((acc, curr) => acc + (Number(curr.quantity) || 1), 0);
+    // 1. Buscamos apenas os ativos que NÃO foram deletados
+    const ativos = await db.assets.filter(a => !a.deleted).toArray();
+    
+    // 2. Somamos a quantidade apenas destes ativos válidos
+    return ativos.reduce((acc, curr) => acc + (Number(curr.quantity) || 1), 0);
   });
 
   // 🚀 NOVIDADE: Busca vistorias prontas para o Administrador homologar
@@ -439,17 +441,40 @@ export function Dashboard() {
                     </Button>
                     
                     {/* BOTÃO LIBERADO PARA A COMISSÃO E ADMIN */}
-                    <button 
-                      onClick={() => {
-                        if (window.confirm("Isso irá limpar o cache preso do tablet e forçar o download completo da nuvem. Deseja continuar?")) {
-                          hardResetAndRescue();
-                        }
-                      }}
-                      className="text-[10px] font-bold uppercase text-slate-400 hover:text-indigo-600 transition-colors flex items-center gap-1 ml-4"
-                    >
-                      <Database className="w-3 h-3" />
-                      Sincronização Forçada
-                    </button>  
+                  <Button 
+  variant="outline" 
+  icon={Database} 
+  onClick={async () => {
+    if (window.confirm("Isso fará uma limpeza segura e baixará todos os dados da nuvem novamente. Seu login será mantido. Deseja continuar?")) {
+      try {
+        // 1. Limpamos APENAS as tabelas de dados, PRESERVANDO a tabela "users" e "settings" para NÃO DESLOGAR
+        await db.locations.clear();
+        await db.inspections.clear();
+        await db.assets.clear();
+        await db.notifications.clear();
+
+        // 2. Apagamos os marcadores de sincronização para forçar o Firebase a baixar tudo do zero da nuvem
+        const keys = [
+          'lastSyncTime_locations',
+          'lastSyncTime_inspections',
+          'lastSyncTime_assets',
+          'lastSyncTime_users',
+          'lastSyncTime_notifications'
+        ];
+        keys.forEach(key => localStorage.removeItem(key));
+        
+        // 3. Recarregamos a página
+        window.location.reload();
+      } catch (error) {
+        console.error("Erro ao sincronizar:", error);
+        alert("Ocorreu um erro ao limpar o cache. Tente novamente.");
+      }
+    }
+  }} 
+  className="px-10 h-16 text-xs uppercase tracking-widest bg-white"
+>
+  Sincronização Forçada
+</Button>  
                     
                     {isManager && (
                       <div className="flex items-center gap-4 ml-4 border-l border-slate-200 pl-4">

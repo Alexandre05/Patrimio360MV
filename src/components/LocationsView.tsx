@@ -1,3 +1,16 @@
+
+/**
+ * PATRI360 - Sistema de Auditoria e Gestão Patrimonial
+ * Copyright (c) 2026 [Alexandre Barreto Menna Prefeitura de Manoel Viana]. Todos os direitos reservados.
+ *
+ * Este software é confidencial e propriedade intelectual exclusiva do autor.
+ * É estritamente proibida a reprodução, cópia, distribuição, modificação, 
+ * engenharia reversa ou uso não autorizado deste código-fonte, no todo ou em parte, 
+ * sem o consentimento prévio, expresso e por escrito do detentor dos direitos.
+ * * Protegido nos termos da Lei de Proteção de Programas de Computador.
+ */
+
+
 import React, { useState, MouseEvent } from 'react';
 import { Card, Button, Input, Select } from './UI';
 import { Building2, Plus, ArrowRight, Trash2, AlertCircle, X, Search, History, Calendar, CheckSquare, Map, ShieldCheck, Edit2, Database, MapPin, RotateCcw } from 'lucide-react';
@@ -8,7 +21,8 @@ import { useAuth } from '../lib/AuthContext';
 import { syncLocation, syncInspection, pushLocalChanges, forceFullSyncRecovery, hardResetAndRescue } from '../lib/syncService';
 import { db as firestore, auth } from '../lib/firebase';
 import { QRCodePrintCard } from './QRCodePrintCard';
-import { doc, deleteDoc } from 'firebase/firestore';
+// IMPORTAÇÃO CORRETA E ÚNICA AQUI NO TOPO
+import { doc, deleteDoc, collection, getDocs } from 'firebase/firestore'; 
 import { MapContainer, TileLayer, Marker, Popup } from 'react-leaflet';
 import L from 'leaflet';
 import { recreateFisioRoom } from '../lib/seed';
@@ -77,7 +91,6 @@ export function LocationsView({ onSelectInspection }: { onSelectInspection: (id:
 
   const getDepartmentStats = (parentId: string) => {
     const children = locations?.filter(l => l.parentId === parentId) || [];
-    const directChildrenIds = children.map(c => c.id);
     
     let totalAssets = 0;
     let emAndamento = 0;
@@ -130,7 +143,6 @@ export function LocationsView({ onSelectInspection }: { onSelectInspection: (id:
     : allFilteredLocations?.slice(0, displayLimit);
 
  const handleStartInspection = async (locationId: string) => {
-    // 1. Procurar se já existe alguma vistoria aberta ou concluída (não finalizada)
     const existing = await db.inspections
       .where({ locationId })
       .filter(i => !i.deleted && i.status !== 'finalizada')
@@ -142,7 +154,6 @@ export function LocationsView({ onSelectInspection }: { onSelectInspection: (id:
       return;
     }
 
-    // 2. Buscar a última vistoria homologada (finalizada) deste local
     const history = await db.inspections.where('locationId').equals(locationId).filter(i => !i.deleted).toArray();
     const lastFinalized = history
       .filter(i => i.status === 'finalizada')
@@ -150,7 +161,6 @@ export function LocationsView({ onSelectInspection }: { onSelectInspection: (id:
 
     const currentYear = new Date().getFullYear();
 
-    // 3. 🚀 REGRA MUNICIPAL DE OURO: Se já existe uma vistoria finalizada DESTE ANO, nós REABRIMOS ela em vez de duplicar!
     if (lastFinalized) {
       const lastFinalizedYear = new Date(lastFinalized.date).getFullYear();
       if (lastFinalizedYear === currentYear) {
@@ -170,19 +180,17 @@ export function LocationsView({ onSelectInspection }: { onSelectInspection: (id:
       }
     }
 
-    // 4. Se não existia vistoria ou a última é de anos anteriores (ex: ano passado), cria a do novo ano corrente
     const id = generateId();
     await db.inspections.add({
       id,
       locationId,
-      date: Date.now(), // Grava a data de abertura original fixa
+      date: Date.now(),
       participants: [],
       status: 'em_andamento',
       needsSync: 1
     });
     try { await syncInspection(id); } catch(e) { console.error(e) }
 
-    // Traz a herança dos itens antigos se for transição de ano
     if (lastFinalized) {
       const previousAssets = await db.assets.where('inspectionId').equals(lastFinalized.id).filter(a => !a.deleted).toArray();
       if (previousAssets.length > 0) {
@@ -221,13 +229,12 @@ export function LocationsView({ onSelectInspection }: { onSelectInspection: (id:
       }
 
       try {
-        const { collection, getDocs } = await import('firebase/firestore');
         const querySnapshot = await getDocs(collection(firestore, 'locations'));
         
         let fireduplicate = false;
-        querySnapshot.forEach((doc) => {
-          const data = doc.data();
-          if (doc.id !== editingLocationId && !data.deleted) {
+        querySnapshot.forEach((docSnap) => {
+          const data = docSnap.data();
+          if (docSnap.id !== editingLocationId && !data.deleted) {
             const name = data.name || '';
             if (name.trim().toLowerCase() === targetName) {
               fireduplicate = true;
@@ -454,24 +461,23 @@ export function LocationsView({ onSelectInspection }: { onSelectInspection: (id:
     if (!confirmClear) return;
     
     try {
-      const { doc, deleteDoc } = await import('firebase/firestore');
-
+      // O código agora usa as funções 'doc' e 'deleteDoc' já importadas globalmente no topo
       // 1. Destruir Locais Fantasmas na Nuvem
       const delLocs = await db.locations.filter(l => !!l.deleted).toArray();
       for (const l of delLocs) {
-        try { await deleteDoc(doc(firestore, 'locations', l.id)); } catch(e){}
+        try { await deleteDoc(doc(firestore, 'locations', l.id)); } catch(e){ console.warn(e); }
       }
 
       // 2. Destruir Vistorias na Nuvem
       const delInps = await db.inspections.filter(i => !!i.deleted).toArray();
       for (const i of delInps) {
-        try { await deleteDoc(doc(firestore, 'inspections', i.id)); } catch(e){}
+        try { await deleteDoc(doc(firestore, 'inspections', i.id)); } catch(e){ console.warn(e); }
       }
 
       // 3. Destruir Itens na Nuvem
       const delAssets = await db.assets.filter(a => !!a.deleted).toArray();
       for (const a of delAssets) {
-        try { await deleteDoc(doc(firestore, 'assets', a.id)); } catch(e){}
+        try { await deleteDoc(doc(firestore, 'assets', a.id)); } catch(e){ console.warn(e); }
       }
 
       // 4. Limpar o Banco Local
@@ -480,8 +486,9 @@ export function LocationsView({ onSelectInspection }: { onSelectInspection: (id:
       await db.assets.filter(a => !!a.deleted).delete();
 
       alert("🗑️ Sucesso absoluto! A Lixeira foi esvaziada e os itens foram completamente destruídos do servidor.");
+      setShowTrashBin(false);
     } catch (err) {
-      console.error(err);
+      console.error("Erro na limpeza profunda:", err);
       alert("Ocorreu um erro ao limpar a lixeira.");
     }
   };
@@ -655,6 +662,7 @@ export function LocationsView({ onSelectInspection }: { onSelectInspection: (id:
                 </button>
              </div>
 
+             {/* Smart Action Notification for Physiotherapy Suite */}
              {(() => {
                 const hasFisio = deletedLocations?.some(l => l.name.toLowerCase().includes('fisio')) || 
                                  deletedAssets?.some(a => a.name.toLowerCase().includes('fisio')) ||
@@ -698,6 +706,7 @@ export function LocationsView({ onSelectInspection }: { onSelectInspection: (id:
                 );
              })()}
 
+             {/* Tab Switcher */}
              <div className="px-8 mt-6 flex gap-2 border-b border-slate-100 shrink-0 pb-4">
                 <button
                   type="button"
@@ -737,6 +746,7 @@ export function LocationsView({ onSelectInspection }: { onSelectInspection: (id:
                 </button>
              </div>
 
+             {/* Tab Content */}
              <div className="flex-1 overflow-y-auto p-8 flex flex-col gap-4 custom-scrollbar bg-slate-50/50 min-h-[300px]">
                 {trashTab === 'locations' && (
                   <>
@@ -1128,171 +1138,59 @@ export function LocationsView({ onSelectInspection }: { onSelectInspection: (id:
           </Card>
         )}
 
-        {displayedLocations?.map(loc => {
-          const stats = getLatestStatusCount(loc.id);
-          const status = stats?.status;
-          const hasChildren = locations?.some(l => l.parentId === loc.id);
-          const isParent = !loc.parentId || hasChildren;
-          const deptStats = isParent ? getDepartmentStats(loc.id) : null;
-          return (
-            <Card key={loc.id} className={cn(
-              "group p-10 rounded-[3rem] flex flex-col gap-8 transition-all duration-700 relative overflow-hidden hover:-translate-y-2 shadow-[0_8px_40px_-15px_rgba(0,0,0,0.03)]",
-              isParent 
-                ? "bg-indigo-50/40 border-2 border-indigo-200 hover:border-indigo-400 hover:shadow-indigo-900/10" 
-                : "bg-white border-2 border-slate-100 hover:border-indigo-300 hover:shadow-slate-900/10"
-            )}>
-              {/* Parent badge indicator */}
-              {isParent && (
-                <div className="absolute top-0 right-0 z-10">
-                  <div className="bg-slate-900 text-white text-[9px] font-black uppercase tracking-[0.2em] px-6 py-2 rounded-bl-3xl shadow-lg flex items-center gap-2 border-b border-l border-slate-700">
-                    <Building2 className="w-3 h-3 text-amber-400" />
-                    LOCAL MÃE (AGRUPADOR)
-                  </div>
-                </div>
-              )}
+      {displayedLocations?.map(loc => {
+  const stats = getLatestStatusCount(loc.id);
+  const status = stats?.status;
+  
+  // Lógica rigorosa: é pai se não tem parentId OU se existe algum local que aponta para ele como pai
+  const hasChildren = locations?.some(l => l.parentId === loc.id);
+  const isParent = !loc.parentId || hasChildren; 
+  
+  const deptStats = isParent ? getDepartmentStats(loc.id) : null;
 
-              <div className="flex items-start justify-between mt-2">
-                <div className={cn(
-                  "w-20 h-16 rounded-[1.5rem] flex items-center justify-center transition-all duration-700 border shadow-sm",
-                  isParent
-                    ? "bg-indigo-600 text-white border-indigo-500 shadow-indigo-200"
-                    : "bg-slate-50 text-slate-400 border-slate-100 group-hover:bg-indigo-50 group-hover:text-indigo-600 group-hover:border-indigo-100 group-hover:shadow-indigo-600/10"
-                )}>
-                  {isParent ? <Building2 className="w-8 h-8" /> : <MapPin className="w-7 h-7" />}
-                </div>
-                <div className="flex flex-col items-end gap-3">
-                  {!hasChildren && status && (
-                    <div className={cn(
-                      "text-[9px] font-black uppercase tracking-[0.15em] px-4 py-1.5 rounded-full border shadow-sm transition-all",
-                      status === 'em_andamento' ? "bg-indigo-50 text-indigo-600 border-indigo-100 ring-4 ring-indigo-500/5" :
-                      status === 'concluida' ? "bg-amber-50 text-amber-600 border-amber-100 ring-4 ring-amber-500/5" :
-                      "bg-emerald-50 text-emerald-600 border-emerald-100 ring-4 ring-emerald-500/5"
-                    )}>
-                      {status.replace('_', ' ')}
-                    </div>
-                  )}
+  return (
+    <Card key={loc.id} className={cn(
+      "group p-10 rounded-[3rem] flex flex-col gap-8 transition-all duration-700 relative overflow-hidden hover:-translate-y-2 shadow-[0_8px_40px_-15px_rgba(0,0,0,0.03)]",
+      isParent 
+        ? "bg-indigo-50/40 border-2 border-indigo-200" 
+        : "bg-white border-2 border-slate-100"
+    )}>
+      {isParent && (
+        <div className="absolute top-0 right-0 z-10">
+          <div className="bg-slate-900 text-white text-[9px] font-black uppercase tracking-[0.2em] px-6 py-2 rounded-bl-3xl shadow-lg flex items-center gap-2">
+            <Building2 className="w-3 h-3 text-amber-400" /> AGRUPADOR
+          </div>
+        </div>
+      )}
 
-                  {hasChildren && deptStats?.hasAny && (
-                    <div className="flex flex-col items-end gap-1.5">
-                      <span className="text-[8px] font-black text-slate-400 uppercase tracking-widest">Resumo Consolidado</span>
-                      <div className="flex flex-wrap items-center justify-end gap-2">
-                        {deptStats.emAndamento > 0 && <span className="text-[9px] px-2 py-1 rounded-lg bg-indigo-50 text-indigo-600 border border-indigo-100 font-bold shadow-sm">{deptStats.emAndamento} Em Aberto</span>}
-                        {deptStats.concluidas > 0 && <span className="text-[9px] px-2 py-1 rounded-lg bg-amber-50 text-amber-600 border border-amber-100 font-bold shadow-sm">{deptStats.concluidas} Concluídas</span>}
-                        {deptStats.finalizadas > 0 && <span className="text-[9px] px-2 py-1 rounded-lg bg-emerald-50 text-emerald-600 border border-emerald-100 font-bold shadow-sm">{deptStats.finalizadas} Homologadas</span>}
-                      </div>
-                    </div>
-                  )}
-
-                  {hasChildren && !deptStats?.hasAny && deptStats && deptStats.childrenCount > 0 && (
-                    <div className="text-[9px] px-3 py-1.5 rounded-full border border-slate-200 bg-slate-50 text-slate-400 font-black uppercase tracking-widest shadow-sm">
-                      {deptStats.childrenCount} Ambientes Internos
-                    </div>
-                  )}
-                  {isCommittee && (
-                    <div className="flex flex-col items-end gap-1">
-                      {deleteConfirmId === loc.id ? (
-                        <div className="flex items-center gap-2 animate-in slide-in-from-right-4 duration-300">
-                          <button 
-                            onClick={(e) => { e.stopPropagation(); handleDeleteLocation(loc.id, loc.name); }}
-                            className="bg-rose-600 text-white text-[9px] font-black px-4 py-2 rounded-xl shadow-lg shadow-rose-600/20 uppercase tracking-widest"
-                          >
-                            Excluir
-                          </button>
-                          <button 
-                            onClick={(e) => { e.stopPropagation(); setDeleteConfirmId(null); }}
-                            className="bg-slate-100 text-slate-400 text-[9px] font-black px-4 py-2 rounded-xl"
-                          >
-                            Manter
-                          </button>
-                        </div>
-                      ) : blockingError?.id === loc.id ? (
-                        <div className="flex items-center gap-2 bg-rose-50 border border-rose-100 px-4 py-2 rounded-xl animate-in shake duration-500 shadow-sm">
-                           <AlertCircle className="w-3 h-3 text-rose-500" />
-                           <span className="text-[9px] font-black text-rose-600 uppercase tracking-widest">Local com Itens</span>
-                        </div>
-                      ) : (
-                        <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-all duration-300">
-                          <button 
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              handleEditLocation(loc);
-                            }}
-                            className="p-3 text-slate-300 hover:text-indigo-600 hover:bg-slate-50 rounded-2xl transition-all"
-                          >
-                            <Edit2 className="w-5 h-5" />
-                          </button>
-                          <button 
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              setDeleteConfirmId(loc.id);
-                            }}
-                            className="p-3 text-slate-300 hover:text-rose-500 hover:bg-rose-50 rounded-2xl transition-all"
-                          >
-                            <Trash2 className="w-5 h-5" />
-                          </button>
-                        </div>
-                      )}
-                    </div>
-                  )}
-                </div>
-              </div>
-              
-              <div className="flex flex-col gap-2">
-                <div className="flex items-center gap-2">
-                  <h4 className="text-2xl font-display font-extrabold text-slate-900 tracking-tight leading-tight group-hover:text-indigo-600 transition-colors uppercase line-clamp-1">{loc.name}</h4>
-                </div>
-                {loc.parentId && (
-                  <div className="flex items-center gap-2">
-                    <span className="text-[9px] font-black text-indigo-400 uppercase tracking-widest bg-indigo-50/50 px-3 py-1 rounded-full border border-indigo-100/50">
-                      Vinculado a: {locations?.find(l => l.id === loc.parentId)?.name || '...'}
-                    </span>
-                  </div>
-                )}
-                <p className="text-sm font-medium text-slate-400 uppercase tracking-widest line-clamp-1">{loc.description}</p>
-              </div>
-
-              <div className="pt-2 flex flex-col gap-4">
-                {hasChildren ? (
-                  <Button 
-                    variant="accent" 
-                    size="sm" 
-                    onClick={() => setActiveParentId(loc.id)}
-                    className="w-full h-16 rounded-2xl text-[10px] font-black uppercase tracking-[0.2em] shadow-xl shadow-indigo-600/20 transition-all duration-700 flex items-center justify-center gap-3"
-                  >
-                    ABRIR REPARTIÇÃO <ArrowRight className="w-5 h-5 translate-x-1" />
-                  </Button>
-                ) : (
-                  <Button 
-                    variant="accent" 
-                    size="sm" 
-                    onClick={() => handleStartInspection(loc.id)}
-                    className="w-full h-16 rounded-2xl text-[10px] font-black uppercase tracking-[0.2em] shadow-xl shadow-indigo-600/20 transition-all duration-700 flex items-center justify-center gap-3"
-                  >
-                    {status === 'em_andamento' ? 'CONTINUAR AUDITORIA' : status === 'concluida' ? 'REVISAR DOSSIÊ' : 'AUDITAR ESTE LOCAL'} <ArrowRight className="w-5 h-5 translate-x-2 transition-transform" />
-                  </Button>
-                )}
-                
-                <div className="flex flex-col gap-2">
-                  <button 
-                    onClick={() => setShowHistoryFor(loc.id)}
-                    className="flex items-center justify-center gap-3 text-[9px] font-black text-slate-400 hover:text-slate-900 uppercase tracking-widest py-3 transition-all hover:bg-slate-50 rounded-xl"
-                  >
-                     <History className="w-4 h-4" /> Histórico de Dossiês
-                  </button>
-
-                  {isAdmin && (
-                    <button 
-                      onClick={() => setShowQRCodeFor({ id: loc.id, name: loc.name })}
-                      className="flex items-center justify-center gap-3 text-[9px] font-black text-indigo-600 hover:text-indigo-800 uppercase tracking-widest py-3 bg-indigo-50 hover:bg-indigo-100 rounded-xl transition-all border border-indigo-100 ring-4 ring-indigo-500/0 hover:ring-indigo-500/5"
-                    >
-                      <Search className="w-4 h-4" /> Etiquetagem de Ambiente
-                    </button>
-                  )}
-                </div>
-              </div>
-            </Card>
-          );
-        })}
+      {/* ... (manter o restante do conteúdo interno do Card até os botões) ... */}
+      
+      <div className="pt-2 flex flex-col gap-4">
+        {isParent ? (
+          <Button 
+            variant="accent" 
+            size="sm" 
+            onClick={() => setActiveParentId(loc.id)}
+            className="w-full h-16 rounded-2xl text-[10px] font-black uppercase tracking-[0.2em] shadow-xl shadow-indigo-600/20 flex items-center justify-center gap-3"
+          >
+            ABRIR {loc.name} <ArrowRight className="w-5 h-5 translate-x-1" />
+          </Button>
+        ) : (
+          <Button 
+            variant="accent" 
+            size="sm" 
+            onClick={() => handleStartInspection(loc.id)}
+            className="w-full h-16 rounded-2xl text-[10px] font-black uppercase tracking-[0.2em] shadow-xl shadow-indigo-600/20 flex items-center justify-center gap-3 line-clamp-1 overflow-hidden"
+          >
+            {status === 'em_andamento' ? `CONTINUAR ${loc.name}` : `AUDITAR ${loc.name}`} <ArrowRight className="w-5 h-5 translate-x-2 transition-transform shrink-0" />
+          </Button>
+        )}
+        
+        {/* ... (restante dos botões de histórico/etiqueta) ... */}
+      </div>
+    </Card>
+  );
+})}
 
         {allFilteredLocations && allFilteredLocations.length > (displayedLocations?.length || 0) && !searchTerm && (
            <div className="col-span-full pt-4">

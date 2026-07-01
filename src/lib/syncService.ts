@@ -1,3 +1,13 @@
+/**
+ * PATRI360 - Sistema de Auditoria e Gestão Patrimonial
+ * Copyright (c) 2026 [Alexandre Barreto Menna Prefeitura de Manoel Viana]. Todos os direitos reservados.
+ *
+ * Este software é confidencial e propriedade intelectual exclusiva do autor.
+ * É estritamente proibida a reprodução, cópia, distribuição, modificação, 
+ * engenharia reversa ou uso não autorizado deste código-fonte, no todo ou em parte, 
+ * sem o consentimento prévio, expresso e por escrito do detentor dos direitos.
+ * * Protegido nos termos da Lei de Proteção de Programas de Computador.
+ */
 import { db as dexie } from './db';
 import { db as firestore, auth, handleFirestoreError } from './firebase';
 import { collection, doc, setDoc, onSnapshot, query, where, deleteDoc } from 'firebase/firestore';
@@ -104,6 +114,7 @@ export async function pushLocalChanges() {
   window.dispatchEvent(new CustomEvent('app-sync-start'));
 
   try {
+    // 1. Sincronizar Locais
     const unsyncedLocations = await dexie.locations.filter(loc => loc.needsSync === 1 || loc.needsSync === true as any).toArray();
     for (const loc of unsyncedLocations) {
       try {
@@ -122,6 +133,7 @@ export async function pushLocalChanges() {
       }
     }
 
+    // 2. Sincronizar Vistorias
     const unsyncedInspections = await dexie.inspections.filter(insp => insp.needsSync === 1 || insp.needsSync === true as any).toArray();
     for (const insp of unsyncedInspections) {
       try {
@@ -140,6 +152,7 @@ export async function pushLocalChanges() {
       }
     }
 
+    // 3. Sincronizar Itens (Refatorado para salvar fotos como Base64 diretamente)
     const unsyncedAssets = await dexie.assets.filter(asset => asset.needsSync === 1 || asset.needsSync === true as any).toArray();
     for (const asset of unsyncedAssets) {
       try {
@@ -154,41 +167,28 @@ export async function pushLocalChanges() {
         const { needsSync, ...data } = asset;
         data.updatedAt = Date.now();
         
-        const processedPhotos: string[] = [];
-        let photoUploadFailed = false;
-
+        // Mantemos a lógica de manter a foto como veio (Base64)
+        // Isso ignora o Firebase Storage e salva direto no documento do Firestore
         if (asset.photos) {
-          for (let index = 0; index < asset.photos.length; index++) {
-            const photo = asset.photos[index];
-            if (typeof photo === 'string' && photo.startsWith('data:image')) {
-              try {
-                const url = await uploadAssetPhoto(photo, `assets/${asset.id}/photo_${Date.now()}_${index}.jpg`);
-                processedPhotos.push(url);
-              } catch (err) {
-                photoUploadFailed = true;
-                processedPhotos.push(photo);
-              }
-            } else {
-              processedPhotos.push(photo);
-            }
-          }
+           data.photos = asset.photos;
         }
 
-        if (photoUploadFailed) {
-          throw new Error("Falha na foto");
-        }
-
-        data.photos = processedPhotos;
         if (data.isPublic === undefined) data.isPublic = true;
         
         await setDoc(assetRef, sanitizeForFirestore(data));
-        await dexie.assets.update(asset.id, { needsSync: 0, updatedAt: data.updatedAt, photos: processedPhotos });
+        await dexie.assets.update(asset.id, { 
+           needsSync: 0, 
+           updatedAt: data.updatedAt, 
+           photos: data.photos 
+        });
       } catch (assetErr) {
         console.error(`[Sync] Erro no item:`, assetErr);
       }
     }
+    
     window.dispatchEvent(new CustomEvent('app-sync-end', { detail: { success: true } }));
   } catch (error) {
+    console.error("[Sync] Erro crítico na sincronização:", error);
     window.dispatchEvent(new CustomEvent('app-sync-end', { detail: { success: false } }));
   } finally {
     isPushing = false;
