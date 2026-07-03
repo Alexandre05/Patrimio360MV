@@ -1,10 +1,11 @@
 import React, { useEffect, useState, useRef } from 'react';
 import { Html5QrcodeScanner, Html5QrcodeScanType } from 'html5-qrcode';
-import { Camera, X, Box, CheckCircle2, ChevronRight, Share, Search, Info, ExternalLink } from 'lucide-react';
+import { Camera, X, CheckCircle2, Search, Info, ExternalLink, QrCode, ScanLine } from 'lucide-react';
 import { Button, Card } from './UI';
 import { db, Inspection, Asset } from '../lib/db';
 import { db as firestore, auth } from '../lib/firebase';
 import { doc, getDoc, collection, query, where, getDocs, limit } from 'firebase/firestore';
+import { cn } from '../lib/utils';
 
 export function ScannerView({ onOpenInspection }: { onOpenInspection: (id: string, locationId: string) => void }) {
   const [scanResult, setScanResult] = useState<string | null>(null);
@@ -16,8 +17,8 @@ export function ScannerView({ onOpenInspection }: { onOpenInspection: (id: strin
     const scanner = new Html5QrcodeScanner(
       "qr-reader",
       {
-        fps: 10,
-        qrbox: { width: 250, height: 250 },
+        fps: 15, // Aumentado para leitura mais rápida
+        qrbox: { width: 280, height: 280 },
         supportedScanTypes: [Html5QrcodeScanType.SCAN_TYPE_CAMERA],
         rememberLastUsedCamera: true,
       },
@@ -41,7 +42,7 @@ export function ScannerView({ onOpenInspection }: { onOpenInspection: (id: strin
         });
       },
       (error) => {
-        // Ignore generic scan errors
+        // Ignora os erros de leitura em tempo real (foco, luz, etc)
       }
     );
 
@@ -50,7 +51,7 @@ export function ScannerView({ onOpenInspection }: { onOpenInspection: (id: strin
          scannerRef.current.clear().catch(console.error);
       }
     };
-  }, []); // Run once on mount
+  }, []); 
 
   const handleScan = async (text: string) => {
     setScanResult(text);
@@ -59,7 +60,7 @@ export function ScannerView({ onOpenInspection }: { onOpenInspection: (id: strin
     let isLocal = false;
     let id = "";
 
-    // Check for Deep Link URL patterns
+    // Parse inteligente do QR Code
     if (text.includes("/vistoria/")) {
       isVistoria = true;
       id = text.split("/vistoria/")[1]?.split("?")[0];
@@ -68,7 +69,6 @@ export function ScannerView({ onOpenInspection }: { onOpenInspection: (id: strin
       id = text.split("/local/")[1]?.split("?")[0];
     } else if (text.includes("/item/") || text.includes("/asset/")) {
       id = text.split("/item/")[1]?.split("?")[0] || text.split("/asset/")[1]?.split("?")[0];
-      // We will handle asset search below
     } else if (text.startsWith("VISTORIA_ID:")) {
       isVistoria = true;
       id = text.replace("VISTORIA_ID:", "");
@@ -76,7 +76,6 @@ export function ScannerView({ onOpenInspection }: { onOpenInspection: (id: strin
       isLocal = true;
       id = text.replace("LOCAL_ID:", "");
     } else {
-      // Could be a patrimony number directly or an asset ID
       id = text;
     }
 
@@ -85,17 +84,17 @@ export function ScannerView({ onOpenInspection }: { onOpenInspection: (id: strin
     try {
       const isOnline = window.navigator.onLine;
 
-      // 1. Try to check if it's a known Asset by ID or Patrimony (Dexie first)
+      // 1. Procura Local Dexie (Item)
       const assetById = await db.assets.get(id);
       const assetByPatrimony = await db.assets.where('patrimonyNumber').equals(id).first();
       const asset = assetById || assetByPatrimony;
 
       if (asset) {
-        onOpenInspection(asset.inspectionId, ''); // Opening inspection where it belongs
+        onOpenInspection(asset.inspectionId, ''); 
         return;
       }
 
-      // Step 2: Let's check if it's an inspection ID in Dexie
+      // 2. Procura Local Dexie (Vistoria)
       if (isVistoria) {
          const localInsp = await db.inspections.get(id);
          if (localInsp) {
@@ -104,8 +103,8 @@ export function ScannerView({ onOpenInspection }: { onOpenInspection: (id: strin
          }
       }
 
-      if (!window.navigator.onLine) {
-         setError("Dados não disponíveis offline");
+      if (!isOnline) {
+         setError("Item não encontrado na memória offline.");
          setScanResult(null);
          setLoading(false);
          if (scannerRef.current) {
@@ -114,7 +113,7 @@ export function ScannerView({ onOpenInspection }: { onOpenInspection: (id: strin
          return;
       }
 
-      // Check Cloud if online
+      // 3. Procura na Nuvem (Firestore)
       if (isVistoria) {
          const inspRef = doc(firestore, 'inspections', id);
          const inspSnap = await getDoc(inspRef);
@@ -122,21 +121,11 @@ export function ScannerView({ onOpenInspection }: { onOpenInspection: (id: strin
            const data = inspSnap.data() as Inspection;
            await db.inspections.put({ id: inspSnap.id, ...(data as any) } as any);
            
-           // Fetch assets - restricted query for public security compatibility
            let assetsQuery;
            if (auth.currentUser) {
-             assetsQuery = query(
-               collection(firestore, 'assets'), 
-               where('inspectionId', '==', inspSnap.id),
-               limit(100)
-             );
+             assetsQuery = query(collection(firestore, 'assets'), where('inspectionId', '==', inspSnap.id), limit(100));
            } else {
-             assetsQuery = query(
-               collection(firestore, 'assets'), 
-               where('inspectionId', '==', inspSnap.id),
-               where('isPublic', '==', true),
-               limit(100)
-             );
+             assetsQuery = query(collection(firestore, 'assets'), where('inspectionId', '==', inspSnap.id), where('isPublic', '==', true), limit(100));
            }
            
            try {
@@ -144,7 +133,7 @@ export function ScannerView({ onOpenInspection }: { onOpenInspection: (id: strin
              const assetsPromises = assetsSnap.docs.map(doc => db.assets.put({ id: doc.id, ...(doc.data() as any) } as any));
              await Promise.all(assetsPromises);
            } catch(e) {
-             console.warn("Assets sync failed (likely permission-related), continuing with metadata only.");
+             console.warn("Sincronização de itens restrita.");
            }
 
            onOpenInspection(inspSnap.id, data.locationId);
@@ -158,7 +147,6 @@ export function ScannerView({ onOpenInspection }: { onOpenInspection: (id: strin
            return;
          }
       } else {
-        // Global Asset Search by ID or Patrimony in Firestore
         const assetRef = doc(firestore, 'assets', id);
         const assetSnap = await getDoc(assetRef);
         
@@ -166,7 +154,6 @@ export function ScannerView({ onOpenInspection }: { onOpenInspection: (id: strin
         if (assetSnap.exists()) {
           foundAssetData = assetSnap.data();
         } else {
-          // Search by patrimony number
           const q = query(collection(firestore, 'assets'), where('patrimonyNumber', '==', id), limit(1));
           const qSnap = await getDocs(q);
           if (!qSnap.empty) {
@@ -180,7 +167,7 @@ export function ScannerView({ onOpenInspection }: { onOpenInspection: (id: strin
         }
       }
 
-      setError("Código não reconhecido ou Vistoria não encontrada.");
+      setError("QR Code inválido ou item não registado.");
       setScanResult(null);
       if (scannerRef.current) {
         try { scannerRef.current.resume(); } catch(e){}
@@ -189,9 +176,9 @@ export function ScannerView({ onOpenInspection }: { onOpenInspection: (id: strin
     } catch (err: any) {
       console.error(err);
       if (err.message && err.message.toLowerCase().includes('permission')) {
-         setError("Erro 403: Acesso negado aos dados. Verifique login.");
+         setError("Acesso Negado (Erro 403).");
       } else {
-         setError("Erro ao processar o QR Code.");
+         setError("Falha na leitura do código.");
       }
       setScanResult(null);
       if (scannerRef.current) {
@@ -205,8 +192,6 @@ export function ScannerView({ onOpenInspection }: { onOpenInspection: (id: strin
   };
 
   const openGoogleLens = () => {
-    // There is no direct web API to trigger Google Lens perfectly across platforms,
-    // but on Android we can try an intent. On iOS/others, we just open Google.
     const isAndroid = /Android/i.test(navigator.userAgent);
     if (isAndroid) {
       window.location.href = "intent://#Intent;scheme=googleapp;package=com.google.android.googlequicksearchbox;action=com.google.zxing.client.android.SCAN;end";
@@ -217,97 +202,170 @@ export function ScannerView({ onOpenInspection }: { onOpenInspection: (id: strin
 
   return (
     <div className="flex flex-col min-h-[80vh] md:min-h-0 animate-in fade-in duration-700 pb-20">
-      <div className="flex flex-col items-center mb-12 mt-10 text-center gap-6">
-        <div className="w-20 h-20 bg-indigo-600 rounded-[2rem] flex items-center justify-center shadow-2xl shadow-indigo-600/30 transform hover:scale-110 transition-transform duration-500">
-           <Camera className="w-10 h-10 text-white" />
+      
+      {/* ESTILOS CIRÚRGICOS PARA O HTML5-QRCODE */}
+      <style>{`
+        #qr-reader {
+          border: none !important;
+          border-radius: 2.5rem !important;
+          overflow: hidden !important;
+          position: relative !important;
+          background: #0f172a !important;
+        }
+        #qr-reader video {
+          object-fit: cover !important;
+          width: 100% !important;
+          height: 100% !important;
+          border-radius: 2.5rem !important;
+        }
+        /* Ocultar lixo visual da biblioteca */
+        #qr-reader__dashboard_section_csr,
+        #qr-reader__dashboard_section_swaplink,
+        #qr-reader__status_span,
+        #qr-reader__header_message {
+          display: none !important;
+        }
+        #qr-reader button {
+          background: #4f46e5 !important;
+          color: white !important;
+          border: none !important;
+          padding: 10px 20px !important;
+          border-radius: 12px !important;
+          font-weight: 900 !important;
+          text-transform: uppercase !important;
+          letter-spacing: 1px !important;
+          margin-bottom: 10px !important;
+        }
+        /* Animação do Laser */
+        @keyframes surgicalScan {
+          0%, 100% { top: 5%; opacity: 0; }
+          10%, 90% { opacity: 1; }
+          50% { top: 95%; }
+        }
+        .laser-beam {
+          animation: surgicalScan 2.5s cubic-bezier(0.53, 0.21, 0.29, 0.67) infinite;
+        }
+      `}</style>
+
+      {/* CABEÇALHO */}
+      <div className="flex flex-col items-center mb-8 mt-6 text-center gap-4">
+        <div className="w-16 h-16 bg-slate-900 rounded-[1.5rem] flex items-center justify-center shadow-xl shadow-slate-900/20 transform hover:scale-105 transition-transform duration-500">
+           <ScanLine className="w-8 h-8 text-white" />
         </div>
-        <div className="flex flex-col gap-2">
-          <h2 className="text-4xl font-display font-extrabold text-slate-900 tracking-tight leading-tight">Mapeamento Inteligente</h2>
-          <p className="text-sm font-medium text-slate-400 uppercase tracking-[0.2em] max-w-sm mx-auto leading-relaxed">
-            Aponte para o QR Code de patrimônio ou ambiente para iniciar a auditoria instantânea.
+        <div className="flex flex-col gap-1">
+          <h2 className="text-3xl font-display font-extrabold text-slate-900 tracking-tight">Leitura Dinâmica</h2>
+          <p className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em]">
+            Auditoria Instantânea de Patrimônio
           </p>
         </div>
       </div>
 
-      <div style={{ display: scanResult ? 'none' : 'block' }} className="flex-1 flex flex-col max-w-xl mx-auto w-full">
-        <Card className="p-8 md:p-10 overflow-hidden shadow-[0_40px_100px_-20px_rgba(0,0,0,0.1)] rounded-[3.5rem] bg-white border-none relative">
-           <div className="relative rounded-[2rem] overflow-hidden bg-slate-900 shadow-[inset_0_4px_30px_rgba(0,0,0,0.8)] border-8 border-slate-50">
-             <div id="qr-reader" className="w-full text-center qr-reader-container !border-none min-h-[350px] flex items-center justify-center opacity-80" />
-             
-             {/* Scanner Overlay (Mira) */}
-             <div className="absolute inset-0 z-10 pointer-events-none flex flex-col items-center justify-center gap-6">
-                 <div className="w-64 h-64 md:w-72 md:h-72 border-2 border-white/10 rounded-[2.5rem] relative">
-                    {/* Corner marks */}
-                    <div className="absolute -top-2 -left-2 w-14 h-14 border-t-[10px] border-l-[10px] border-indigo-500 rounded-tl-[1.5rem]"></div>
-                    <div className="absolute -top-2 -right-2 w-14 h-14 border-t-[10px] border-r-[10px] border-indigo-500 rounded-tr-[1.5rem]"></div>
-                    <div className="absolute -bottom-2 -left-2 w-14 h-14 border-b-[10px] border-l-[10px] border-indigo-500 rounded-bl-[1.5rem]"></div>
-                    <div className="absolute -bottom-2 -right-2 w-14 h-14 border-b-[10px] border-r-[10px] border-indigo-500 rounded-br-[1.5rem]"></div>
-                    
-                    {/* Scanning animation line */}
-                    <div className="absolute top-0 left-4 tracking-line w-[calc(100%-2rem)] h-[4px] rounded-full bg-indigo-400 shadow-[0_0_20px_6px_rgba(129,140,248,0.8)]"></div>
-                 </div>
-                 
-                 <div className="bg-indigo-600/90 backdrop-blur-md text-white text-[10px] font-black uppercase tracking-[0.2em] px-8 py-3.5 rounded-2xl border border-white/20 shadow-2xl">
-                    Posicione o código no centro
-                 </div>
-             </div>
-           </div>
+      {/* ÁREA DO SCANNER */}
+      <div className="flex-1 flex flex-col max-w-md mx-auto w-full px-2 relative">
+        <div className={cn(
+            "relative w-full aspect-[3/4] rounded-[2.5rem] overflow-hidden shadow-2xl transition-all duration-700 bg-slate-900 ring-8 ring-white",
+            loading && scanResult ? "scale-95 opacity-0 pointer-events-none absolute" : "scale-100 opacity-100"
+        )}>
            
-           {error && (
-             <div className="mt-8 flex items-center gap-4 bg-rose-50 border border-rose-100 p-6 rounded-3xl animate-in shake duration-500 text-rose-600 shadow-xl shadow-rose-900/5">
-                <div className="w-10 h-10 rounded-xl bg-white flex items-center justify-center shrink-0 border border-rose-100 shadow-sm">
-                  <X className="w-5 h-5" />
-                </div>
-                <p className="text-xs font-bold uppercase tracking-widest leading-relaxed">{error}</p>
-             </div>
-           )}
-
-           <div className="mt-10 flex flex-col gap-6">
-              <div className="flex items-start gap-4 p-6 bg-slate-50 border border-slate-100 rounded-[2rem] text-slate-500 text-sm transition-all hover:bg-slate-100/50 group">
-                <div className="w-10 h-10 rounded-xl bg-white flex items-center justify-center shrink-0 border border-slate-100 shadow-sm group-hover:scale-110 transition-transform">
-                   <Info className="w-5 h-5 text-indigo-600" />
-                </div>
-                <div className="flex flex-col gap-1">
-                  <p className="text-xs font-bold text-slate-900 uppercase tracking-widest">Dica de Captura</p>
-                  <p className="text-xs font-medium leading-relaxed opacity-80">Afaste levemente o dispositivo caso o foco esteja demorando ou utilize iluminação direta sobre o selo patrimonial.</p>
-                </div>
-              </div>
-
-              <button 
-                onClick={openGoogleLens}
-                className="w-full h-20 bg-white border-2 border-slate-50 hover:border-indigo-100 hover:bg-indigo-50/10 transition-all duration-500 rounded-[2rem] flex items-center px-8 gap-5 group shadow-sm hover:shadow-xl hover:shadow-indigo-900/5"
-              >
-                <div className="w-12 h-12 rounded-xl bg-slate-50 group-hover:bg-indigo-600 flex items-center justify-center shadow-inner transition-all duration-500">
-                   <Search className="w-6 h-6 text-slate-400 group-hover:text-white" />
-                </div>
-                <div className="flex flex-col items-start gap-1">
-                   <span className="font-display font-extrabold text-slate-900 text-base tracking-tight group-hover:text-indigo-600 transition-colors">Scanner Externo</span>
-                   <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Google Lens / Nativo</span>
-                </div>
-                <ExternalLink className="w-5 h-5 text-slate-300 group-hover:text-indigo-600 transition-all ml-auto group-hover:translate-x-1 group-hover:-translate-y-1" />
-              </button>
+           <div id="qr-reader" className="w-full h-full flex items-center justify-center" />
+           
+           {/* MÁSCARA "CIRÚRGICA" SOBRE A CÂMARA */}
+           <div className="absolute inset-0 pointer-events-none z-10 flex flex-col items-center justify-center">
+               {/* Sombra de contorno (Efeito Nativo) */}
+               <div className="w-[260px] h-[260px] border-[3px] border-white/20 rounded-[2.5rem] relative shadow-[0_0_0_9999px_rgba(15,23,42,0.65)]">
+                  
+                  {/* Bordas de Foco (Cantos) */}
+                  <div className="absolute -top-1 -left-1 w-12 h-12 border-t-[5px] border-l-[5px] border-white rounded-tl-[2.4rem]"></div>
+                  <div className="absolute -top-1 -right-1 w-12 h-12 border-t-[5px] border-r-[5px] border-white rounded-tr-[2.4rem]"></div>
+                  <div className="absolute -bottom-1 -left-1 w-12 h-12 border-b-[5px] border-l-[5px] border-white rounded-bl-[2.4rem]"></div>
+                  <div className="absolute -bottom-1 -right-1 w-12 h-12 border-b-[5px] border-r-[5px] border-white rounded-br-[2.4rem]"></div>
+                  
+                  {/* Laser Animado */}
+                  <div className="absolute left-[5%] right-[5%] h-[2px] bg-emerald-400 laser-beam shadow-[0_0_15px_4px_rgba(52,211,153,0.7)] rounded-full z-20"></div>
+               </div>
+               
+               <div className="mt-8 bg-slate-900/90 backdrop-blur-md text-white text-[9px] font-black uppercase tracking-[0.3em] px-6 py-3 rounded-full border border-white/10 shadow-2xl">
+                  Enquadre o Selo ou Etiqueta
+               </div>
            </div>
-        </Card>
+        </div>
+           
+        {/* MENSAGEM DE ERRO VISUAL */}
+        {error && !loading && (
+          <div className="mt-6 flex items-center gap-4 bg-rose-950 text-white p-5 rounded-[2rem] animate-in slide-in-from-bottom-4 duration-500 shadow-2xl shadow-rose-900/20">
+            <div className="w-12 h-12 rounded-[1.2rem] bg-rose-500 flex items-center justify-center shrink-0">
+               <X className="w-6 h-6 text-white" />
+            </div>
+            <div className="flex flex-col">
+               <span className="text-[10px] font-black uppercase tracking-[0.2em] text-rose-300">Falha na Leitura</span>
+               <span className="text-sm font-bold">{error}</span>
+            </div>
+          </div>
+        )}
+
+        {/* BOTÕES AUXILIARES */}
+        <div className={cn("mt-6 flex flex-col gap-4 transition-all duration-500", loading && scanResult ? "opacity-0" : "opacity-100")}>
+           <button 
+             onClick={openGoogleLens}
+             className="w-full h-16 bg-white border border-slate-200 hover:border-indigo-600 transition-all duration-300 rounded-[2rem] flex items-center justify-between px-6 group shadow-sm hover:shadow-xl hover:shadow-indigo-900/10"
+           >
+             <div className="flex items-center gap-4">
+                <div className="w-10 h-10 rounded-xl bg-slate-50 group-hover:bg-indigo-600 flex items-center justify-center transition-colors">
+                   <Search className="w-5 h-5 text-slate-400 group-hover:text-white" />
+                </div>
+                <div className="flex flex-col items-start">
+                   <span className="font-display font-bold text-slate-900 text-sm group-hover:text-indigo-600 transition-colors">Scanner Externo</span>
+                   <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Usar Google Lens</span>
+                </div>
+             </div>
+             <ExternalLink className="w-4 h-4 text-slate-300 group-hover:text-indigo-600 transition-transform group-hover:translate-x-1" />
+           </button>
+        </div>
       </div>
 
+      {/* ESTADO DE SUCESSO (LOCK-ON E CARREGAMENTO PREMIUM) */}
       {loading && scanResult && (
-        <div className="flex-1 flex flex-col items-center justify-center py-20 gap-10 animate-in fade-in zoom-in-95 duration-700">
-           <div className="relative">
-             <div className="w-32 h-32 bg-emerald-100 rounded-[3rem] flex items-center justify-center animate-pulse shadow-[0_40px_80px_-15px_rgba(16,185,129,0.4)] border-4 border-white relative z-10">
-                <CheckCircle2 className="w-16 h-16 text-emerald-600 drop-shadow-md" />
-             </div>
-             <div className="absolute inset-0 bg-emerald-400 rounded-[3rem] animate-ping opacity-10"></div>
-             <div className="absolute -inset-4 bg-emerald-50 rounded-[4rem] animate-pulse opacity-50 -z-10"></div>
-           </div>
-           <div className="flex flex-col items-center gap-4">
-             <h3 className="font-display font-black text-4xl text-slate-900 tracking-tight">Capturado!</h3>
-             <div className="flex items-center gap-3 bg-white px-6 py-3 rounded-2xl shadow-xl shadow-slate-200/50 border border-slate-50">
-                <div className="w-2 h-2 bg-emerald-500 rounded-full animate-bounce"></div>
-                <p className="text-slate-400 font-black uppercase tracking-[0.3em] text-[10px]">Puxando dossiê...</p>
-             </div>
+        <div className="absolute inset-0 z-50 flex flex-col items-center justify-center bg-slate-50 animate-in fade-in zoom-in-95 duration-500 p-6">
+           <div className="w-full max-w-sm flex flex-col items-center gap-8">
+               
+               {/* Ícone de Sucesso com Pulsação */}
+               <div className="relative">
+                 <div className="w-32 h-32 bg-emerald-500 rounded-[3rem] flex items-center justify-center shadow-[0_20px_60px_-15px_rgba(16,185,129,0.5)] z-10 relative transform hover:scale-105 transition-transform">
+                    <CheckCircle2 className="w-16 h-16 text-white" />
+                 </div>
+                 <div className="absolute inset-0 bg-emerald-400 rounded-[3rem] animate-ping opacity-20"></div>
+               </div>
+
+               {/* Textos e Feedback */}
+               <div className="text-center flex flex-col gap-2 w-full">
+                 <h3 className="font-display font-extrabold text-3xl text-slate-900 tracking-tight">Código Validado</h3>
+                 
+                 {/* Exibição cirúrgica do ID escaneado (Resumo) */}
+                 <div className="mt-4 bg-white border border-slate-200 p-4 rounded-3xl flex items-center gap-4 shadow-sm w-full mx-auto">
+                    <div className="w-12 h-12 bg-slate-50 rounded-2xl flex items-center justify-center shrink-0">
+                       <QrCode className="w-6 h-6 text-slate-400" />
+                    </div>
+                    <div className="flex flex-col items-start overflow-hidden w-full text-left">
+                       <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Hash / ID Identificado</span>
+                       <span className="text-sm font-bold text-slate-900 truncate w-full">{scanResult.length > 25 ? `${scanResult.substring(0, 25)}...` : scanResult}</span>
+                    </div>
+                 </div>
+
+                 {/* Barra de progresso animada */}
+                 <div className="mt-8 flex flex-col items-center gap-3">
+                    <div className="flex items-center gap-2">
+                       <div className="w-2 h-2 bg-emerald-500 rounded-full animate-bounce" style={{ animationDelay: '0ms' }}></div>
+                       <div className="w-2 h-2 bg-emerald-500 rounded-full animate-bounce" style={{ animationDelay: '150ms' }}></div>
+                       <div className="w-2 h-2 bg-emerald-500 rounded-full animate-bounce" style={{ animationDelay: '300ms' }}></div>
+                    </div>
+                    <p className="text-slate-400 font-black uppercase tracking-[0.2em] text-[10px]">A resgatar o dossiê do ativo...</p>
+                 </div>
+               </div>
+
            </div>
         </div>
       )}
+
     </div>
   );
 }
