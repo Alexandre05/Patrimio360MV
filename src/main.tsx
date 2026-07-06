@@ -1,11 +1,15 @@
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import App from './App';
+
+// @ts-ignore
 import './index.css';
+
 import { AuthProvider } from './lib/AuthContext';
 import { ToastProvider } from './lib/ToastContext';
 
 // Importação do motor PWA (Service Worker)
+// @ts-ignore
 import { registerSW } from 'virtual:pwa-register';
 
 // Regista o Service Worker para cache offline e atualizações automáticas
