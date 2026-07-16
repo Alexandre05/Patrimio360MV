@@ -44,7 +44,8 @@ import { UsersView } from './UsersView';
 import { NotificationsView } from './NotificationsView';
 import { checkAndGenerateNotifications } from '../lib/NotificationService';
 import { cn } from '../lib/utils';
-import { setupSync, pushLocalChanges, forceFullSyncRecovery, hardResetAndRescue } from '../lib/syncService';
+// Adicionado processSyncQueue para rodar a fila inteligente no fundo
+import { setupSync, pushLocalChanges, processSyncQueue, forceFullSyncRecovery, hardResetAndRescue } from '../lib/syncService';
 import { db as firestore, auth } from '../lib/firebase';
 import { doc, deleteDoc, getDoc } from 'firebase/firestore';
 import { ScannerView } from './ScannerView';
@@ -118,19 +119,21 @@ export function Dashboard() {
   const locations = useLiveQuery(() => db.locations.toArray());
   const activeInspectionsCount = useLiveQuery(() => db.inspections.where('status').equals('em_andamento').count());
   const concludedInspectionsCount = useLiveQuery(() => db.inspections.where('status').anyOf('concluida', 'finalizada').count());
-  // SOMA REAL DAS QUANTIDADES NO DASHBOARD (Corrigida)
+  
+  // SOMA REAL DAS QUANTIDADES NO DASHBOARD
   const totalAssetsCount = useLiveQuery(async () => {
-    // 1. Buscamos apenas os ativos que NÃO foram deletados
     const ativos = await db.assets.filter(a => !a.deleted).toArray();
-    
-    // 2. Somamos a quantidade apenas destes ativos válidos
     return ativos.reduce((acc, curr) => acc + (Number(curr.quantity) || 1), 0);
   });
 
-  // 🚀 NOVIDADE: Busca vistorias prontas para o Administrador homologar
+  // Busca vistorias prontas para o Administrador homologar
   const pendingHomologation = useLiveQuery(() => db.inspections.where('status').equals('concluida').toArray());
 
-  const unreadNotifications = useLiveQuery(() => user ? db.notifications.where('targetUserId').equals(user.userId).and(n => !n.read).count() : 0, [user]);
+  // CORREÇÃO: Usando .filter() em vez de .and() para compatibilidade máxima com Dexie
+  const unreadNotifications = useLiveQuery(() => 
+    user ? db.notifications.where('targetUserId').equals(user.userId).filter(n => !n.read).count() : 0, 
+  [user]) || 0;
+
   const unsyncedCount = useLiveQuery(() => 
     db.assets.filter(a => 
       a.needsSync === 1 || 
@@ -138,6 +141,7 @@ export function Dashboard() {
       (a.photos && a.photos.some(p => typeof p === 'string' && p.startsWith('data:image')))
     ).count()
   ) || 0;
+  
   const [syncing, setSyncing] = useState(false);
   const isAdmin = user?.role === 'administrador' || user?.role === 'prefeito' || user?.email === 'henri199@gmail.com' || auth.currentUser?.email === 'henri199@gmail.com';
   const isManager = isAdmin || user?.role === 'responsavel';
@@ -151,7 +155,8 @@ export function Dashboard() {
       const syncAndNotify = async () => {
         setSyncing(true);
         try {
-          await pushLocalChanges();
+          await pushLocalChanges(); // Mantém compatibilidade com o sistema antigo
+          await processSyncQueue(); // NOVO: Processa a fila inteligente também!
         } catch (err: any) {
           if (err.message?.includes('LIMITE DE COTAS')) setQuotaExceeded(true);
         } finally {
@@ -180,16 +185,13 @@ export function Dashboard() {
   });
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
 
-  // Persistence and auto-collapse
   useEffect(() => {
     localStorage.setItem('sidebar_collapsed', JSON.stringify(isSidebarCollapsed));
   }, [isSidebarCollapsed]);
 
   useEffect(() => {
     const handleResize = () => {
-      if (window.innerWidth < 1280) {
-        setIsSidebarCollapsed(true);
-      }
+      if (window.innerWidth < 1280) setIsSidebarCollapsed(true);
     };
     window.addEventListener('resize', handleResize);
     return () => window.removeEventListener('resize', handleResize);
@@ -210,7 +212,7 @@ export function Dashboard() {
 
   const handleResetSystem = async () => {
     if (!isAdmin) return;
-    const confirm1 = window.confirm("⚠️ ATENÇÃO: Isso irá apagar COMPLETAMENTE o banco de dados (Locais/Setores, Vistorias, Itens e Alertas) tanto localmente quanto na nuvem. Esta ação é irreversível e apagará todos os dados de teste. Deseja prosseguir?");
+    const confirm1 = window.confirm("⚠️ ATENÇÃO: Isso irá apagar COMPLETAMENTE o banco de dados. Deseja prosseguir?");
     if (!confirm1) return;
     
     const confirm2 = window.confirm("CONFIRMAÇÃO FINAL: Você tem certeza absoluta de que quer ZERAR tudo?");
@@ -218,7 +220,6 @@ export function Dashboard() {
 
     setIsResetting(true);
     try {
-      // 1. Limpar banco local Dexie
       await Promise.all([
         db.assets.clear(),
         db.inspections.clear(),
@@ -226,65 +227,33 @@ export function Dashboard() {
         db.notifications.clear()
       ]);
 
-      // 2. Limpar do Firestore se estiver conectado
       if (isOnline) {
         try {
-          const { getDocs, collection, deleteDoc, doc } = await import('firebase/firestore');
+          const { getDocs, collection, deleteDoc, doc, setDoc } = await import('firebase/firestore');
           
-          // Limpa Bens (assets)
-          const assetsSnap = await getDocs(collection(firestore, 'assets'));
-          for (const d of assetsSnap.docs) {
-            await deleteDoc(doc(firestore, 'assets', d.id));
+          const collectionsToClear = ['assets', 'inspections', 'locations', 'notifications'];
+          for (const col of collectionsToClear) {
+             const snap = await getDocs(collection(firestore, col));
+             for (const d of snap.docs) await deleteDoc(doc(firestore, col, d.id));
           }
 
-          // Limpa Vistorias (inspections)
-          const inspectionsSnap = await getDocs(collection(firestore, 'inspections'));
-          for (const d of inspectionsSnap.docs) {
-            await deleteDoc(doc(firestore, 'inspections', d.id));
-          }
-
-          // Limpa Ambientes/Locais (locations)
-          const locationsSnap = await getDocs(collection(firestore, 'locations'));
-          for (const d of locationsSnap.docs) {
-            await deleteDoc(doc(firestore, 'locations', d.id));
-          }
-
-          // Limpa Alertas (notifications)
-          const notificationsSnap = await getDocs(collection(firestore, 'notifications'));
-          for (const d of notificationsSnap.docs) {
-            await deleteDoc(doc(firestore, 'notifications', d.id));
-          }
-
-         // 🚀 NOVIDADE 100% SYNC: Dispara o pulso eletromagnético (usando a coleção locations que é sempre permitida)
-          const { setDoc } = await import('firebase/firestore');
           await setDoc(doc(firestore, 'locations', 'GLOBAL_RESET_COMMAND'), {
             reset_timestamp: Date.now(),
             name: 'Comando de Reset (Ignorar)',
-            deleted: true // Mantém escondido da lista
+            deleted: true
           });
 
         } catch (firestoreErr) {
-          console.error("Erro ao limpar dados remotos do Firestore:", firestoreErr);
+          console.error("Erro ao limpar dados remotos:", firestoreErr);
         }
       }
 
-      // 3. Limpa os marcadores de tempo do Delta Sync no localStorage para não sincronizar lixo
-      const keys = [
-        'lastSyncTime_locations',
-        'lastSyncTime_inspections',
-        'lastSyncTime_assets',
-        'lastSyncTime_users',
-        'lastSyncTime_sector_inspections'
-      ];
+      const keys = ['lastSyncTime_locations', 'lastSyncTime_inspections', 'lastSyncTime_assets', 'lastSyncTime_users', 'lastSyncTime_sector_inspections'];
       keys.forEach(key => localStorage.removeItem(key));
       
-      alert("✅ SUCESSO: O banco de dados (locais, vistorias, bens e alertas) local e na nuvem foi zerado com sucesso para fins de testes.");
-      
-      setTimeout(() => {
-        window.location.href = '/'; // Recarregar a aplicação na Home
-      }, 500);
+      alert("✅ SUCESSO: O banco de dados local e na nuvem foi zerado com sucesso.");
+      setTimeout(() => window.location.href = '/', 500);
     } catch (err) {
-      console.error("Erro ao zerar sistema:", err);
       alert("Erro ao zerar o banco de dados.");
     } finally {
       setIsResetting(false);
@@ -293,18 +262,12 @@ export function Dashboard() {
 
   const handleExportData = async () => {
     try {
-      const users = await db.users.toArray();
-      const locations = await db.locations.toArray();
-      const inspections = await db.inspections.toArray();
-      const assets = await db.assets.toArray();
-      const notifications = await db.notifications.toArray();
-
       const data = {
-        users,
-        locations,
-        inspections,
-        assets,
-        notifications,
+        users: await db.users.toArray(),
+        locations: await db.locations.toArray(),
+        inspections: await db.inspections.toArray(),
+        assets: await db.assets.toArray(),
+        notifications: await db.notifications.toArray(),
         exportDate: Date.now(),
         version: "v16.4.2"
       };
@@ -319,7 +282,6 @@ export function Dashboard() {
       document.body.removeChild(link);
       URL.revokeObjectURL(url);
     } catch (err) {
-      console.error("Erro ao exportar dados:", err);
       alert("Falha ao exportar backup.");
     }
   };
@@ -332,13 +294,10 @@ export function Dashboard() {
     reader.onload = async (event) => {
       try {
         const data = JSON.parse(event.target?.result as string);
-        if (!data.inspections || !data.assets) throw new Error("Formato de backup inválido.");
+        if (!data.inspections || !data.assets) throw new Error("Formato inválido.");
 
-        const confirm = window.confirm("Deseja importar estes dados? Os dados atuais em conflito podem ser substituídos.");
-        if (!confirm) return;
+        if (!window.confirm("Deseja importar estes dados? Os dados atuais podem ser substituídos.")) return;
 
-        // Limpar bancos para importação limpa (opcional, aqui vamos mesclar)
-        // Usando bulkPut para mesclar
         await Promise.all([
           db.users.bulkPut(data.users || []),
           db.locations.bulkPut(data.locations || []),
@@ -347,280 +306,24 @@ export function Dashboard() {
           db.notifications.bulkPut(data.notifications || [])
         ]);
 
-        alert("✅ DADOS IMPORTADOS: O sistema foi atualizado com as informações do backup.");
+        alert("✅ DADOS IMPORTADOS: O sistema foi atualizado.");
         window.location.reload();
       } catch (err) {
-        console.error("Erro na importação:", err);
-        alert("Erro ao importar arquivo. Verifique se o formato está correto.");
+        alert("Erro ao importar arquivo.");
       }
     };
     reader.readAsText(file);
   };
 
   const renderContent = () => {
-    if (selectedInspectionId) {
-      return (
-        <div className="animate-in fade-in slide-in-from-right-4 duration-500">
-           <ErrorBoundary fallback={
-             <div className="p-10 text-center">
-               <h2 className="text-xl font-bold text-rose-500 mb-2">Erro ao carregar a vistoria</h2>
-               <p className="text-slate-500 mb-6">Ocorreu um erro inesperado ao tentar exibir esta vistoria.</p>
-               <Button onClick={() => setSelectedInspectionId(null)}>Voltar ao Início</Button>
-             </div>
-           }>
-             <InspectionView id={selectedInspectionId} onBack={() => setSelectedInspectionId(null)} />
-           </ErrorBoundary>
-        </div>
-      );
-    }
-
     switch (activeTab) {
-      case 'training':
-        return <TrainingView />;
-      case 'analytics':
-        return <InventoryDashboard />;
-      case 'scanner':
-        return <ScannerView onOpenInspection={handleScannerOpen} />;
-      case 'home':
-        return (
-          <div className="flex flex-col gap-10 animate-in fade-in slide-in-from-bottom-4 duration-700">
-            {/* 🚨 Alerta de Cota Excedida */}
-            {quotaExceeded && (
-              <div className="bg-amber-50 border border-amber-200 rounded-[2.5rem] p-6 flex flex-col md:flex-row items-center gap-6 animate-in slide-in-from-top-4 duration-500 shadow-xl shadow-amber-500/5">
-                <div className="w-16 h-16 bg-white rounded-3xl flex items-center justify-center shadow-lg shadow-amber-500/10 shrink-0">
-                  <AlertCircle className="w-8 h-8 text-amber-500" />
-                </div>
-                <div className="flex flex-col gap-1 text-center md:text-left">
-                  <span className="text-lg font-black text-amber-900 tracking-tight uppercase leading-none">Limite de Sincronização Atingido</span>
-                  <span className="text-xs font-bold text-amber-600/70 leading-relaxed">
-                    O Google Cloud atingiu o limite gratuito de hoje. <strong>Suas vistorias continuam sendo salvas normalmente neste dispositivo</strong> e serão enviadas para a nuvem automaticamente assim que a cota for reiniciada (geralmente à meia-noite).
-                  </span>
-                </div>
-              </div>
-            )}
-
-            {/* 🚀 NOVIDADE: Card de Homologação Pendente para Administradores */}
-            {isAdmin && pendingHomologation && pendingHomologation.length > 0 && (
-              <div className="bg-emerald-50 border border-emerald-200 p-6 rounded-[2.5rem] flex flex-col md:flex-row items-center gap-6 shadow-xl shadow-emerald-500/5 animate-in slide-in-from-top-4 duration-500">
-                 <div className="w-16 h-16 bg-white rounded-3xl flex items-center justify-center shadow-lg shrink-0">
-                    <ShieldCheck className="w-8 h-8 text-emerald-600" />
-                 </div>
-                 <div className="flex flex-col gap-1 text-center md:text-left flex-1">
-                    <span className="text-lg font-black text-emerald-900 tracking-tight uppercase">Homologação Pendente</span>
-                    <span className="text-xs font-bold text-emerald-700/70">
-                       Existem <strong>{pendingHomologation.length} vistoria(s)</strong> concluídas pela comissão aguardando sua revisão e homologação.
-                    </span>
-                 </div>
-                 <Button onClick={() => setActiveTab('inspections')} className="bg-emerald-600 hover:bg-emerald-700 h-14 px-8 text-[10px] font-black uppercase tracking-widest rounded-xl">
-                    Revisar Agora
-                 </Button>
-              </div>
-            )}
-
-             {/* 🏰 Hero Moderno */}
-            <div className="relative overflow-hidden rounded-[2.5rem] bg-white border border-slate-100 p-8 lg:p-12 text-slate-900 shadow-[0_20px_60px_-15px_rgba(0,0,0,0.03)] group">
-              <div className="relative z-10 flex flex-col lg:flex-row items-center justify-between gap-12">
-                <div className="flex flex-col gap-6 text-center lg:text-left max-w-2xl">
-                  <div className="inline-flex items-center gap-2 px-3 py-1.5 bg-slate-50 border border-slate-100 rounded-full w-fit mx-auto lg:mx-0">
-                    <Zap className="w-4 h-4 text-indigo-600" />
-                    <span className="text-[10px] font-bold uppercase tracking-widest text-slate-500">Manoel Viana • Sistema Oficial</span>
-                  </div>
-                  <h2 className="text-4xl lg:text-6xl font-display font-extrabold tracking-tight leading-[0.9] text-slate-900">
-                    Sua Vistoria <br /> 
-                    <span className="text-indigo-600">360 Graus.</span>
-                  </h2>
-                  <p className="text-slate-500 text-lg font-medium leading-relaxed max-w-lg">
-                    Software inteligente de auditoria patrimonial. Monitore, escaneie e homologue bens públicos com transparência total.
-                  </p>
-                  <div className="flex flex-wrap items-center justify-center lg:justify-start gap-4 mt-4">
-                    <Button variant="accent" icon={Plus} onClick={() => setActiveTab('locations')} className="px-10 h-16 text-xs uppercase tracking-widest">
-                      Nova Vistoria
-                    </Button>
-                    <Button variant="outline" icon={Search} onClick={() => setActiveTab('scanner')} className="px-10 h-16 text-xs uppercase tracking-widest bg-white">
-                      Escanear QR
-                    </Button>
-                    
-                    {/* BOTÃO LIBERADO PARA A COMISSÃO E ADMIN */}
-                  <Button 
-  variant="outline" 
-  icon={Database} 
-  onClick={async () => {
-    if (window.confirm("Isso fará uma limpeza segura e baixará todos os dados da nuvem novamente. Seu login será mantido. Deseja continuar?")) {
-      try {
-        // 1. Limpamos APENAS as tabelas de dados, PRESERVANDO a tabela "users" e "settings" para NÃO DESLOGAR
-        await db.locations.clear();
-        await db.inspections.clear();
-        await db.assets.clear();
-        await db.notifications.clear();
-
-        // 2. Apagamos os marcadores de sincronização para forçar o Firebase a baixar tudo do zero da nuvem
-        const keys = [
-          'lastSyncTime_locations',
-          'lastSyncTime_inspections',
-          'lastSyncTime_assets',
-          'lastSyncTime_users',
-          'lastSyncTime_notifications'
-        ];
-        keys.forEach(key => localStorage.removeItem(key));
-        
-        // 3. Recarregamos a página
-        window.location.reload();
-      } catch (error) {
-        console.error("Erro ao sincronizar:", error);
-        alert("Ocorreu um erro ao limpar o cache. Tente novamente.");
-      }
-    }
-  }} 
-  className="px-10 h-16 text-xs uppercase tracking-widest bg-white"
->
-  Sincronização Forçada
-</Button>  
-                    
-                    {isManager && (
-                      <div className="flex items-center gap-4 ml-4 border-l border-slate-200 pl-4">
-                        <button onClick={async () => {
-                          const confirmCleanup = window.confirm("Isso irá remover vistorias sem itens e locais sem vistorias. Deseja prosseguir?");
-                          if (!confirmCleanup) return;
-
-                          // Tenta sincronizar antes de limpar
-                          try { await pushLocalChanges(); } catch (e) {}
-
-                          const allInspections = await db.inspections.toArray();
-                          const allLocations = await db.locations.toArray();
-                          let clearedInps = 0;
-                          let clearedAssets = 0;
-                          let clearedLocs = 0;
-                          
-                          for (const i of allInspections) {
-                             const c = await db.assets.where('inspectionId').equals(i.id).count();
-                             if (c === 0) {
-                                await db.inspections.delete(i.id);
-                                try { await deleteDoc(doc(firestore, 'inspections', i.id)); } catch(e){}
-                                clearedInps++;
-                             }
-                          }
-
-                          for (const l of allLocations) {
-                            const c = await db.inspections.where('locationId').equals(l.id).count();
-                            if (c === 0) {
-                              await db.locations.delete(l.id);
-                              try { await deleteDoc(doc(firestore, 'locations', l.id)); } catch(e){}
-                              clearedLocs++;
-                            }
-                          }
-
-                          const allAssets = await db.assets.toArray();
-                          for (const a of allAssets) {
-                            const insp = await db.inspections.get(a.inspectionId);
-                            if (!insp) {
-                              await db.assets.delete(a.id);
-                              try { await deleteDoc(doc(firestore, 'assets', a.id)); } catch(e){}
-                              clearedAssets++;
-                            }
-                          }
-
-                          if (clearedInps > 0 || clearedAssets > 0 || clearedLocs > 0) {
-                            alert(`Limpeza concluída:\n- ${clearedLocs} Locais vazios\n- ${clearedInps} Vistorias vazias\n- ${clearedAssets} Itens órfãos`);
-                            window.location.reload();
-                          }
-                          else alert('Tudo em ordem.');
-                        }} className="text-[10px] font-bold uppercase text-slate-400 hover:text-indigo-600 transition-colors">Higienizar</button>
-
-                        <button 
-                          onClick={handleResetSystem}
-                          disabled={isResetting}
-                          className="text-[10px] font-black uppercase text-rose-500 hover:text-rose-700 transition-all flex items-center gap-1 bg-rose-50/40 hover:bg-rose-50 border border-rose-100/50 hover:border-rose-200 px-3 py-1.5 rounded-xl shadow-sm"
-                        >
-                          <Trash2 className="w-3.5 h-3.5" />
-                          {isResetting ? "Zerando..." : "Zerar Banco (Testes)"}
-                        </button>
-                      </div>
-                    )}
-                  </div>
-                </div>
-                
-                <div className="hidden lg:flex flex-col gap-6 relative">
-                   <Card className="p-8 bg-slate-900 border-slate-800 rounded-[2rem] shadow-2xl flex flex-col items-center gap-3 transform rotate-2 hover:rotate-0 transition-all duration-500 cursor-pointer group/card" onClick={() => setActiveTab('notifications')}>
-                      <div className="w-16 h-16 bg-white/5 rounded-2xl flex items-center justify-center border border-white/10 mb-2 transition-transform group-hover/card:scale-110">
-                        <Bell className="w-8 h-8 text-indigo-400" />
-                      </div>
-                      <span className="text-4xl font-display font-black text-white leading-none">{unreadNotifications || 0}</span>
-                      <span className="text-[10px] font-bold text-slate-500 uppercase tracking-widest text-center">Alertas Críticos<br/>Pendentes</span>
-                   </Card>
-                   <div className="absolute -top-16 -left-24 p-6 bg-indigo-600 rounded-[2rem] shadow-2xl shadow-indigo-500/20 flex flex-col items-center gap-1 transform -rotate-6 scale-90 border border-indigo-500">
-                      <ShieldCheck className="w-8 h-8 text-white" />
-                      <span className="text-[10px] font-bold text-indigo-200 uppercase tracking-widest mt-2">Vistorias</span>
-                      <span className="text-2xl font-display font-extrabold text-white leading-none">{concludedInspectionsCount || 0}</span>
-                   </div>
-                </div>
-              </div>
-              
-              <Building2 className="absolute -bottom-24 -right-16 w-80 h-80 text-slate-100 opacity-20 transform -rotate-12 pointer-events-none group-hover:scale-110 transition-transform duration-1000" />
-            </div>
-
-            {/* 📊 2. Cards de Resumo */}
-            <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-              <SummaryCard 
-                label="Localizações" 
-                value={locations?.length || 0} 
-                icon={Building2} 
-                onClick={() => setActiveTab('locations')}
-              />
-              <SummaryCard 
-                label="Em Andamento" 
-                value={activeInspectionsCount || 0} 
-                icon={ClipboardList} 
-                variant="accent"
-                onClick={() => setActiveTab('inspections')}
-              />
-              <SummaryCard 
-                label="Concluídas" 
-                value={concludedInspectionsCount || 0} 
-                icon={CheckCircle2} 
-                onClick={() => setActiveTab('inspections')}
-              />
-              <SummaryCard 
-                label="Total de Itens" 
-                value={totalAssetsCount || 0} 
-                icon={ShieldCheck} 
-                onClick={() => setActiveTab('reports')}
-              />
-            </div>
-
-            {/* 📋 4. Lista de Vistorias Recentes */}
-            <div className="flex flex-col gap-6">
-              <div className="flex items-center justify-between ml-1 leading-none">
-                <div className="flex flex-col">
-                  <h3 className="text-xs font-black text-text-muted uppercase tracking-[0.2em]">Fluxo de Atividades</h3>
-                  <span className="text-[10px] font-bold text-text-muted uppercase tracking-widest mt-1">Vistorias recentes no sistema</span>
-                </div>
-                <button onClick={() => setActiveTab('inspections')} className="flex items-center gap-2 text-[10px] font-black text-primary border-2 border-primary px-4 py-2 rounded-xl hover:bg-primary hover:text-white transition-all">VER TODAS <ArrowRight className="w-3 h-3" /></button>
-              </div>
-              <div className="grid grid-cols-1 gap-3">
-                {inspections?.length === 0 ? (
-                  <Card className="flex items-center justify-center py-20 text-text-muted border-dashed border-2 border-border bg-bg/50 rounded-[3rem]">
-                    <div className="text-center">
-                      <ClipboardList className="w-16 h-16 mx-auto opacity-20 mb-4" />
-                      <p className="text-sm font-black uppercase tracking-widest text-text-muted">Nenhuma vistoria registrada</p>
-                      <p className="text-xs text-text-muted mt-1">Selecione um local para iniciar o inventário.</p>
-                    </div>
-                  </Card>
-                ) : (
-                  inspections?.map(insp => (
-                    <RecentInspectionRow 
-                      key={insp.id} 
-                      inspection={insp} 
-                      locationName={locations?.find(l => l.id === insp.locationId)?.name || '...'} 
-                      onClick={() => setSelectedInspectionId(insp.id)}
-                    />
-                  ))
-                )}
-              </div>
-            </div>
-          </div>
-        );
-      case 'locations':
-        return <LocationsView onSelectInspection={(id) => setSelectedInspectionId(id)} />;
+      case 'training': return <TrainingView />;
+      case 'analytics': return <InventoryDashboard />;
+      case 'scanner': return <ScannerView onOpenInspection={handleScannerOpen} />;
+      case 'locations': return <LocationsView onSelectInspection={(id) => setSelectedInspectionId(id)} />;
+      case 'reports': return isManager ? <ReportsView /> : <div className="p-20 text-center font-bold tracking-widest text-slate-400">Acesso restrito.</div>;
+      case 'users': return isAdmin ? <UsersView /> : <div className="p-20 text-center font-bold tracking-widest text-slate-400">Acesso restrito.</div>;
+      case 'notifications': return <NotificationsView onBack={() => setActiveTab('home')} />;
       case 'inspections':
         return (
           <div className="flex flex-col gap-6 animate-in fade-in duration-500">
@@ -640,12 +343,6 @@ export function Dashboard() {
               </div>
           </div>
         );
-      case 'reports':
-        return isManager ? <ReportsView /> : <div className="p-20 text-center text-slate-400 font-bold uppercase tracking-widest">Acesso restrito.</div>;
-      case 'users':
-        return isAdmin ? <UsersView /> : <div className="p-20 text-center text-slate-400 font-bold uppercase tracking-widest">Acesso restrito a administradores.</div>;
-      case 'notifications':
-        return <NotificationsView onBack={() => setActiveTab('home')} />;
       case 'settings':
         return isAdmin ? (
           <div className="flex flex-col gap-8 animate-in fade-in duration-500 max-w-4xl">
@@ -655,110 +352,190 @@ export function Dashboard() {
                   <Settings className="w-6 h-6" />
                 </div>
                 <div className="flex flex-col">
-                  <h3 className="text-lg font-black text-slate-900 uppercase tracking-tight">Ferramentas de Sistema & Administração</h3>
-                  <span className="text-slate-400 text-[10px] font-bold uppercase tracking-widest">Painel para fins de teste e manutenção</span>
+                  <h3 className="text-lg font-black text-slate-900 uppercase tracking-tight">Ferramentas de Sistema</h3>
+                  <span className="text-slate-400 text-[10px] font-bold uppercase tracking-widest">Painel de manutenção</span>
                 </div>
               </div>
-
               <div className="h-px bg-slate-100 w-full" />
-
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                 <div className="border border-rose-100 bg-rose-50/20 p-6 rounded-[2rem] flex flex-col justify-between gap-6">
                   <div className="flex flex-col gap-2">
                     <span className="text-xs font-black text-rose-600 uppercase tracking-widest">Zona de Perigo</span>
-                    <h4 className="text-xl font-bold text-rose-950 leading-none">Zerar Banco de Dados</h4>
-                    <p className="text-slate-500 text-xs leading-relaxed mt-2">
-                      Apaga permanentemente todas as vistorias, ambientes criados, observações, fotos e itens do banco de dados local e do servidor na nuvem.
-                    </p>
+                    <h4 className="text-xl font-bold text-rose-950 leading-none">Zerar Banco</h4>
+                    <p className="text-slate-500 text-xs mt-2">Apaga permanentemente todas as informações.</p>
                   </div>
-                  <Button 
-                    variant="danger" 
-                    onClick={handleResetSystem}
-                    disabled={isResetting}
-                    className="w-full h-14 text-xs uppercase tracking-widest bg-rose-600 text-white hover:bg-rose-700 font-bold"
-                  >
-                    {isResetting ? "Limpando Banco..." : "Zerar Banco de Dados e Vistorias"}
+                  <Button variant="danger" onClick={handleResetSystem} disabled={isResetting} className="w-full h-14 bg-rose-600 text-white hover:bg-rose-700 font-bold uppercase text-xs">
+                    {isResetting ? "Limpando..." : "Zerar Banco"}
                   </Button>
                 </div>
-
                 <div className="border border-indigo-100/30 bg-slate-50/40 p-6 rounded-[2rem] flex flex-col justify-between gap-6">
                   <div className="flex flex-col gap-2">
-                    <span className="text-xs font-black text-indigo-600 uppercase tracking-widest">Preservação de Dados</span>
-                    <h4 className="text-xl font-bold text-slate-950 leading-none">Backup do Sistema</h4>
-                    <p className="text-slate-500 text-xs leading-relaxed mt-2">
-                      Exporte todos os dados cadastrados para um arquivo JSON local ou importe um arquivo de backup previamente gerado.
-                    </p>
+                    <span className="text-xs font-black text-indigo-600 uppercase tracking-widest">Preservação</span>
+                    <h4 className="text-xl font-bold text-slate-950 leading-none">Backup</h4>
+                    <p className="text-slate-500 text-xs mt-2">Exporte ou importe os dados do sistema.</p>
                   </div>
                   <div className="flex flex-col gap-3">
-                    <Button 
-                      variant="outline" 
-                      onClick={handleExportData}
-                      className="w-full h-14 text-xs uppercase tracking-widest bg-white border-2 border-slate-200 text-slate-800 font-bold"
-                    >
-                      Exportar Dados (.json)
-                    </Button>
-                    <label className="flex items-center justify-center gap-2 w-full h-14 px-4 bg-indigo-600 hover:bg-indigo-700 text-white rounded-2xl text-xs uppercase tracking-widest font-black pointer-events-auto cursor-pointer transition-all select-none text-center">
+                    <Button variant="outline" onClick={handleExportData} className="w-full h-14 border-2 font-bold uppercase text-xs">Exportar Dados (.json)</Button>
+                    <label className="flex items-center justify-center gap-2 w-full h-14 bg-indigo-600 hover:bg-indigo-700 text-white rounded-2xl text-xs uppercase font-black cursor-pointer text-center">
                       Importar Backup
-                      <input 
-                        type="file" 
-                        accept=".json" 
-                        onChange={handleImportData} 
-                        className="hidden" 
-                      />
+                      <input type="file" accept=".json" onChange={handleImportData} className="hidden" />
                     </label>
                   </div>
                 </div>
               </div>
             </div>
           </div>
-        ) : (
-          <div className="p-20 text-center text-slate-400 font-bold uppercase tracking-widest">Acesso restrito a administradores.</div>
-        );
+        ) : <div className="p-20 text-center font-bold text-slate-400 uppercase tracking-widest">Acesso restrito.</div>;
+      case 'home':
       default:
-        return <div className="flex items-center justify-center py-20 text-slate-400 font-medium italic">Selecione uma opção no menu.</div>;
+        return (
+          <div className="flex flex-col gap-10 animate-in fade-in slide-in-from-bottom-4 duration-700">
+            {quotaExceeded && (
+              <div className="bg-amber-50 border border-amber-200 rounded-[2.5rem] p-6 flex flex-col md:flex-row items-center gap-6 shadow-xl shadow-amber-500/5">
+                <div className="w-16 h-16 bg-white rounded-3xl flex items-center justify-center shadow-lg shadow-amber-500/10 shrink-0">
+                  <AlertCircle className="w-8 h-8 text-amber-500" />
+                </div>
+                <div className="flex flex-col gap-1">
+                  <span className="text-lg font-black text-amber-900 tracking-tight uppercase">Limite de Sincronização Atingido</span>
+                  <span className="text-xs font-bold text-amber-600/70">O Google Cloud atingiu o limite gratuito de hoje. Suas vistorias continuam sendo salvas no dispositivo.</span>
+                </div>
+              </div>
+            )}
+
+            {isAdmin && pendingHomologation && pendingHomologation.length > 0 && (
+              <div className="bg-emerald-50 border border-emerald-200 p-6 rounded-[2.5rem] flex flex-col md:flex-row items-center gap-6 shadow-xl shadow-emerald-500/5">
+                 <div className="w-16 h-16 bg-white rounded-3xl flex items-center justify-center shadow-lg shrink-0">
+                    <ShieldCheck className="w-8 h-8 text-emerald-600" />
+                 </div>
+                 <div className="flex flex-col gap-1 flex-1">
+                    <span className="text-lg font-black text-emerald-900 tracking-tight uppercase">Homologação Pendente</span>
+                    <span className="text-xs font-bold text-emerald-700/70">
+                       Existem <strong>{pendingHomologation.length} vistoria(s)</strong> aguardando sua revisão e homologação.
+                    </span>
+                 </div>
+                 <Button onClick={() => setActiveTab('inspections')} className="bg-emerald-600 hover:bg-emerald-700 h-14 px-8 text-[10px] font-black uppercase tracking-widest rounded-xl">
+                    Revisar Agora
+                 </Button>
+              </div>
+            )}
+
+            <div className="relative overflow-hidden rounded-[2.5rem] bg-white border border-slate-100 p-8 lg:p-12 text-slate-900 shadow-[0_20px_60px_-15px_rgba(0,0,0,0.03)] group">
+              <div className="relative z-10 flex flex-col lg:flex-row items-center justify-between gap-12">
+                <div className="flex flex-col gap-6 text-center lg:text-left max-w-2xl">
+                  <div className="inline-flex items-center gap-2 px-3 py-1.5 bg-slate-50 border border-slate-100 rounded-full w-fit mx-auto lg:mx-0">
+                    <Zap className="w-4 h-4 text-indigo-600" />
+                    <span className="text-[10px] font-bold uppercase tracking-widest text-slate-500">Manoel Viana • Sistema Oficial</span>
+                  </div>
+                  <h2 className="text-4xl lg:text-6xl font-display font-extrabold tracking-tight leading-[0.9] text-slate-900">
+                    Sua Vistoria <br /> 
+                    <span className="text-indigo-600">360 Graus.</span>
+                  </h2>
+                  <p className="text-slate-500 text-lg font-medium max-w-lg">
+                    Software inteligente de auditoria patrimonial. Monitore, escaneie e homologue bens públicos com transparência total.
+                  </p>
+                  <div className="flex flex-wrap items-center justify-center lg:justify-start gap-4 mt-4">
+                    <Button variant="accent" icon={Plus} onClick={() => setActiveTab('locations')} className="px-10 h-16 text-xs uppercase tracking-widest">
+                      Nova Vistoria
+                    </Button>
+                    <Button variant="outline" icon={Search} onClick={() => setActiveTab('scanner')} className="px-10 h-16 text-xs uppercase tracking-widest bg-white">
+                      Escanear QR
+                    </Button>
+                    <Button variant="outline" icon={Database} onClick={async () => {
+                        if (window.confirm("Isso fará uma limpeza segura e baixará todos os dados da nuvem novamente. Deseja continuar?")) {
+                          try {
+                            await db.locations.clear(); await db.inspections.clear(); await db.assets.clear(); await db.notifications.clear();
+                            ['lastSyncTime_locations','lastSyncTime_inspections','lastSyncTime_assets','lastSyncTime_users','lastSyncTime_notifications'].forEach(k => localStorage.removeItem(k));
+                            window.location.reload();
+                          } catch (error) { alert("Erro ao limpar cache."); }
+                        }
+                      }} className="px-10 h-16 text-xs uppercase tracking-widest bg-white">
+                      Sincronização Forçada
+                    </Button>
+                  </div>
+                </div>
+                
+                <div className="hidden lg:flex flex-col gap-6 relative">
+                   <Card className="p-8 bg-slate-900 border-slate-800 rounded-[2rem] shadow-2xl flex flex-col items-center gap-3 transform rotate-2 hover:rotate-0 transition-all duration-500 cursor-pointer group/card" onClick={() => setActiveTab('notifications')}>
+                      <div className="w-16 h-16 bg-white/5 rounded-2xl flex items-center justify-center border border-white/10 mb-2 transition-transform group-hover/card:scale-110">
+                        <Bell className="w-8 h-8 text-indigo-400" />
+                      </div>
+                      <span className="text-4xl font-display font-black text-white leading-none">{unreadNotifications}</span>
+                      <span className="text-[10px] font-bold text-slate-500 uppercase tracking-widest text-center">Alertas Críticos<br/>Pendentes</span>
+                   </Card>
+                   <div className="absolute -top-16 -left-24 p-6 bg-indigo-600 rounded-[2rem] shadow-2xl flex flex-col items-center gap-1 transform -rotate-6 scale-90 border border-indigo-500">
+                      <ShieldCheck className="w-8 h-8 text-white" />
+                      <span className="text-[10px] font-bold text-indigo-200 uppercase tracking-widest mt-2">Vistorias</span>
+                      <span className="text-2xl font-display font-extrabold text-white leading-none">{concludedInspectionsCount || 0}</span>
+                   </div>
+                </div>
+              </div>
+              <Building2 className="absolute -bottom-24 -right-16 w-80 h-80 text-slate-100 opacity-20 transform -rotate-12 pointer-events-none group-hover:scale-110 transition-transform duration-1000" />
+            </div>
+
+            <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+              <SummaryCard label="Localizações" value={locations?.length || 0} icon={Building2} onClick={() => setActiveTab('locations')} />
+              <SummaryCard label="Em Andamento" value={activeInspectionsCount || 0} icon={ClipboardList} variant="accent" onClick={() => setActiveTab('inspections')} />
+              <SummaryCard label="Concluídas" value={concludedInspectionsCount || 0} icon={CheckCircle2} onClick={() => setActiveTab('inspections')} />
+              <SummaryCard label="Total de Itens" value={totalAssetsCount || 0} icon={ShieldCheck} onClick={() => setActiveTab('reports')} />
+            </div>
+
+            <div className="flex flex-col gap-6">
+              <div className="flex items-center justify-between ml-1 leading-none">
+                <div className="flex flex-col">
+                  <h3 className="text-xs font-black text-slate-500 uppercase tracking-[0.2em]">Fluxo de Atividades</h3>
+                  <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mt-1">Vistorias recentes no sistema</span>
+                </div>
+                <button onClick={() => setActiveTab('inspections')} className="flex items-center gap-2 text-[10px] font-black text-indigo-600 border-2 border-indigo-600 px-4 py-2 rounded-xl hover:bg-indigo-600 hover:text-white transition-all">VER TODAS <ArrowRight className="w-3 h-3" /></button>
+              </div>
+              <div className="grid grid-cols-1 gap-3">
+                {inspections?.length === 0 ? (
+                  <Card className="flex items-center justify-center py-20 text-slate-400 border-dashed border-2 bg-slate-50 rounded-[3rem]">
+                    <div className="text-center">
+                      <ClipboardList className="w-16 h-16 mx-auto opacity-20 mb-4" />
+                      <p className="text-sm font-black uppercase tracking-widest text-slate-400">Nenhuma vistoria registrada</p>
+                    </div>
+                  </Card>
+                ) : (
+                  inspections?.map(insp => (
+                    <RecentInspectionRow 
+                      key={insp.id} 
+                      inspection={insp} 
+                      locationName={locations?.find(l => l.id === insp.locationId)?.name || '...'} 
+                      onClick={() => setSelectedInspectionId(insp.id)}
+                    />
+                  ))
+                )}
+              </div>
+            </div>
+          </div>
+        );
     }
   };
 
   return (
-    <div className="flex flex-col lg:flex-row min-h-screen bg-bg">
-      <div className="lg:hidden flex items-center justify-between p-4 bg-card border-b border-border sticky top-0 z-50">
+    <div className="flex flex-col lg:flex-row min-h-screen bg-slate-50">
+      <div className="lg:hidden flex items-center justify-between p-4 bg-white border-b border-slate-200 sticky top-0 z-50">
         <div className="flex items-center gap-3">
-           <button 
-             onClick={() => setIsMobileMenuOpen(true)}
-             className="w-10 h-10 flex items-center justify-center bg-slate-50 text-slate-400 rounded-xl border border-slate-100"
-           >
+           <button onClick={() => setIsMobileMenuOpen(true)} className="w-10 h-10 flex items-center justify-center bg-slate-50 text-slate-400 rounded-xl border border-slate-100">
               <LayoutGrid className="w-5 h-5" />
            </button>
-           {selectedInspectionId ? (
-             <button onClick={() => setSelectedInspectionId(null)} className="flex items-center gap-2 text-slate-900 font-black">
-                <ArrowLeft className="w-5 h-5 text-slate-400" /> 
-                <span className="text-xs uppercase tracking-widest text-slate-500">Detalhes</span>
-             </button>
-           ) : (
-             <div className="flex items-center gap-2" onClick={() => handleTabChange('home')}>
-                <div className="w-8 h-8 bg-primary rounded-lg flex items-center justify-center">
-                   <ShieldCheck className="w-5 h-5 text-white" />
-                </div>
-                <span className="font-black tracking-tighter text-primary uppercase">PATRI-MV</span>
-             </div>
-           )}
+           <div className="flex items-center gap-2" onClick={() => handleTabChange('home')}>
+              <div className="w-8 h-8 bg-indigo-600 rounded-lg flex items-center justify-center">
+                 <ShieldCheck className="w-5 h-5 text-white" />
+              </div>
+              <span className="font-black tracking-tighter text-indigo-600 uppercase">PATRI-MV</span>
+           </div>
         </div>
         <div className="flex items-center gap-3">
-          <div className="flex items-center gap-1.5 px-2 py-1 bg-slate-50 rounded-full shadow-inner border border-slate-100">
-            <div className={cn("w-2 h-2 rounded-full", isOnline ? "bg-emerald-500" : "bg-rose-500")} />
-          </div>
-          <button onClick={signOut} className="flex items-center gap-1.5 px-3 py-1.5 bg-rose-50 text-rose-600 rounded-lg hover:bg-rose-100 transition-colors">
-             <span className="text-[10px] font-bold uppercase tracking-widest leading-none">Sair</span>
-             <LogOut className="w-3.5 h-3.5" />
+          <button onClick={() => setActiveTab('notifications')} className="relative p-2 text-slate-400 hover:text-indigo-600">
+             <Bell className="w-5 h-5" />
+             {unreadNotifications > 0 && <span className="absolute top-1 right-1 w-2 h-2 bg-rose-500 rounded-full animate-pulse" />}
           </button>
         </div>
       </div>
 
       {isMobileMenuOpen && (
-        <div 
-          className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[60] lg:hidden animate-in fade-in duration-300"
-          onClick={() => setIsMobileMenuOpen(false)}
-        />
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[60] lg:hidden animate-in fade-in duration-300" onClick={() => setIsMobileMenuOpen(false)} />
       )}
 
       <aside className={cn(
@@ -773,16 +550,11 @@ export function Dashboard() {
              </div>
              <div className="flex flex-col leading-none whitespace-nowrap">
                 <span className="font-display font-extrabold text-2xl tracking-tighter text-slate-900">PATRI<span className="text-indigo-600">360</span></span>
-                <span className="text-[10px] font-bold text-slate-400 uppercase tracking-[0.2em] mt-1">Manoel Viana</span>
              </div>
           </div>
           <button 
             onClick={() => setIsSidebarCollapsed(!isSidebarCollapsed)}
-            className={cn(
-              "p-2.5 rounded-xl bg-slate-50 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 transition-all border border-slate-100 shadow-sm shrink-0",
-              isSidebarCollapsed ? "mx-auto" : ""
-            )}
-            title={isSidebarCollapsed ? "Expandir Menu" : "Recolher Menu"}
+            className={cn("p-2.5 rounded-xl bg-slate-50 text-slate-400 hover:text-indigo-600 transition-all border border-slate-100 shrink-0", isSidebarCollapsed ? "mx-auto" : "")}
           >
             {isSidebarCollapsed ? <ChevronRight className="w-4 h-4" /> : <ChevronLeft className="w-4 h-4" />}
           </button>
@@ -790,155 +562,60 @@ export function Dashboard() {
 
         <nav className="flex flex-col gap-1.5 flex-1">
           <NavItem collapsed={isSidebarCollapsed} active={activeTab === 'home' && !selectedInspectionId} label="Dashboard" icon={LayoutGrid} onClick={() => handleTabChange('home')} />
-          <NavItem collapsed={isSidebarCollapsed} active={activeTab === 'training'} label="Treinamento" icon={GraduationCap} onClick={() => handleTabChange('training')} />
-          <NavItem collapsed={isSidebarCollapsed} active={activeTab === 'analytics'} label="Estatísticas" icon={BarChart3} onClick={() => handleTabChange('analytics')} />
           <NavItem collapsed={isSidebarCollapsed} active={activeTab === 'scanner'} label="Scanner QR" icon={Search} onClick={() => handleTabChange('scanner')} />
           <NavItem collapsed={isSidebarCollapsed} active={activeTab === 'notifications'} label="Alertas" icon={Bell} onClick={() => handleTabChange('notifications')} badge={isSidebarCollapsed ? (unreadNotifications ? '•' : 0) : unreadNotifications || 0} />
           
           {unsyncedCount > 0 && (
-            <div className={cn(
-              "mt-2 px-6 py-3 bg-amber-50 rounded-2xl border border-amber-100 flex items-center gap-3 animate-in fade-in duration-500",
-              isSidebarCollapsed && "px-0 justify-center w-14 mx-auto"
-            )}>
+            <div className={cn("mt-2 px-6 py-3 bg-amber-50 rounded-2xl border flex items-center gap-3 animate-in fade-in", isSidebarCollapsed && "px-0 justify-center w-14 mx-auto")}>
               <Cloud className={cn("w-4 h-4 text-amber-600", syncing && "animate-bounce")} />
               {!isSidebarCollapsed && (
                 <div className="flex flex-col leading-none">
                   <span className="text-[9px] font-black text-amber-900 uppercase">{unsyncedCount} PENDENTES</span>
-                  <span className="text-[7px] font-bold text-amber-500 uppercase tracking-widest mt-0.5">Sincronizando...</span>
+                  <span className="text-[7px] font-bold text-amber-500 uppercase mt-0.5">Sincronizando...</span>
                 </div>
               )}
             </div>
           )}
 
           <div className={cn("h-4 transition-all", isSidebarCollapsed ? "h-6" : "h-4")} />
-          {!isSidebarCollapsed && <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest px-4 mb-2 animate-in fade-in duration-700">Gestão Patrimonial</span>}
-          
+          {!isSidebarCollapsed && <span className="text-[10px] font-bold text-slate-400 uppercase px-4 mb-2">Gestão Patrimonial</span>}
           <NavItem collapsed={isSidebarCollapsed} active={activeTab === 'inspections'} label="Dossiês" icon={ClipboardList} onClick={() => handleTabChange('inspections')} />
           <NavItem collapsed={isSidebarCollapsed} active={activeTab === 'locations'} label="Setores" icon={Building2} onClick={() => handleTabChange('locations')} />
-          
           {isManager && <NavItem collapsed={isSidebarCollapsed} active={activeTab === 'reports'} label="Relatórios" icon={BarChart3} onClick={() => handleTabChange('reports')} />}
-          
           {isAdmin && (
             <>
               {!isSidebarCollapsed && <div className="h-4" />}
-              {!isSidebarCollapsed && <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest px-4 mb-2 animate-in fade-in duration-700">Equipe & Sistema</span>}
-              <NavItem collapsed={isSidebarCollapsed} active={activeTab === 'users'} label="Agentes" icon={Users} onClick={() => handleTabChange('users')} />
               <NavItem collapsed={isSidebarCollapsed} active={activeTab === 'settings'} label="Configurações" icon={Settings} onClick={() => handleTabChange('settings')} />
             </>
           )}
         </nav>
-
-        <div className="mt-auto pt-8 border-t border-slate-100 pb-8">
-          {!isSidebarCollapsed ? (
-            <div className="p-4 bg-slate-50 rounded-2xl flex items-center gap-3 border border-slate-100 mb-4 transition-all hover:bg-slate-100 cursor-default animate-in slide-in-from-bottom-2">
-               <div className="w-10 h-10 bg-white rounded-xl flex items-center justify-center shadow-sm text-indigo-600 font-bold text-sm border border-slate-200 shrink-0">
-                  {user?.name.charAt(0)}
-               </div>
-               <div className="flex flex-col overflow-hidden">
-                  <span className="text-sm font-bold text-slate-900 truncate">{user?.name}</span>
-                  <span className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">{user?.role}</span>
-               </div>
-            </div>
-          ) : (
-            <div className="w-12 h-12 mx-auto bg-slate-50 rounded-xl flex items-center justify-center mb-4 border border-slate-100 text-indigo-600 font-bold text-sm">
-               {user?.name.charAt(0)}
-            </div>
-          )}
-          <button 
-            onClick={signOut}
-            className={cn(
-              "flex items-center gap-3 rounded-xl text-slate-500 hover:text-rose-600 hover:bg-rose-50 font-bold text-sm transition-all group outline-none",
-              isSidebarCollapsed ? "justify-center px-0 w-12 mx-auto h-12" : "w-full px-4 py-3"
-            )}
-            title={isSidebarCollapsed ? "Encerrar Sessão" : undefined}
-          >
-            <LogOut className="w-5 h-5 shrink-0" />
-            {!isSidebarCollapsed && "Sair"}
-          </button>
-        </div>
       </aside>
 
       <main className="flex-1 flex flex-col min-w-0">
-        <header className={cn(
-          "flex items-center justify-between px-6 lg:px-10 py-6 lg:py-7 bg-bg/80 backdrop-blur-xl sticky top-0 z-30 transition-all",
-          selectedInspectionId ? "pb-4" : ""
-        )}>
-          <div className="flex items-center gap-3 lg:gap-5 min-w-0 flex-1">
-            {(activeTab !== 'home' || selectedInspectionId) && (
-              <button 
-                onClick={() => handleTabChange('home')}
-                className="w-10 h-10 lg:w-12 lg:h-12 shrink-0 bg-card border border-border rounded-[1rem] lg:rounded-2xl flex items-center justify-center text-text-muted hover:text-primary hover:shadow-lg hover:border-text-muted transition-all active:scale-95"
-                title="Voltar ao Início"
-              >
-                <Home className="w-5 h-5 lg:w-6 lg:h-6" />
-              </button>
-            )}
-            <div className="flex flex-col min-w-0">
-              <div className="flex items-center gap-2 mb-1.5 overflow-x-auto no-scrollbar mask-fade-right pr-4">
-                <span 
-                  onClick={() => handleTabChange('home')}
-                  className="text-[9px] lg:text-[10px] font-black text-slate-400 hover:text-blue-600 uppercase tracking-widest cursor-pointer transition-colors shrink-0"
-                >
-                  Dashboard
-                </span>
-                {activeTab !== 'home' && (
-                  <>
-                    <ArrowRight className="w-3 h-3 text-slate-300 shrink-0" />
-                    <span 
-                      onClick={() => setSelectedInspectionId(null)}
-                      className={cn("text-[9px] lg:text-[10px] font-black uppercase tracking-widest cursor-pointer transition-colors shrink-0", selectedInspectionId ? "text-slate-400 hover:text-blue-600" : "text-blue-600")}
-                    >
-                      {activeTab === 'locations' ? 'Ambientes' : activeTab === 'inspections' ? 'Vistorias' : activeTab === 'reports' ? 'Auditoria' : activeTab === 'users' ? 'Equipe' : activeTab === 'settings' ? 'Global' : activeTab === 'notifications' ? 'Alertas' : activeTab === 'training' ? 'Treinamento' : activeTab}
-                    </span>
-                  </>
-                )}
-                {selectedInspectionId && (
-                  <>
-                    <ArrowRight className="w-3 h-3 text-slate-300 shrink-0" />
-                    <span className="text-[9px] lg:text-[10px] font-black text-blue-600 uppercase tracking-widest shrink-0 truncate">
-                      Modo Inspeção
-                    </span>
-                  </>
-                )}
-              </div>
-              <h2 className="text-xl lg:text-3xl font-black text-primary tracking-tighter leading-none truncate">
-                {selectedInspectionId ? "Auditoria de Ambiente" : activeTab === 'home' ? `Olá, ${user?.name.split(' ')[0]}` : activeTab === 'locations' ? 'Registro de Ambientes' : activeTab === 'inspections' ? 'Dossiê de Vistorias' : activeTab === 'reports' ? 'Painel de Transparência' : activeTab === 'users' ? 'Gestão de Agentes' : activeTab === 'settings' ? 'Configurações de Instância' : activeTab === 'notifications' ? 'Centro de Controle' : activeTab === 'training' ? 'Centro de Treinamento' : activeTab}
-              </h2>
-            </div>
+        <header className={cn("hidden lg:flex items-center justify-between px-10 py-7 bg-white/80 backdrop-blur-xl sticky top-0 z-30 transition-all", selectedInspectionId ? "pb-4" : "")}>
+          <div className="flex items-center gap-5 min-w-0 flex-1">
+            <h2 className="text-3xl font-black text-slate-900 tracking-tighter truncate">
+              {activeTab === 'home' ? `Olá, ${user?.name.split(' ')[0]}` : activeTab.toUpperCase()}
+            </h2>
           </div>
           
-          <div className="hidden lg:flex items-center gap-6 shrink-0">
-             <div className="flex items-center gap-3 pr-6 border-r border-border">
-                <div className="flex flex-col items-end leading-none">
-                   <span className="text-[10px] font-black text-primary uppercase tracking-tighter shrink-0">{user?.name}</span>
-                   <span className="text-[8px] font-bold text-text-muted uppercase tracking-widest mt-1">{user?.role}</span>
-                </div>
-                <div className="w-10 h-10 bg-primary rounded-xl flex items-center justify-center text-white font-bold">
-                   {user?.name.charAt(0)}
-                </div>
+          <div className="flex items-center gap-6 shrink-0">
+             <div className="flex items-center gap-2 px-4 py-2 bg-slate-50 border border-slate-200 rounded-full">
+                <div className={cn("w-2 h-2 rounded-full", syncing ? "bg-indigo-500 animate-pulse" : (isOnline ? "bg-emerald-500" : "bg-rose-500"))} />
+                <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest">{syncing ? "Sincronizando..." : (isOnline ? "Conectado" : "Offline")}</span>
              </div>
 
-             <div className="flex items-center gap-2 px-4 py-2 bg-card border border-border rounded-full shadow-sm">
-                <div className={cn("w-2 h-2 rounded-full", syncing ? "bg-indigo-500 animate-pulse" : (isOnline ? "bg-emerald-500 shadow-[0_0_8px_#10b981]" : "bg-rose-500"))} />
-                <span className="text-[10px] font-black text-text-muted uppercase tracking-widest leading-none">
-                  {syncing ? "Sincronizando..." : (isOnline ? "Conectado" : "Offline")}
-                </span>
-             </div>
-
-             <button onClick={() => setActiveTab('notifications')} className="relative w-12 h-12 flex items-center justify-center bg-card border border-border rounded-2xl text-text-muted hover:text-primary transition-all hover:bg-bg">
+             <button onClick={() => setActiveTab('notifications')} className="relative w-12 h-12 flex items-center justify-center bg-white border border-slate-200 rounded-2xl text-slate-400 hover:text-indigo-600 transition-all">
                <Bell className="w-6 h-6" />
                {unreadNotifications > 0 && (
-                 <span className="absolute top-2 right-2 w-4 h-4 bg-rose-500 text-[10px] text-white flex items-center justify-center rounded-full border-2 border-white font-bold">
+                 <span className="absolute -top-2 -right-2 min-w-[20px] h-5 px-1 bg-rose-500 text-[10px] text-white flex items-center justify-center rounded-full border-2 border-white font-bold animate-pulse">
                    {unreadNotifications}
                  </span>
                )}
              </button>
 
-             <button 
-               onClick={signOut}
-               className="flex items-center gap-2 px-5 h-12 bg-rose-50 border border-rose-100 rounded-2xl text-rose-600 hover:bg-rose-500 hover:text-white transition-all font-bold text-[10px] uppercase tracking-widest"
-             >
-               <LogOut className="w-4 h-4" /> Sair
+             <button onClick={signOut} className="w-12 h-12 flex items-center justify-center bg-rose-50 border border-rose-100 rounded-2xl text-rose-600 hover:bg-rose-500 hover:text-white transition-all">
+               <LogOut className="w-5 h-5" />
              </button>
           </div>
         </header>
@@ -948,26 +625,17 @@ export function Dashboard() {
         </section>
       </main>
 
-      <nav className="fixed bottom-0 left-0 right-0 lg:hidden bg-card/90 backdrop-blur-xl border-t border-border flex items-center justify-around p-4 pb-6 z-50">
+      <nav className="fixed bottom-0 left-0 right-0 lg:hidden bg-white/90 backdrop-blur-xl border-t border-slate-200 flex items-center justify-around p-4 pb-6 z-50">
         <MobileNavItem active={activeTab === 'home' && !selectedInspectionId} icon={LayoutGrid} onClick={() => handleTabChange('home')} />
-        <MobileNavItem active={activeTab === 'training'} icon={GraduationCap} onClick={() => handleTabChange('training')} />
         <div className="relative -top-6">
            <motion.button 
              whileTap={{ scale: 0.9 }}
-             whileHover={{ scale: 1.05 }}
              onClick={() => handleTabChange('locations')}
-             className={cn("w-14 h-14 rounded-2xl flex items-center justify-center shadow-xl shadow-accent/30 text-white transition-colors duration-300",
-               activeTab === 'locations' ? "bg-accent-focus ring-4 ring-accent/20" : "bg-accent"
-             )}
+             className={cn("w-14 h-14 rounded-2xl flex items-center justify-center shadow-xl text-white transition-colors duration-300", activeTab === 'locations' ? "bg-indigo-700 ring-4 ring-indigo-500/20" : "bg-indigo-600")}
            >
              <Plus className={cn("w-6 h-6 transition-transform duration-300", activeTab === 'locations' && "rotate-45")} />
            </motion.button>
         </div>
-        {isManager ? (
-          <MobileNavItem active={activeTab === 'reports'} icon={BarChart3} onClick={() => handleTabChange('reports')} />
-        ) : (
-          <MobileNavItem active={activeTab === 'scanner'} icon={Search} onClick={() => handleTabChange('scanner')} />
-        )}
         <MobileNavItem active={activeTab === 'notifications'} icon={Bell} onClick={() => handleTabChange('notifications')} />
       </nav>
     </div>
@@ -976,137 +644,58 @@ export function Dashboard() {
 
 function SummaryCard({ label, value, icon: Icon, onClick, variant = 'default' }: { label: string, value: number | string, icon: any, onClick: () => void, variant?: 'default' | 'accent' }) {
   return (
-    <Card 
-      onClick={onClick}
-      className={cn(
-        "group h-40 flex flex-col justify-between border-slate-100 px-6 py-6",
-        variant === 'accent' ? "bg-slate-900 border-transparent" : "bg-white shadow-sm hover:shadow-xl"
-      )}
-    >
-      <div className="flex items-start justify-between">
-        <div className={cn(
-          "w-12 h-12 rounded-2xl flex items-center justify-center transition-all duration-500",
-          variant === 'accent' ? "bg-white/10" : "bg-slate-50 group-hover:bg-slate-900 text-slate-500 group-hover:text-white"
-        )}>
-          <Icon className="w-6 h-6 transform group-hover:rotate-12 transition-transform" />
-        </div>
+    <Card onClick={onClick} className={cn("group h-40 flex flex-col justify-between border-slate-100 px-6 py-6 cursor-pointer", variant === 'accent' ? "bg-slate-900 border-transparent" : "bg-white shadow-sm hover:shadow-xl")}>
+      <div className={cn("w-12 h-12 rounded-2xl flex items-center justify-center transition-all duration-500", variant === 'accent' ? "bg-white/10" : "bg-slate-50 group-hover:bg-slate-900 text-slate-500 group-hover:text-white")}>
+        <Icon className="w-6 h-6 transform group-hover:rotate-12 transition-transform" />
       </div>
       <div className="flex flex-col">
-        <span className={cn(
-          "text-4xl font-display font-extrabold tracking-tight leading-none",
-          variant === 'accent' ? "text-white" : "text-slate-900"
-        )}>{value}</span>
-        <span className={cn(
-          "text-[10px] uppercase font-bold tracking-widest mt-2",
-          variant === 'accent' ? "text-slate-400" : "text-slate-500"
-        )}>{label}</span>
+        <span className={cn("text-4xl font-display font-extrabold tracking-tight", variant === 'accent' ? "text-white" : "text-slate-900")}>{value}</span>
+        <span className={cn("text-[10px] uppercase font-bold tracking-widest mt-2", variant === 'accent' ? "text-slate-400" : "text-slate-500")}>{label}</span>
       </div>
     </Card>
   );
 }
 
-function QuickActionButton({ icon: Icon, label, onClick, primary = false }: { icon: any, label: string, onClick: () => void, primary?: boolean }) {
-  return (
-    <button 
-      onClick={onClick}
-      className={cn(
-        "flex flex-col items-center justify-center gap-4 h-40 rounded-[2.5rem] border-2 transition-all group active:scale-95 shadow-sm",
-        primary 
-          ? "bg-primary border-primary text-white hover:bg-primary-light" 
-          : "bg-card border-bg hover:border-border text-text-muted hover:text-primary"
-      )}
-    >
-      <div className={cn(
-        "w-14 h-14 rounded-2xl flex items-center justify-center transition-all shadow-sm",
-        primary ? "bg-white/10 text-white" : "bg-bg text-text-muted group-hover:bg-primary group-hover:text-white"
-      )}>
-        <Icon className="w-7 h-7" />
-      </div>
-      <span className="text-[11px] font-black uppercase tracking-widest leading-none">{label}</span>
-    </button>
-  );
-}
-
-function RecentInspectionRow({ inspection, locationName, onClick }: { inspection: Inspection, locationName: string, onClick: () => void, key?: string | number }) {
+function RecentInspectionRow({ inspection, locationName, onClick }: { inspection: Inspection, locationName: string, onClick: () => void }) {
   const isFinalized = inspection.status === 'finalizada';
   const isInProgress = inspection.status === 'em_andamento';
   
-  // SOMA REAL DAS QUANTIDADES NA LISTA DE VISTORIAS
   const assetCount = useLiveQuery(async () => {
-    const itensDaVistoria = await db.assets.where('inspectionId').equals(inspection.id).toArray();
-    return itensDaVistoria.reduce((acc, curr) => acc + (Number(curr.quantity) || 1), 0);
+    const itens = await db.assets.where('inspectionId').equals(inspection.id).toArray();
+    return itens.reduce((acc, curr) => acc + (Number(curr.quantity) || 1), 0);
   }, [inspection.id]);
 
   return (
-    <Card 
-      onClick={onClick}
-      className="flex items-center justify-between p-4 lg:p-6 group hover:border-slate-300 transition-all border-slate-100"
-    >
+    <Card onClick={onClick} className="flex items-center justify-between p-4 lg:p-6 group hover:border-slate-300 transition-all border-slate-100 cursor-pointer">
       <div className="flex items-center gap-6 min-w-0">
-        <div className={cn(
-          "w-14 h-14 rounded-2xl flex items-center justify-center shrink-0 border transition-all duration-500",
-          isFinalized ? "bg-emerald-50 border-emerald-100 text-emerald-600" : 
-          isInProgress ? "bg-indigo-50 border-indigo-100 text-indigo-600" : 
-          "bg-slate-50 border-slate-100 text-slate-400"
-        )}>
+        <div className={cn("w-14 h-14 rounded-2xl flex items-center justify-center shrink-0 border transition-all duration-500", isFinalized ? "bg-emerald-50 border-emerald-100 text-emerald-600" : isInProgress ? "bg-indigo-50 border-indigo-100 text-indigo-600" : "bg-slate-50 border-slate-100 text-slate-400")}>
           {isFinalized ? <CheckCircle2 className="w-7 h-7" /> : <ClipboardList className="w-7 h-7" />}
         </div>
         <div className="flex flex-col min-w-0">
           <div className="flex items-center gap-2 mb-1">
-            <h4 className="text-sm font-bold text-slate-900 truncate tracking-tight">{locationName}</h4>
-            {isInProgress && (assetCount === 0) && (
-              <span className="bg-amber-100 text-amber-700 text-[8px] font-bold uppercase px-2 py-0.5 rounded-lg tracking-widest">Sem itens</span>
-            )}
+            <h4 className="text-sm font-bold text-slate-900 truncate">{locationName}</h4>
           </div>
           <div className="flex items-center gap-3 text-[10px] font-bold">
-            <span className="uppercase text-slate-400 tracking-wider font-mono">{formatDate(inspection.date).split(',')[0]}</span>
+            <span className="uppercase text-slate-400">{formatDate(inspection.date).split(',')[0]}</span>
             <div className="w-1 h-1 rounded-full bg-slate-200"></div>
             <span className="text-slate-400">{assetCount || 0} itens</span>
-            <div className="w-1 h-1 rounded-full bg-slate-200"></div>
-            <span className={cn(
-              "uppercase tracking-[0.1em]",
-              isFinalized ? "text-emerald-600" : isInProgress ? "text-indigo-600" : "text-slate-600"
-            )}>
-              {inspection.status.replace('_', ' ')}
-            </span>
           </div>
         </div>
       </div>
-      
-      <Button 
-        size="sm" 
-        variant={isInProgress ? "accent" : "secondary"}
-        icon={isInProgress ? PlayCircle : Eye}
-        onClick={onClick}
-        className="hidden sm:flex h-11 px-8 uppercase tracking-widest"
-      >
-        {isInProgress ? "Continuar" : "Visualizar"}
+      <Button size="sm" variant={isInProgress ? "accent" : "secondary"} icon={isInProgress ? PlayCircle : Eye} onClick={onClick} className="hidden sm:flex h-11 px-8 uppercase tracking-widest">
+        {isInProgress ? "Continuar" : "Ver"}
       </Button>
-
-      <ArrowRight className="w-5 h-5 text-slate-300 sm:hidden group-hover:text-slate-900 transition-transform group-hover:translate-x-1" />
     </Card>
   );
 }
 
-function NavItem({ active, label, icon: Icon, onClick, badge, collapsed }: { active: boolean, icon: any, label: string, onClick: () => void, badge?: any, collapsed?: boolean }) {
+function NavItem({ active, label, icon: Icon, onClick, badge, collapsed }: any) {
   return (
-    <button 
-      onClick={onClick}
-      title={collapsed ? label : undefined}
-      className={cn(
-        "flex items-center gap-4 py-4 rounded-2xl font-black text-[10px] uppercase tracking-widest transition-all group relative overflow-hidden",
-        collapsed ? "justify-center px-0 w-14 mx-auto" : "px-6 w-full",
-        active ? "bg-slate-900 text-white shadow-2xl shadow-slate-200" : "text-slate-500 hover:bg-slate-50 hover:text-slate-900"
-      )}
-    >
+    <button onClick={onClick} title={collapsed ? label : undefined} className={cn("flex items-center gap-4 py-4 rounded-2xl font-black text-[10px] uppercase tracking-widest transition-all group relative overflow-hidden", collapsed ? "justify-center px-0 w-14 mx-auto" : "px-6 w-full", active ? "bg-slate-900 text-white shadow-2xl" : "text-slate-500 hover:bg-slate-50")}>
       <Icon className={cn("w-5 h-5 shrink-0 transition-transform duration-500", active ? "scale-110" : "group-hover:scale-110")} />
-      {!collapsed && <span className="flex-1 text-left truncate animate-in fade-in duration-500">{label}</span>}
-      {badge !== undefined && (typeof badge === 'number' ? badge > 0 : badge) ? (
-        <span className={cn(
-          "rounded-full text-[8px] font-black flex items-center justify-center border transition-all",
-          collapsed ? "absolute top-2 right-2 w-2 h-2 p-0" : "px-2 py-0.5 min-w-[18px]",
-          active ? "bg-indigo-500 border-indigo-400 text-white" : "bg-indigo-100 border-indigo-200 text-indigo-700"
-        )}>
+      {!collapsed && <span className="flex-1 text-left truncate">{label}</span>}
+      {badge !== undefined && badge > 0 ? (
+        <span className={cn("rounded-full text-[8px] font-black flex items-center justify-center border transition-all", collapsed ? "absolute top-2 right-2 w-2 h-2 p-0" : "px-2 py-0.5 min-w-[18px]", active ? "bg-indigo-500 border-indigo-400 text-white" : "bg-indigo-100 border-indigo-200 text-indigo-700")}>
           {!collapsed && badge}
         </span>
       ) : null}
@@ -1114,22 +703,9 @@ function NavItem({ active, label, icon: Icon, onClick, badge, collapsed }: { act
   );
 }
 
-function MobileNavItem({ active, icon: Icon, onClick, label }: any) {
+function MobileNavItem({ active, icon: Icon, onClick }: any) {
   return (
-    <button 
-      onClick={onClick}
-      className={cn(
-        "relative p-3 rounded-2xl flex flex-col items-center justify-center transition-all outline-none",
-        active ? "text-slate-900 scale-110" : "text-slate-400 hover:text-slate-600"
-      )}
-    >
-      {active && (
-        <motion.div
-          layoutId="mobile-nav-indicator"
-          className="absolute -inset-1 bg-slate-900/5 rounded-2xl -z-10"
-          transition={{ type: "spring", bounce: 0.3, duration: 0.6 }}
-        />
-      )}
+    <button onClick={onClick} className={cn("relative p-3 rounded-2xl flex flex-col items-center justify-center transition-all outline-none", active ? "text-indigo-600 scale-110" : "text-slate-400")}>
       <Icon className={cn("w-6 h-6 transition-all duration-300", active ? "stroke-[2.5px]" : "stroke-2")} />
     </button>
   );

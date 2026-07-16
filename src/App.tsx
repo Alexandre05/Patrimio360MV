@@ -7,15 +7,15 @@ import React, { useState, useEffect } from 'react';
 import { AuthProvider, useAuth } from './lib/AuthContext';
 import { ToastProvider, useToast } from './lib/ToastContext';
 import { Dashboard } from './components/Dashboard';
-import { Card, Button, Input, Alert } from './components/UI';
+import { Card, Button, Input, Alert, SyncToast } from './components/UI';
 import { Building2, LogIn, ShieldCheck, UserPlus, UserCheck, Search } from 'lucide-react';
 import { seedDatabase } from './lib/seed';
 import { db } from './lib/db';
 import { db as firestore } from './lib/firebase';
 import { doc, deleteDoc } from 'firebase/firestore';
 import { getAuth, sendPasswordResetEmail } from 'firebase/auth';
-
 import { PublicInspectionView } from './components/PublicInspectionView';
+import { PublicScannerView } from './components/PublicScannerView';
 
 function SetupScreen() {
   const { signUp, isFirstUser } = useAuth();
@@ -313,8 +313,6 @@ function LoginScreen() {
   );
 }
 
-import { PublicScannerView } from './components/PublicScannerView';
-
 function Main() {
   const { user, loading, isFirstUser } = useAuth();
   
@@ -422,8 +420,6 @@ function Main() {
 
   return user ? <Dashboard /> : <LoginScreen />;
 }
-
-import { SyncToast } from './components/UI';
 
 export default function App() {
   return (

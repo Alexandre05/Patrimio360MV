@@ -1,12 +1,6 @@
 /**
  * PATRI360 - Sistema de Auditoria e Gestão Patrimonial
  * Copyright (c) 2026 [Alexandre Barreto Menna Prefeitura de Manoel Viana]. Todos os direitos reservados.
- *
- * Este software é confidencial e propriedade intelectual exclusiva do autor.
- * É estritamente proibida a reprodução, cópia, distribuição, modificação, 
- * engenharia reversa ou uso não autorizado deste código-fonte, no todo ou em parte, 
- * sem o consentimento prévio, expresso e por escrito do detentor dos direitos.
- * * Protegido nos termos da Lei de Proteção de Programas de Computador.
  */
 import { db as dexie } from './db';
 import { db as firestore, auth, handleFirestoreError } from './firebase';
@@ -25,13 +19,14 @@ function sanitizeForFirestore(obj: any) {
 
 let unsubscribers: (() => void)[] = [];
 
+// MANTEVE A SUA FUNÇÃO ORIGINAL INTACTA
 export function setupSync() {
   if (!auth.currentUser) return;
 
   unsubscribers.forEach(unsub => unsub());
   unsubscribers = [];
 
-  // 🚀 VIGILANTE DE RESET (À prova de bloqueios de segurança)
+  // 🚀 VIGILANTE DE RESET 
   try {
     const sysRef = doc(firestore, 'locations', 'GLOBAL_RESET_COMMAND');
     const unsubSys = onSnapshot(sysRef, async (snap) => {
@@ -40,7 +35,6 @@ export function setupSync() {
         const localReset = localStorage.getItem('global_reset_time');
         const remoteReset = data.reset_timestamp?.toString();
         
-        // Se a nuvem tiver um sinal de Reset mais recente, o tablet obedece e limpa-se sozinho
         if (remoteReset && localReset !== remoteReset) {
           console.warn("🚨 COMANDO DE RESET GLOBAL RECEBIDO DA NUVEM!");
           localStorage.clear();
@@ -107,6 +101,7 @@ export function setupSync() {
 
 let isPushing = false;
 
+// MANTEVE O SEU PUSH ANTIGO (Para não quebrar botões existentes)
 export async function pushLocalChanges() {
   if (isPushing) return;
   
@@ -114,7 +109,6 @@ export async function pushLocalChanges() {
   window.dispatchEvent(new CustomEvent('app-sync-start'));
 
   try {
-    // 1. Sincronizar Locais
     const unsyncedLocations = await dexie.locations.filter(loc => loc.needsSync === 1 || loc.needsSync === true as any).toArray();
     for (const loc of unsyncedLocations) {
       try {
@@ -133,7 +127,6 @@ export async function pushLocalChanges() {
       }
     }
 
-    // 2. Sincronizar Vistorias
     const unsyncedInspections = await dexie.inspections.filter(insp => insp.needsSync === 1 || insp.needsSync === true as any).toArray();
     for (const insp of unsyncedInspections) {
       try {
@@ -152,7 +145,6 @@ export async function pushLocalChanges() {
       }
     }
 
-    // 3. Sincronizar Itens (Refatorado para salvar fotos como Base64 diretamente)
     const unsyncedAssets = await dexie.assets.filter(asset => asset.needsSync === 1 || asset.needsSync === true as any).toArray();
     for (const asset of unsyncedAssets) {
       try {
@@ -167,8 +159,6 @@ export async function pushLocalChanges() {
         const { needsSync, ...data } = asset;
         data.updatedAt = Date.now();
         
-        // Mantemos a lógica de manter a foto como veio (Base64)
-        // Isso ignora o Firebase Storage e salva direto no documento do Firestore
         if (asset.photos) {
            data.photos = asset.photos;
         }
@@ -262,4 +252,63 @@ export async function hardResetAndRescue() {
   localStorage.clear();
   await dexie.delete();
   window.location.reload();
+}
+
+// ============================================================================
+// NOVO MOTOR DE FILA DE SINCRONIZAÇÃO (ADICIONADO AQUI NO FINAL)
+// ============================================================================
+
+export async function addToQueue(collectionName: string, operation: 'create' | 'update' | 'delete', data: any) {
+  const docId = data.id;
+  if (!docId) {
+    console.error("Tentativa de adicionar à fila sem ID:", data);
+    return;
+  }
+
+  // "Deduping" inteligente
+  const existing = await dexie.syncQueue.where('docId').equals(docId).first();
+
+  if (existing) {
+    await dexie.syncQueue.update(existing.id!, { 
+      data, 
+      operation: operation === 'delete' ? 'delete' : existing.operation,
+      timestamp: Date.now() 
+    });
+  } else {
+    await dexie.syncQueue.add({ 
+      docId, 
+      collection: collectionName, 
+      operation, 
+      data, 
+      timestamp: Date.now() 
+    });
+  }
+
+  processSyncQueue();
+}
+
+export async function processSyncQueue() {
+  const queue = await dexie.syncQueue.orderBy('timestamp').toArray();
+
+  for (const item of queue) {
+    try {
+      const docRef = doc(firestore, item.collection, item.docId);
+      
+      if (item.operation === 'create' || item.operation === 'update') {
+        // Envia para o Firebase
+        await setDoc(docRef, sanitizeForFirestore(item.data), { merge: true });
+      } else if (item.operation === 'delete') {
+        await deleteDoc(docRef);
+      }
+      
+      // Remove da fila apenas se teve sucesso
+      await dexie.syncQueue.delete(item.id!);
+      console.log(`Fila Processada com Sucesso: ${item.operation} em ${item.collection} (${item.docId})`);
+      
+    } catch (error: any) {
+      console.error("Erro na sincronização da Fila. Pausando tentativa:", error.message);
+      break; // Para tudo e aguarda melhor internet
+    }
+    
+  }
 }
