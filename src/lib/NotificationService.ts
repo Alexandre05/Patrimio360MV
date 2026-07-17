@@ -1,12 +1,11 @@
-import { db, generateId, Notification } from './db';
+import { db, Notification } from './db';
 
 export async function checkAndGenerateNotifications(userId: string) {
   const now = Date.now();
   const user = await db.users.get(userId);
   if (!user) return;
 
-  // 1. Check for upcoming inspections (Reminders)
-  // Scheduled for the next 24 hours
+  // 1. Lembretes de vistorias programadas
   const upcomingInspections = await db.inspections
     .where('status')
     .equals('em_andamento')
@@ -32,19 +31,23 @@ export async function checkAndGenerateNotifications(userId: string) {
     }
   }
 
-  // 2. Check for critical items (Alerts)
-  // Assets marked as 'ruim' or 'inservivel' in the last 72 hours (3 days)
-  // Only sent to 'administrador' and 'responsavel' (Asset Manager)
+  // 2. Alertas Críticos (Bens 'ruim' ou 'inservivel')
+  // Agora analisa tanto os recém-criados quanto os atualizados/editados nas últimas 72h
   if (user.role === 'administrador' || user.role === 'responsavel') {
     const seventyTwoHoursAgo = now - (3 * 24 * 60 * 60 * 1000);
+    
     const criticalAssets = await db.assets
-      .where('createdAt')
-      .above(seventyTwoHoursAgo)
-      .filter(a => a.condition === 'ruim' || a.condition === 'inservivel')
+      .filter(a => {
+        const timestamp = a.updatedAt || a.createdAt;
+        return timestamp > seventyTwoHoursAgo && (a.condition === 'ruim' || a.condition === 'inservivel');
+      })
       .toArray();
 
     for (const asset of criticalAssets) {
-      const notificationId = `alert-${asset.id}-${userId}`;
+      // O ID da notificação inclui a data de atualização, assim, se o item for editado de novo para 'ruim', 
+      // ele pode gerar um novo alerta, mas não cria spam da mesma edição.
+      const timestampToUse = asset.updatedAt || asset.createdAt;
+      const notificationId = `alert-${asset.id}-${timestampToUse}-${userId}`;
       const exists = await db.notifications.get(notificationId);
       
       if (!exists) {
@@ -52,7 +55,7 @@ export async function checkAndGenerateNotifications(userId: string) {
           id: notificationId,
           type: 'alerta',
           title: '🚨 Alerta de Estado Crítico',
-          message: `O item "${asset.name}" foi registrado como "${asset.condition.toUpperCase()}". Recomenda-se revisão técnica imediata ou abertura de processo de baixa/ação corretiva.`,
+          message: `O item "${asset.name}" foi registado/alterado para a condição "${asset.condition.toUpperCase()}". Recomenda-se revisão técnica imediata ou abertura de processo de baixa.`,
           date: now,
           read: false,
           targetUserId: userId,
