@@ -96,6 +96,17 @@ export interface SyncItem {
   timestamp: number;
 }
 
+// 🚀 NOVA INTERFACE: EVENTOS DA LINHA DO TEMPO
+export interface AssetEvent {
+  id: string;
+  assetId: string;
+  type: 'criacao' | 'edicao' | 'transferencia' | 'atualizacao_status' | 'baixa' | 'foto_adicionada';
+  description: string;
+  userId: string;
+  userName: string;
+  date: number;
+}
+
 // --- CLASSE DO BANCO ---
 export class PatrimonyDatabase extends Dexie {
   users!: Table<User>;
@@ -104,21 +115,23 @@ export class PatrimonyDatabase extends Dexie {
   assets!: Table<Asset>;
   notifications!: Table<Notification>;
   settings!: Table<AppSettings>;
-  syncQueue!: Table<SyncItem>; // Nova tabela adicionada
+  syncQueue!: Table<SyncItem>; 
+  assetEvents!: Table<AssetEvent>; // 🚀 NOVA TABELA DECLARADA AQUI
 
   constructor() {
     super('PatrimonyDB');
     
-    // Incrementado para versão 9 (versão anterior era 8)
-    // O Dexie detecta que é uma versão nova e cria a tabela syncQueue automaticamente
-    this.version(9).stores({
+  
+   // 🚀 MUDOU PARA VERSÃO 11: Adicionado 'name' na tabela assets para permitir a busca do histórico
+    this.version(11).stores({
       users: 'userId, email, role, updatedAt, deleted, needsSync',
       locations: 'id, name, internalCode, updatedAt, deleted, needsSync',
       inspections: 'id, locationId, status, date, updatedAt, deleted, needsSync',
-      assets: 'id, inspectionId, hash, needsSync, createdAt, patrimonyNumber, updatedAt, deleted',
+      assets: 'id, inspectionId, name, hash, needsSync, createdAt, patrimonyNumber, updatedAt, deleted', // <-- 'name' ADICIONADO AQUI
       notifications: 'id, type, date, read, targetUserId',
       settings: 'id',
-      syncQueue: '++id, docId, timestamp' // Tabela de fila: ++id cria ID único automaticamente
+      syncQueue: '++id, docId, timestamp', 
+      assetEvents: 'id, assetId, type, date' 
     });
   }
 }

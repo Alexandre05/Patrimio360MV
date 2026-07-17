@@ -12,7 +12,7 @@
 import React, { useState, useRef } from 'react';
 import { Card, Button, Input, Select, Textarea } from './UI';
 import { useOnlineStatus } from '../lib/hooks';
-import { ArrowLeft, Plus, Image as ImageIcon, Trash2, Camera, UserPlus, Save, CheckCircle2, History, Eye, PlayCircle, ArrowRight, X, Edit2, Search, ShieldCheck, AlertCircle, Home, ChevronLeft, ChevronRight, Zap, Copy, Database, Signature, Mic, Filter } from 'lucide-react';
+import { ArrowLeft, Plus, Image as ImageIcon, Trash2, Camera, UserPlus, Save, CheckCircle2, History, Eye, PlayCircle, ArrowRight, X, Edit2, Search, ShieldCheck, AlertCircle, Home, ChevronLeft, ChevronRight, Zap, Copy, Database, Signature, Mic, Filter, Clock } from 'lucide-react';
 import { db, Asset, generateAssetHash, generateId, AssetCondition, InspectionStatus, Inspection, Location } from '../lib/db';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { useAuth } from '../lib/AuthContext';
@@ -119,17 +119,13 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
 
   const unsyncedAssetsCount = assets?.filter(a => a.needsSync === 1 || a.needsSync === true as any).length || 0;
 
-  // Restore Missing logic starts here
-  // Fetch signature data quando a vistoria mudar ou for homologada
   React.useEffect(() => {
     const fetchSignature = async () => {
       if (!id || !isOnline) return;
 
-      // Verificação proativa de permissão para evitar avisos no console
       const isPublic = inspection?.status === 'finalizada';
       const isAuthenticated = !!auth.currentUser;
 
-      // Se não for pública e não estiver autenticado, nem tenta
       if (!isPublic && !isAuthenticated) return;
 
       try {
@@ -143,7 +139,6 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
           });
         }
       } catch (err: any) {
-        // Trata erro de permissão com mensagem amigável em vez de warn agressivo
         if (err.message?.includes('permissions')) {
           console.info("Assinatura restrita: Aguardando homologação do dossiê.");
         } else {
@@ -181,7 +176,6 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
     const isTextarea = e.currentTarget.tagName === 'TEXTAREA';
     const isInput = e.currentTarget.tagName === 'INPUT';
     
-    // For text inputs and textareas, only navigate if cursor is at bounds OR if it's a select/button
     const canMoveRight = !isInput && !isTextarea || (e.currentTarget as any).selectionEnd === (e.currentTarget as any).value?.length;
     const canMoveLeft = !isInput && !isTextarea || (e.currentTarget as any).selectionStart === 0;
 
@@ -198,11 +192,9 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
       }
     }
   };
-  // Restore Missing logic ends here
 
   const [locationNames, setLocationNames] = useState<Record<string, string>>({});
 
-  // Sync location names for display labels
   React.useEffect(() => {
     const fetchLocNames = async () => {
       const inspIds = [...new Set(allVisibleAssets.map(a => a.inspectionId))];
@@ -241,8 +233,8 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
       return () => clearTimeout(timer);
     }
   }, [successMessage]);
-const handleAddItem = async () => {
-    // 🚀 NOVIDADE: Bloqueio de Inclusão em Agrupadores (Locais "Pai")
+
+  const handleAddItem = async () => {
     if (hasSubLocations) {
       toast("Este local é apenas um agrupador. Adicione itens dentro das salas/gavetas específicas.", "error", "Bloqueado");
       return;
@@ -261,7 +253,6 @@ const handleAddItem = async () => {
             inspectionId: id,
             hash: hash,
             needsSync: 1,
-            // Optionally update with new details provided in the form
             condition: newItem.condition,
             observations: newItem.observations,
             quantity: newItem.quantity
@@ -283,7 +274,6 @@ const handleAddItem = async () => {
     // Duplication Check (only for new items)
     if (!editingAssetId) {
       if (newItem.patrimonyNumber) {
-        // GLOBAL Patrimony check
         let globalExisting = await db.assets.where('patrimonyNumber').equals(newItem.patrimonyNumber).first();
         
         if (!globalExisting && isOnline) {
@@ -309,7 +299,6 @@ const handleAddItem = async () => {
           return;
         }
       } else {
-        // Local Check (same location, no patrimony)
         let existingHash = await db.assets.where('hash').equals(hash).first();
 
         if (!existingHash && isOnline) {
@@ -329,7 +318,65 @@ const handleAddItem = async () => {
       }
     }
 
+    
+
+    let finalAssetId = editingAssetId;
+    let eventDescription = 'Património catalogado no sistema';
+
     if (editingAssetId) {
+      // 1. Puxar o item antigo para comparar
+      const oldAsset = await db.assets.get(editingAssetId);
+      const changes: string[] = [];
+
+    if (oldAsset) {
+        // Compara Nome
+        if (oldAsset.name !== newItem.name) {
+          changes.push(`Nome (de '${oldAsset.name}' para '${newItem.name}')`);
+        }
+        
+        // Compara Património
+        if (oldAsset.patrimonyNumber !== newItem.patrimonyNumber) {
+          const oldPat = oldAsset.patrimonyNumber || 'Sem Nº';
+          const newPat = newItem.patrimonyNumber || 'Sem Nº';
+          changes.push(`Nº Património (de '${oldPat}' para '${newPat}')`);
+        }
+        
+        // Compara Estado
+        if (oldAsset.condition !== newItem.condition) {
+          changes.push(`Estado (de '${oldAsset.condition.toUpperCase()}' para '${newItem.condition.toUpperCase()}')`);
+        }
+        
+        // Compara Quantidade
+        if (oldAsset.quantity !== newItem.quantity) {
+          changes.push(`Qtd (de ${oldAsset.quantity || 1} para ${newItem.quantity})`);
+        }
+        
+        // Compara Observações (aqui não colocamos de/para porque os textos podem ser gigantes e poluir o ecrã)
+        if (oldAsset.observations !== newItem.observations) {
+          changes.push(`Observações atualizadas`);
+        }
+        
+        // Compara Fotos
+        if (oldAsset.photos?.length !== newItem.photos.length) {
+          changes.push(`Fotos alteradas`);
+        }
+      }
+
+      // 2. Montar a mensagem inteligente com uma quebra de visualização bonita
+      if (changes.length > 0) {
+        eventDescription = `Alterou: ${changes.join(' | ')}`; // Usa a barra (|) para separar se houver mais de uma alteração junta
+      } else {
+        eventDescription = `Registro salvo sem alterações visíveis`;
+      }
+
+      // 2. Montar a mensagem inteligente
+      if (changes.length > 0) {
+        eventDescription = `Alterou: ${changes.join(', ')}`;
+      } else {
+        eventDescription = `Registro salvo sem alterações visíveis`;
+      }
+
+      // 3. Atualizar o item
       await db.assets.update(editingAssetId, {
         name: newItem.name,
         patrimonyNumber: newItem.patrimonyNumber,
@@ -342,9 +389,9 @@ const handleAddItem = async () => {
       });
       toast("Registro atualizado!", "success", "Item Editado");
     } else {
-      const assetId = generateId();
-      await db.assets.add({
-        id: assetId,
+      finalAssetId = generateId();
+      await db.assets.put({
+        id: finalAssetId,
         inspectionId: id,
         name: newItem.name,
         patrimonyNumber: newItem.patrimonyNumber,
@@ -355,10 +402,27 @@ const handleAddItem = async () => {
         createdAt: Date.now(),
         hash: hash,
         needsSync: 1,
-        isPublic: true, // 🚀 ADICIONE ESTA LINHA PARA QUE A COMISSÃO VEJA,
+        isPublic: true,
         quantity: newItem.quantity
       });
       toast("Item adicionado à vistoria!", "success", "Novo Patrimônio");
+    }
+
+    // 🚀 GRAVAR LOG NA LINHA DO TEMPO COM A MENSAGEM INTELIGENTE
+    try {
+      if ((db as any).assetEvents) {
+        await (db as any).assetEvents.put({
+          id: crypto.randomUUID(),
+          assetId: finalAssetId,
+          type: editingAssetId ? 'edicao' : 'criacao',
+          description: eventDescription, // Usa a mensagem que montámos acima!
+          userId: user.userId,
+          userName: user.name,
+          date: Date.now()
+        });
+      }
+    } catch (err) {
+      console.warn("Aviso: Falha ao gravar log de eventos", err);
     }
 
     // Trigger sync
@@ -494,11 +558,10 @@ const handleAddItem = async () => {
       reader.onloadend = async () => {
         try {
           const rawBase64 = reader.result as string;
-          // COMPRESS to avoid storage quota issues (now using 1000px since we hit Storage, not Firestore)
           const compressedBase64 = await compressImage(rawBase64, 1000, 0.7);
           setNewItem(prev => ({
             ...prev,
-            photos: [...prev.photos, compressedBase64].slice(-4) // Limit to 4 photos
+            photos: [...prev.photos, compressedBase64].slice(-4)
           }));
         } catch (err) {
           console.error("Erro ao processar imagem:", err);
@@ -519,7 +582,6 @@ const handleAddItem = async () => {
   const handleConclude = async (force: boolean = false) => {
     if (!id || isConcluding) return;
     
-    // First click: ask for confirmation in-UI (unless forced by signature modal)
     if (!isConfirmingConclude && !force) {
       setIsConfirmingConclude(true);
       return;
@@ -530,19 +592,16 @@ const handleAddItem = async () => {
     console.log("Tentando concluir vistoria ID:", id);
     
     try {
-      // 0. Safety check: must have assets
       const assetsCount = await db.assets.where('inspectionId').equals(id).count();
       if (assetsCount === 0) {
         throw new Error("Não é possível concluir uma vistoria sem itens registrados.");
       }
 
-      // 1. Verify existence check
       const current = await db.inspections.get(id);
       if (!current) {
         throw new Error(`Vistoria ${id} não encontrada no banco local.`);
       }
 
-      // 2. Perform update using the most robust method (put)
       await db.inspections.put({
         ...current,
         status: 'concluida',
@@ -556,7 +615,6 @@ const handleAddItem = async () => {
       await syncInspection(id);
       await pushLocalChanges();
       
-      // Safety delay for reaction
       await new Promise(resolve => setTimeout(resolve, 400));
       setIsConfirmingConclude(false);
       
@@ -576,7 +634,6 @@ const handleAddItem = async () => {
 
     if (!id || isFinalizing) return;
 
-    // First click: ask for confirmation in-UI
     if (!isConfirmingFinalize) {
       setIsConfirmingFinalize(true);
       setError(null);
@@ -591,7 +648,6 @@ const handleAddItem = async () => {
       const current = await db.inspections.get(id);
       if (!current) throw new Error("Vistoria não encontrada.");
 
-      // Forçar o uso do domínio de produção para o QR Code
       const qrCodeDataPayload = `https://patrimonio360-75ade.web.app/vistoria/${id}`;
 
       await db.inspections.put({
@@ -603,7 +659,6 @@ const handleAddItem = async () => {
         needsSync: 1
       });
       
-      // Mark all assets as public for public view without O(N) get() in rules
       const assets = await db.assets.where('inspectionId').equals(id).toArray();
       for (const asset of assets) {
         await db.assets.update(asset.id, { isPublic: true, needsSync: 1 });
@@ -634,7 +689,6 @@ const handleAddItem = async () => {
       const current = await db.inspections.get(id);
       if (!current) throw new Error("Vistoria não encontrada.");
 
-      // --- REGRA DE OURO DA PREFEITURA: TRAVA HISTÓRICA POR ANO ---
       const currentYear = new Date().getFullYear();
       const inspectionYear = new Date(current.date).getFullYear();
 
@@ -644,7 +698,6 @@ const handleAddItem = async () => {
         return;
       }
 
-      // Primeiro clique: pede confirmação visual na tela
       if (!isConfirmingReopen) {
         setIsConfirmingReopen(true);
         setError(null);
@@ -655,14 +708,13 @@ const handleAddItem = async () => {
       setError(null);
       console.log("Reabrindo e atualizando data da vistoria:", id);
 
-      // --- NOVO REGISTRO DE DATA E HORA ATUALIZADOS ---
       const now = Date.now();
       await db.inspections.put({
         ...current,
         status: 'em_andamento',
-        date: now,         // Seta o relógio para o dia e hora de agora
-        updatedAt: now,    // Grava o momento da modificação
-        needsSync: 1       // Avisa o Firebase que este documento precisa subir atualizado
+        date: now,         
+        updatedAt: now,    
+        needsSync: 1       
       });
       
       await new Promise(resolve => setTimeout(resolve, 400));
@@ -692,13 +744,11 @@ const handleAddItem = async () => {
     setError(null);
     try {
       const now = Date.now();
-      // 1. Soft delete items
       const assetsToSoftDelete = await db.assets.where('inspectionId').equals(id).toArray();
       for (const asset of assetsToSoftDelete) {
         await db.assets.update(asset.id, { deleted: true, needsSync: 1, updatedAt: now });
       }
 
-      // 2. Soft delete inspection
       await db.inspections.update(id, { deleted: true, needsSync: 1, updatedAt: now });
       
       console.log("Vistoria marcada para exclusão:", id);
@@ -729,7 +779,6 @@ const handleAddItem = async () => {
       
       if (idsToTransfer.length === 0) throw new Error("Nenhum item para transferir");
 
-      // 1. Procurar ou criar vistoria ativa no destino
       let targetInspection = await db.inspections
         .where({ locationId: targetLocationId })
         .filter(i => i.status === 'em_andamento')
@@ -750,14 +799,12 @@ const handleAddItem = async () => {
 
       if (!targetInspection) throw new Error("Falha ao preparar destino");
 
-      // 2. Transferir itens
       for (const assetId of idsToTransfer) {
         const asset = await db.assets.get(assetId);
         if (!asset) continue;
 
         const newHash = generateAssetHash(asset.name, asset.patrimonyNumber, targetLocationId);
         
-        // Verificar se já existe no destino
         const existingInTarget = await db.assets.where('hash').equals(newHash).first();
         if (existingInTarget) {
           console.warn(`Item ${asset.name} já existe no destino, pulando...`);
@@ -784,17 +831,15 @@ const handleAddItem = async () => {
     }
   };
 
- const generatePDF = async () => {
+  const generatePDF = async () => {
     try {
       setError(null);
       const doc = new jsPDF();
       
-      // --- TÍTULO PRINCIPAL ---
       doc.setFont('helvetica', 'bold');
       doc.setFontSize(18);
       doc.text('Relatório de Vistoria Patrimonial', 14, 22);
       
-      // --- DADOS DE IDENTIFICAÇÃO ---
       doc.setFontSize(10);
       doc.setFont('helvetica', 'normal');
       doc.text(`Local Inspecionado: ${location?.name}`, 14, 32);
@@ -821,10 +866,8 @@ const handleAddItem = async () => {
         doc.text(`Homologado por: ${inspection.finalizedBy === user?.userId ? user?.name : 'Autoridade Municipal'}`, 14, 50);
       }
 
-      // --- CÁLCULO DOS TOTAIS REALIZANDO O SOMATÓRIO DAS QUANTIDADES ---
       const totalUnidadesAbsolutas = assets?.reduce((acc, curr) => acc + (curr.quantity || 1), 0) || 0;
 
-      // --- PAINEL INDICADOR ELEGANTE ---
       doc.setDrawColor(226, 232, 240);
       doc.setFillColor(248, 250, 252);
       doc.roundedRect(14, 56, 182, 14, 3, 3, 'FD');
@@ -843,7 +886,6 @@ const handleAddItem = async () => {
       doc.text('Este documento contém um QR Code DINÂMICO. A leitura em tempo real sempre exibirá a versão mais atualizada.', 14, 76);
       doc.setTextColor(0);
 
-      // Mapeia os dados incluindo a coluna de quantidade de forma explícita
       const tableData = assets?.map(a => [
         a.name,
         a.patrimonyNumber || '-',
@@ -867,7 +909,6 @@ const handleAddItem = async () => {
         finalY = 25;
       }
 
-      // --- LADO ESQUERDO: QR CODE PERMANENTE ---
       doc.setFontSize(10);
       doc.setFont('helvetica', 'bold');
       doc.text('SELO PERMANENTE DE TRANSPARÊNCIA:', 14, finalY);
@@ -891,7 +932,6 @@ const handleAddItem = async () => {
         });
       }
 
-      // --- LADO DIREITO: ASSINATURA DO RESPONSÁVEL ---
       if (sectorSignature) {
         doc.setLineWidth(0.5);
         doc.setDrawColor(0, 0, 0);
@@ -921,6 +961,7 @@ const handleAddItem = async () => {
       setError(`Erro ao gerar PDF: ${err.message || 'Falha desconhecida'}`);
     }
   };
+
   const handlePrintQRCode = (type: 'vistoria' | 'local' = 'local') => {
     try {
       const qrData = type === 'local' 
@@ -979,18 +1020,12 @@ const handleAddItem = async () => {
 
   const isFinalized = inspection.status === 'finalizada';
   const isConcluded = inspection.status === 'concluida';
-  const isLocked = isFinalized || (isConcluded && !isCommittee) || hasSubLocations; // Prevent adding items to parent locations
+  const isLocked = isFinalized || (isConcluded && !isCommittee) || hasSubLocations; 
 
   const handleStartSubInspection = async (subLocId: string) => {
-    // Navigate to a sub-location audit
-    // Need to find existing or create new
     const existing = await db.inspections.where({ locationId: subLocId }).filter(i => !i.deleted && i.status !== 'finalizada').first();
     if (existing) {
-       onBack(); // Go back to trigger selecting another one? 
-       // Better: the app usually manages selecting via ID in Dashboard
-       // For now, let's just use the dashboard's logic by popping back and letting user click?
-       // Actually, we can't easily change the dashboard state from here without props.
-       // Let's just assume navigation happens through Dashboard for now, or just show the links.
+       onBack(); 
     }
   };
 
@@ -1131,7 +1166,6 @@ const handleAddItem = async () => {
         <Building2 className="absolute -bottom-20 -right-20 w-96 h-96 text-white/5 transform rotate-12 pointer-events-none" />
       </div>
 
-      {/* Concluded but not Finalized state */}
       {isConcluded && !isFinalized && (
         <div className="bg-white border border-indigo-100 rounded-[2rem] p-8 flex flex-col md:flex-row items-center gap-8 animate-in slide-in-from-top-4 duration-500 shadow-[0_20px_50px_-15px_rgba(99,102,241,0.1)]">
            <div className="w-20 h-20 bg-indigo-600 rounded-3xl flex items-center justify-center text-white shadow-xl shadow-indigo-600/20 shrink-0">
@@ -1165,7 +1199,6 @@ const handleAddItem = async () => {
         </div>
       )}
 
-      {/* Sub-locations section if is parent */}
       {hasSubLocations && (
         <div className="flex flex-col gap-6 animate-in slide-in-from-bottom-4 duration-700">
            <div className="flex items-center justify-between ml-2">
@@ -1178,7 +1211,7 @@ const handleAddItem = async () => {
               {subLocations?.map(sl => (
                 <button 
                   key={sl.id}
-                  onClick={onBack} // Forcing back to dashboard for now as drill-down is reliable there
+                  onClick={onBack} 
                   className="bg-white border border-slate-100 p-6 rounded-3xl hover:border-indigo-300 hover:shadow-xl hover:shadow-indigo-600/5 transition-all text-left flex flex-col gap-3 group"
                 >
                    <div className="w-10 h-10 bg-slate-50 rounded-xl flex items-center justify-center text-slate-400 group-hover:bg-indigo-600 group-hover:text-white transition-all">
@@ -1205,7 +1238,7 @@ const handleAddItem = async () => {
            </div>
         </div>
       )}
-      {/* QR Code section if finalized */}
+
       {isFinalized && (
         <div className="flex flex-col gap-8 animate-in zoom-in-95 duration-700">
           <Card className="flex flex-col lg:flex-row items-center gap-12 p-8 lg:p-12 border-emerald-100 bg-white group hover:shadow-[0_30px_70px_-20px_rgba(16,185,129,0.15)] transition-all duration-700 rounded-[3rem]">
@@ -1240,7 +1273,7 @@ const handleAddItem = async () => {
                         <img src={sectorSignature.signatureBase64} alt="Assinatura" className="h-8" />
                       </div>
                     </div>
-                  )}
+                 )}
               </div>
               
               <div className="flex flex-wrap gap-4">
@@ -1429,7 +1462,7 @@ const handleAddItem = async () => {
                       <div className="flex flex-col">
                        <label className="text-[10px] font-bold text-slate-900 uppercase tracking-widest ml-1">Etiq. Patrimônio</label>
                        <span className="text-slate-400 text-[9px] ml-1 mb-2 font-medium">Número da plaqueta de tombo (se houver)</span>
-                     </div>
+                      </div>
                       <Input 
                         ref={patrimonyRef}
                         placeholder="Nº de Registro" 
@@ -1444,7 +1477,7 @@ const handleAddItem = async () => {
                       <div className="flex flex-col">
                        <label className="text-[10px] font-bold text-slate-900 uppercase tracking-widest ml-1">Estado Físico</label>
                        <span className="text-slate-400 text-[9px] ml-1 mb-2 font-medium">Qual a condição de uso atual do bem?</span>
-                     </div>
+                      </div>
                       <Select 
                         ref={conditionRef}
                         value={newItem.condition}
@@ -1464,7 +1497,7 @@ const handleAddItem = async () => {
                       <div className="flex flex-col">
                        <label className="text-[10px] font-bold text-slate-900 uppercase tracking-widest ml-1">Quantidade</label>
                        <span className="text-slate-400 text-[9px] ml-1 mb-2 font-medium">Quantos itens idênticos no local?</span>
-                     </div>
+                      </div>
                       <Input 
                         ref={quantityRef}
                         type="number"
@@ -1543,40 +1576,47 @@ const handleAddItem = async () => {
                       </button>
                     )}
                  </div>
+
+                 {/* 🚀 LINHA DO TEMPO APARECE AQUI NA EDIÇÃO */}
+                 {editingAssetId && (
+                   <div className="mt-8 border-t border-slate-100 pt-8">
+                     <AssetTimeline assetId={editingAssetId} />
+                   </div>
+                 )}
                </div>
 
-                {/* Footer Fixo */}
-                <div className="absolute bottom-0 inset-x-0 p-8 pt-4 bg-white border-t border-slate-100 flex items-center gap-4 z-30">
-                   <Button 
-                     variant="secondary" 
-                     onClick={() => { setIsAdding(false); setEditingAssetId(null); setDuplicateWarning(null); }}
-                     className="flex-1 h-16 rounded-2xl text-[10px] uppercase font-black tracking-widest"
-                   >
-                     Cancelar
-                   </Button>
-                   
-                   <Button 
-                     ref={addButtonRef}
-                     variant={editingAssetId ? "accent" : "outline"}
-                     onClick={handleAddItem}
-                     onKeyDown={e => handleKeyDown(e, 5)}
-                     disabled={!newItem.name}
-                     className="flex-1 h-16 rounded-2xl text-[10px] uppercase font-black tracking-widest border-slate-200"
-                   >
-                     {editingAssetId ? 'Salvar Alterações' : 'Salvar e Fechar'}
-                   </Button>
+               {/* Footer Fixo */}
+               <div className="absolute bottom-0 inset-x-0 p-8 pt-4 bg-white border-t border-slate-100 flex items-center gap-4 z-30">
+                  <Button 
+                    variant="secondary" 
+                    onClick={() => { setIsAdding(false); setEditingAssetId(null); setDuplicateWarning(null); }}
+                    className="flex-1 h-16 rounded-2xl text-[10px] uppercase font-black tracking-widest"
+                  >
+                    Cancelar
+                  </Button>
+                  
+                  <Button 
+                    ref={addButtonRef}
+                    variant={editingAssetId ? "accent" : "outline"}
+                    onClick={handleAddItem}
+                    onKeyDown={e => handleKeyDown(e, 5)}
+                    disabled={!newItem.name}
+                    className="flex-1 h-16 rounded-2xl text-[10px] uppercase font-black tracking-widest border-slate-200"
+                  >
+                    {editingAssetId ? 'Salvar Alterações' : 'Salvar e Fechar'}
+                  </Button>
 
-                   {!editingAssetId && (
-                     <Button 
-                       variant="accent" 
-                       onClick={handleSaveAndContinue}
-                       disabled={!newItem.name}
-                       className="flex-1 h-16 rounded-2xl text-[10px] uppercase font-black tracking-widest shadow-xl shadow-indigo-500/20"
-                     >
-                       <Plus className="w-4 h-4 mr-2" /> Salvar e Novo
-                     </Button>
-                   )}
-                </div>
+                  {!editingAssetId && (
+                    <Button 
+                      variant="accent" 
+                      onClick={handleSaveAndContinue}
+                      disabled={!newItem.name}
+                      className="flex-1 h-16 rounded-2xl text-[10px] uppercase font-black tracking-widest shadow-xl shadow-indigo-500/20"
+                    >
+                      <Plus className="w-4 h-4 mr-2" /> Salvar e Novo
+                    </Button>
+                  )}
+               </div>
             </Card>
           </div>
         )}
@@ -1924,7 +1964,6 @@ const handleAddItem = async () => {
           </>
         )}
 
-        {/* Action: Reopen - Available for managers in Concluded or Finalized states */}
         {(isConcluded || isFinalized) && isManager && (
           <div className="flex flex-col gap-3">
             <Button 
@@ -1957,7 +1996,6 @@ const handleAddItem = async () => {
         )}
       </div>
 
-      {/* 🚀 Modal de Transferência */}
       {transferAssetId && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 md:p-10">
           <div className="absolute inset-0 bg-slate-900/60 backdrop-blur-md" onClick={() => setTransferAssetId(null)} />
@@ -2004,7 +2042,7 @@ const handleAddItem = async () => {
         </div>
       )}
 
-      {/* Modal de Histórico */}
+     {/* Modal de Histórico Completo (Global + Edições Locais) */}
       {historyAsset && (
         <div className="fixed inset-0 z-[110] flex items-center justify-center p-4 md:p-10">
           <div className="absolute inset-0 bg-slate-900/60 backdrop-blur-md" onClick={() => setHistoryAsset(null)} />
@@ -2015,7 +2053,7 @@ const handleAddItem = async () => {
                      <History className="w-7 h-7 text-emerald-600" />
                   </div>
                   <div className="flex flex-col">
-                     <h3 className="font-black text-2xl uppercase tracking-tight text-slate-900 leading-none">Histórico</h3>
+                     <h3 className="font-black text-2xl uppercase tracking-tight text-slate-900 leading-none">Dossiê do Item</h3>
                      <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest leading-none mt-2">{historyAsset.name} {historyAsset.patrimonyNumber ? `(Nº ${historyAsset.patrimonyNumber})` : ''}</span>
                   </div>
                </div>
@@ -2025,18 +2063,20 @@ const handleAddItem = async () => {
             </div>
 
             <div className="flex flex-col gap-4 overflow-y-auto custom-scrollbar flex-1 pr-2">
+               {/* 1. HISTÓRICO DE VISTORIAS ANTIGAS */}
+               <h3 className="text-[10px] font-black uppercase text-slate-400 tracking-widest mt-2">Vistorias Anteriores</h3>
                {isLoadingHistory ? (
-                 <div className="py-20 flex flex-col items-center justify-center">
+                 <div className="py-10 flex flex-col items-center justify-center">
                     <div className="w-8 h-8 border-4 border-slate-200 border-t-emerald-500 rounded-full animate-spin"></div>
-                    <span className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] mt-4">Carregando histórico...</span>
+                    <span className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] mt-4">Procurando nos arquivos...</span>
                  </div>
                ) : !assetHistory || assetHistory.length === 0 ? (
-                 <div className="py-20 flex flex-col items-center justify-center text-slate-300">
-                    <History className="w-12 h-12 opacity-20 mb-4" />
-                    <p className="font-bold tracking-widest text-xs uppercase text-slate-400">Nenhum registro anterior encontrado</p>
+                 <div className="py-6 flex flex-col items-center justify-center text-slate-300 bg-slate-50 rounded-2xl border border-slate-100 border-dashed">
+                    <History className="w-8 h-8 opacity-20 mb-2" />
+                    <p className="font-bold tracking-widest text-[9px] uppercase text-slate-400">Sem vistorias passadas registadas</p>
                  </div>
                ) : (
-                 <div className="relative border-l-2 border-slate-100 ml-4 py-2 space-y-8">
+                 <div className="relative border-l-2 border-slate-100 ml-4 py-2 space-y-8 mb-4">
                    {assetHistory.map((entry, idx) => (
                      <div key={idx} className="relative pl-6">
                        <div className="absolute -left-[9px] top-1 w-4 h-4 bg-white border-2 border-slate-300 rounded-full z-10"></div>
@@ -2057,12 +2097,17 @@ const handleAddItem = async () => {
                    ))}
                  </div>
                )}
+               
+               {/* 2. NOSSA NOVA LINHA DO TEMPO (EDIÇÕES DESTA VISTORIA) */}
+               <div className="mt-4 pt-8 border-t border-slate-100">
+                  <AssetTimeline assetId={historyAsset.id} />
+               </div>
+
             </div>
           </Card>
         </div>
       )}
 
-      {/* ✍️ Modal de Assinatura e Encerramento Setorial */}
       {isSignOffModalOpen && (
         <SectorInspectionSignOffModal
           isOpen={isSignOffModalOpen}
@@ -2071,14 +2116,12 @@ const handleAddItem = async () => {
           location={location}
           assets={assets || []}
           onComplete={async () => {
-             setIsSignOffModalOpen(false);
-             // Trigger internal status update immediately skipping confirmation
-             await handleConclude(true);
+              setIsSignOffModalOpen(false);
+              await handleConclude(true);
           }}
         />
       )}
 
-      {/* Lightbox para Visualização de Fotos */}
       {previewPhoto && (
         <div className="fixed inset-0 z-[300] flex items-center justify-center p-4 md:p-10" onClick={() => setPreviewPhoto(null)}>
           <div className="absolute inset-0 bg-slate-900/95 backdrop-blur-sm" />
@@ -2091,6 +2134,43 @@ const handleAddItem = async () => {
             </button>
             <img src={previewPhoto} alt="Visualização ampliada" className="max-w-full max-h-[85vh] object-contain rounded-xl shadow-2xl" onClick={e => e.stopPropagation()} />
           </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ==========================================
+// COMPONENTES AUXILIARES
+// ==========================================
+
+function AssetTimeline({ assetId }: { assetId: string }) {
+  const events = useLiveQuery(() => {
+    if (!(db as any).assetEvents) return [];
+    return (db as any).assetEvents.where('assetId').equals(assetId).reverse().sortBy('date');
+  }, [assetId]);
+
+  return (
+    <div className="space-y-4 animate-in fade-in duration-500">
+      <h3 className="text-[10px] font-black uppercase text-slate-400 tracking-widest flex items-center gap-2">
+        <Clock className="w-4 h-4" /> Histórico de Alterações
+      </h3>
+      
+      {!events || events.length === 0 ? (
+        <div className="bg-slate-50 border border-slate-100 border-dashed rounded-2xl p-6 flex flex-col items-center justify-center text-center">
+           <History className="w-6 h-6 text-slate-300 mb-2" />
+           <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Sem alterações registadas</span>
+           <span className="text-[9px] text-slate-400 mt-1">Ao editar e guardar este item, o registo aparecerá aqui.</span>
+        </div>
+      ) : (
+        <div className="space-y-3 border-l-2 border-indigo-100 ml-2 pl-4">
+          {events.map((e: any) => (
+            <div key={e.id} className="relative bg-slate-50 p-4 rounded-2xl border border-slate-100 shadow-sm">
+              <div className="absolute -left-[21px] top-1/2 -translate-y-1/2 w-3 h-3 bg-white border-2 border-indigo-300 rounded-full"></div>
+              <p className="text-xs font-bold text-slate-800">{e.description}</p>
+              <p className="text-[9px] text-slate-400 font-bold uppercase mt-1">{formatDate(e.date)} por {e.userName}</p>
+            </div>
+          ))}
         </div>
       )}
     </div>
