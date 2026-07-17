@@ -1,438 +1,280 @@
-import { useState } from 'react';
+import React, { useState } from 'react';
 import { Card, Button } from './UI';
-import { BarChart3, TrendingUp, AlertCircle, FileText, Download, Users, Award, Lightbulb, Copy, X, ShieldCheck } from 'lucide-react';
-import { db, Asset, Location, Inspection } from '../lib/db';
 import { useLiveQuery } from 'dexie-react-hooks';
-import { cn, formatDate } from '../lib/utils';
+import { db } from '../lib/db';
+import { BarChart3, Download, FileText, Filter, AlertCircle, Building2, CheckCircle2, FileSpreadsheet, ShieldCheck } from 'lucide-react';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
+import { formatDate, cn } from '../lib/utils';
+import { motion } from 'motion/react';
 
 export function ReportsView() {
-  const [showBiddingDraft, setShowBiddingDraft] = useState(false);
-  const [copied, setCopied] = useState(false);
+  const [selectedLocation, setSelectedLocation] = useState<string>('all');
+  const [selectedCondition, setSelectedCondition] = useState<string>('all');
 
-  const assets = useLiveQuery(() => db.assets.toArray());
-  const inspections = useLiveQuery(() => db.inspections.toArray());
-  const allUsers = useLiveQuery(() => db.users.toArray());
-  const locations = useLiveQuery(() => db.locations.toArray());
+  const locations = useLiveQuery(() => db.locations.filter(l => !l.deleted).toArray()) || [];
+  const allAssets = useLiveQuery(() => db.assets.filter(a => !a.deleted).toArray()) || [];
+  const inspections = useLiveQuery(() => db.inspections.filter(i => !i.deleted).toArray()) || [];
 
-  const stats = {
-    totalItens: assets?.length || 0,
-    ruins: assets?.filter(a => a.condition === 'ruim' || a.condition === 'inservivel').length || 0,
-    finalizadas: inspections?.filter(i => i.status === 'finalizada').length || 0,
-    semPatrimonio: assets?.filter(a => !a.patrimonyNumber).length || 0
-  };
-
-  const inspectorWork = (inspections || [])
-    .filter(i => i.status !== 'em_andamento' && i.concludedBy)
-    .reduce((acc, current) => {
-      const inspectorId = current.concludedBy!;
-      acc[inspectorId] = (acc[inspectorId] || 0) + 1;
-      return acc;
-    }, {} as Record<string, number>);
-
-  const ranking = Object.entries(inspectorWork)
-    .map(([id, count]) => ({
-      id,
-      count,
-      name: allUsers?.find(u => u.userId === id)?.name || 'Vistoriador Externo'
-    }))
-    .sort((a, b) => b.count - a.count);
-
-  const locationSummary = locations?.map(loc => {
-    const locInspections = inspections?.filter(i => i.locationId === loc.id) || [];
-    const locAssets = assets?.filter(a => locInspections.some(i => i.id === a.inspectionId)) || [];
-    return {
-      ...loc,
-      itemCount: locAssets.length
-    };
-  }).sort((a, b) => b.itemCount - a.itemCount) || [];
-
-  const getBiddingDraftText = () => {
-    if (!assets) return '';
-    const toReplace = assets.filter(a => a.condition === 'ruim' || a.condition === 'inservivel');
+  // Cruzamento de dados para os filtros
+  const filteredAssets = allAssets.filter(asset => {
+    if (selectedCondition !== 'all' && asset.condition !== selectedCondition) return false;
     
-    const groups = toReplace.reduce((acc, asset) => {
-      acc[asset.name] = (acc[asset.name] || 0) + (asset.quantity || 1);
-      return acc;
-    }, {} as Record<string, number>);
-
-    const listText = Object.entries(groups)
-      .map(([name, qty]) => `- ${qty} unidade(s) de ${name}`)
-      .join('\n');
-
-    return `ESTUDO TÉCNICO PRELIMINAR (ETP) - RASCUNHO AUTOMÁTICO
-Base Legal: Art. 18, Lei 14.133/2021
-
-1. DESCRIÇÃO DA NECESSIDADE
-A presente contratação visa a substituição de bens móveis classificados como críticos/inservíveis durante a última vistoria patrimonial, essenciais para a continuidade dos serviços públicos.
-
-2. QUANTITATIVOS LEVANTADOS PELO SISTEMA
-${listText || 'Nenhum item crítico registrado.'}
-
-3. JUSTIFICATIVA
-A manutenção dos bens atuais tornou-se antieconômica. A substituição imediata resguarda a administração pública de perdas de eficiência operacional.`;
-  };
-
-  const copyToClipboard = async () => {
-    try {
-      await navigator.clipboard.writeText(getBiddingDraftText());
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
-    } catch (err) {
-      console.error('Failed to copy text: ', err);
+    if (selectedLocation !== 'all') {
+      const insp = inspections.find(i => i.id === asset.inspectionId);
+      if (!insp || insp.locationId !== selectedLocation) return false;
     }
-  };
-
-  const generateSingleLocationReport = (locId: string) => {
-    const loc = locations?.find(l => l.id === locId);
-    if (!loc) return;
-
-    const doc = new jsPDF();
-    doc.setFontSize(18);
-    doc.text(`Relatório de Inventário - ${loc.name}`, 14, 22);
     
-    doc.setFontSize(11);
-    doc.text(`Data de Emissão: ${new Date().toLocaleDateString()}`, 14, 32);
-    doc.text(`Descrição: ${loc.description}`, 14, 38);
+    return true;
+  });
 
-    const locInspections = inspections?.filter(i => i.locationId === loc.id) || [];
-    const locAssets = assets?.filter(a => locInspections.some(i => i.id === a.inspectionId)) || [];
+  // Cálculos precisos somando a quantidade de cada registo
+  const totalAssets = filteredAssets.reduce((acc, curr) => acc + (Number(curr.quantity) || 1), 0);
+  const conditionBom = filteredAssets.filter(a => a.condition === 'bom' || a.condition === 'novo').reduce((acc, curr) => acc + (Number(curr.quantity) || 1), 0);
+  const conditionRegular = filteredAssets.filter(a => a.condition === 'regular').reduce((acc, curr) => acc + (Number(curr.quantity) || 1), 0);
+  const conditionRuim = filteredAssets.filter(a => a.condition === 'ruim' || a.condition === 'inservivel').reduce((acc, curr) => acc + (Number(curr.quantity) || 1), 0);
 
-    const tableData = locAssets.map(a => [
-      a.name,
-      a.patrimonyNumber || '-',
-      a.condition.toUpperCase(),
-      a.observations || '-'
-    ]);
+  const generatePDF = () => {
+    const doc = new jsPDF();
+    
+    // Cabeçalho Oficial
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(18);
+    doc.text('Relatório Analítico de Património', 14, 22);
+    
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(10);
+    doc.text('Prefeitura Municipal de Manoel Viana', 14, 30);
+    
+    const locName = selectedLocation === 'all' ? 'Todos os Setores' : locations.find(l => l.id === selectedLocation)?.name || 'Setor Específico';
+    const condName = selectedCondition === 'all' ? 'Todas as Condições' : selectedCondition.toUpperCase();
+    
+    doc.text(`Filtros Aplicados: ${locName} | Estado: ${condName}`, 14, 36);
+    doc.text(`Data de Emissão: ${new Date().toLocaleDateString()}`, 14, 42);
+
+    // Painel de Resumo
+    doc.setDrawColor(226, 232, 240);
+    doc.setFillColor(248, 250, 252);
+    doc.roundedRect(14, 48, 182, 16, 3, 3, 'FD');
+    
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(10);
+    doc.text(`Total de Itens: ${totalAssets} unidades`, 18, 57);
+    doc.text(`Bons/Novos: ${conditionBom}`, 75, 57);
+    doc.text(`Regulares: ${conditionRegular}`, 125, 57);
+    doc.text(`Críticos: ${conditionRuim}`, 165, 57);
+
+    // Tabela de Dados
+    const tableData = filteredAssets.map(asset => {
+      const insp = inspections.find(i => i.id === asset.inspectionId);
+      const loc = locations.find(l => l.id === insp?.locationId);
+      return [
+        asset.patrimonyNumber || 'Sem Nº',
+        asset.name,
+        loc?.name || 'N/A',
+        asset.condition.toUpperCase(),
+        asset.quantity || 1
+      ];
+    });
 
     autoTable(doc, {
-      head: [['Item', 'Nº Patrimônio', 'Estado', 'Obs']],
+      head: [['Património', 'Descrição do Bem', 'Localização', 'Estado', 'Qtd']],
       body: tableData,
-      startY: 45,
-      theme: 'grid'
+      startY: 72,
+      theme: 'grid',
+      styles: { fontSize: 8 },
+      headStyles: { fillColor: [79, 70, 229], fontStyle: 'bold' },
+      alternateRowStyles: { fillColor: [248, 250, 252] }
     });
 
-    doc.save(`Inventario_${loc.name.replace(/\s+/g, '_')}.pdf`);
+    doc.save(`Relatorio_Patrimonio_${new Date().getTime()}.pdf`);
   };
 
-  const generateInserviceReport = () => {
-    const doc = new jsPDF();
-    doc.setFontSize(18);
-    doc.text('Relatório de Bens Inservíveis / Críticos', 14, 22);
-    
-    doc.setFontSize(11);
-    doc.text(`Data de Emissão: ${new Date().toLocaleDateString()}`, 14, 32);
-    doc.text(`Total de itens identificados: ${stats.ruins}`, 14, 38);
+  const generateCSV = () => {
+    let csvContent = "data:text/csv;charset=utf-8,";
+    csvContent += "Patrimonio,Descricao,Localizacao,Estado,Quantidade,Observacoes\n";
 
-    const items = assets?.filter(a => a.condition === 'ruim' || a.condition === 'inservivel') || [];
-    const tableData = items.map(a => [
-      a.name,
-      a.patrimonyNumber || '-',
-      a.condition.toUpperCase(),
-      locations?.find(l => {
-        const insp = inspections?.find(i => i.id === a.inspectionId);
-        return l.id === insp?.locationId;
-      })?.name || 'Local não ident.'
-    ]);
-
-    autoTable(doc, {
-      head: [['Item', 'Nº Patrimônio', 'Estado', 'Localização']],
-      body: tableData,
-      startY: 45,
-      theme: 'striped'
+    filteredAssets.forEach(asset => {
+      const insp = inspections.find(i => i.id === asset.inspectionId);
+      const loc = locations.find(l => l.id === insp?.locationId);
+      
+      // Limpar quebras de linha nas observações para não estragar o CSV
+      const obs = (asset.observations || '').replace(/(\r\n|\n|\r)/gm, " ");
+      
+      const row = `"${asset.patrimonyNumber || ''}","${asset.name}","${loc?.name || ''}","${asset.condition}","${asset.quantity || 1}","${obs}"`;
+      csvContent += row + "\n";
     });
 
-    doc.save('Relatorio_Bens_Inserviveis.pdf');
-  };
-
-  const generateLocationReport = () => {
-    const doc = new jsPDF();
-    doc.setFontSize(18);
-    doc.text('Inventário Consolidado por Localização', 14, 22);
-    
-    doc.setFontSize(11);
-    doc.text(`Data de Emissão: ${new Date().toLocaleDateString()}`, 14, 32);
-
-    let currentY = 45;
-
-    locations?.forEach(loc => {
-      const locInspections = inspections?.filter(i => i.locationId === loc.id) || [];
-      const locAssets = assets?.filter(a => locInspections.some(i => i.id === a.inspectionId)) || [];
-
-      if (locAssets.length === 0) return;
-
-      if (currentY > 250) {
-        doc.addPage();
-        currentY = 20;
-      }
-
-      doc.setFontSize(13);
-      doc.setTextColor(30, 41, 59);
-      doc.text(loc.name.toUpperCase(), 14, currentY);
-      doc.setTextColor(0, 0, 0);
-
-      const tableData = locAssets.map(a => [
-        a.name,
-        a.patrimonyNumber || '-',
-        a.condition,
-        a.observations || '-'
-      ]);
-
-      autoTable(doc, {
-        head: [['Item', 'Nº Patrimônio', 'Estado', 'Obs']],
-        body: tableData,
-        startY: currentY + 5,
-        theme: 'grid',
-        margin: { top: 20 }
-      });
-
-      currentY = (doc as any).lastAutoTable.finalY + 15;
-    });
-
-    doc.save('Inventario_Por_Localizacao.pdf');
-  };
-
-  const generateNoPatrimonyReport = () => {
-    const doc = new jsPDF();
-    doc.setFontSize(18);
-    doc.text('Relatório de Bens Sem Identificação Patrimonial', 14, 22);
-    
-    doc.setFontSize(11);
-    doc.text(`Data de Emissão: ${new Date().toLocaleDateString()}`, 14, 32);
-    doc.text(`Esses itens requerem etiquetagem e registro no sistema central.`, 14, 38);
-
-    const items = assets?.filter(a => !a.patrimonyNumber) || [];
-    const tableData = items.map(a => [
-      a.name,
-      a.condition.toUpperCase(),
-      locations?.find(l => {
-        const insp = inspections?.find(i => i.id === a.inspectionId);
-        return l.id === insp?.locationId;
-      })?.name || 'Local não ident.'
-    ]);
-
-    autoTable(doc, {
-      head: [['Item', 'Estado Conservação', 'Localização']],
-      body: tableData,
-      startY: 45,
-      theme: 'striped'
-    });
-
-    doc.save('Relatorio_Bens_Sem_Patrimonio.pdf');
+    const encodedUri = encodeURI(csvContent);
+    const link = document.createElement("a");
+    link.setAttribute("href", encodedUri);
+    link.setAttribute("download", `Exportacao_Bens_${new Date().getTime()}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
   };
 
   return (
-    <div className="flex flex-col gap-10 animate-in fade-in slide-in-from-bottom-4 duration-700 pb-20">
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-        <div className="relative overflow-hidden rounded-[2.5rem] bg-slate-900 p-10 text-white shadow-2xl shadow-slate-900/20 group">
-           <div className="relative z-10 flex flex-col gap-6">
-              <div className="w-14 h-14 bg-white/10 rounded-2xl flex items-center justify-center backdrop-blur-sm border border-white/10 transition-transform group-hover:scale-110 duration-500">
-                 <TrendingUp className="w-7 h-7 text-white" />
-              </div>
-              <div className="flex flex-col">
-                 <span className="text-6xl font-display font-black tracking-tighter leading-none">{stats.totalItens}</span>
-                 <span className="text-[11px] font-black uppercase tracking-[0.3em] text-slate-400 mt-4 leading-none">Bens Catalogados</span>
-              </div>
-           </div>
-           <BarChart3 className="absolute -bottom-10 -right-10 w-48 h-48 text-white/5 transform rotate-12 transition-transform group-hover:scale-125 duration-700" />
-        </div>
-
-        <div className="relative overflow-hidden rounded-[2.5rem] bg-rose-600 p-10 text-white shadow-2xl shadow-rose-600/20 group">
-           <div className="relative z-10 flex flex-col gap-6">
-              <div className="w-14 h-14 bg-white/10 rounded-2xl flex items-center justify-center backdrop-blur-sm border border-white/10 transition-transform group-hover:scale-110 duration-500">
-                 <AlertCircle className="w-7 h-7 text-white" />
-              </div>
-              <div className="flex flex-col">
-                 <span className="text-6xl font-display font-black tracking-tighter leading-none">{stats.ruins}</span>
-                 <span className="text-[11px] font-black uppercase tracking-[0.3em] text-rose-200 mt-4 leading-none">Estado Crítico / Baixa</span>
-              </div>
-           </div>
-           <AlertCircle className="absolute -bottom-10 -right-10 w-48 h-48 text-white/5 transform -rotate-12 transition-transform group-hover:scale-125 duration-700" />
-        </div>
-      </div>
-
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-10">
-        <div className="lg:col-span-2 flex flex-col gap-8">
-          <div className="flex flex-col gap-2">
-            <h3 className="text-xs font-black text-slate-400 uppercase tracking-[0.2em] ml-1">Central de Inteligência</h3>
-            <h4 className="text-2xl font-black text-slate-900 tracking-tight">Emissão de Auditorias</h4>
-          </div>
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <ReportAction 
-              title="ETP de Substituição" 
-              description="Rascunho Automático Lei 14.133" 
-              icon={Lightbulb} 
-              variant="amber" 
-              onClick={() => setShowBiddingDraft(true)}
-            />
-            <ReportAction 
-              title="Bens Inservíveis" 
-              description="Processo de Descarte/Leilão" 
-              icon={FileText} 
-              variant="rose" 
-              onClick={generateInserviceReport}
-            />
-            <ReportAction 
-              title="Mapa de Setores" 
-              description="Inventário por Localização" 
-              icon={FileText} 
-              variant="indigo" 
-              onClick={generateLocationReport}
-            />
-            <ReportAction 
-              title="Sem Selo" 
-              description="Itens Pendentes de Registro" 
-              icon={ShieldCheck} 
-              variant="slate" 
-              onClick={generateNoPatrimonyReport}
-            />
-          </div>
-        </div>
-
-        <div className="flex flex-col gap-8">
-          <div className="flex flex-col gap-2">
-            <h3 className="text-xs font-black text-slate-400 uppercase tracking-[0.2em] ml-1">Produtividade</h3>
-            <h4 className="text-2xl font-black text-slate-900 tracking-tight">Ranking Agentes</h4>
-          </div>
-          <div className="bg-white border border-slate-100 rounded-[2.5rem] p-8 shadow-sm flex flex-col gap-6">
-             {ranking.length > 0 ? ranking.slice(0, 5).map((item, idx) => (
-               <div key={item.id} className="flex items-center gap-4 group">
-                  <div className={cn(
-                    "w-12 h-12 rounded-2xl flex items-center justify-center font-black text-sm transition-all duration-300",
-                    idx === 0 ? "bg-amber-100 text-amber-600 shadow-lg shadow-amber-500/10" : "bg-slate-50 text-slate-400 group-hover:bg-slate-900 group-hover:text-white"
-                  )}>
-                    {idx === 0 ? <Award className="w-6 h-6" /> : idx + 1}
-                  </div>
-                  <div className="flex flex-col flex-1 overflow-hidden">
-                     <span className="font-bold text-slate-900 text-sm truncate">{item.name}</span>
-                     <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mt-0.5">{item.count} Vistorias</span>
-                  </div>
-                  {idx === 0 && (
-                    <div className="flex flex-col items-end">
-                      <span className="text-[8px] font-black text-amber-600 bg-amber-50 px-2 py-1 rounded-lg uppercase tracking-tighter shadow-sm border border-amber-100">Destaque</span>
-                    </div>
-                  )}
-               </div>
-             )) : (
-               <div className="py-12 flex flex-col items-center justify-center text-center opacity-30">
-                  <Users className="w-12 h-12 mb-4 text-slate-300" />
-                  <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Dados Insuficientes</p>
-               </div>
-             )}
-          </div>
-        </div>
-      </div>
-
-      <div className="flex flex-col gap-8">
+    <div className="flex flex-col gap-8 animate-in fade-in slide-in-from-bottom-4 duration-700 pb-20">
+      {/* HEADER */}
+      <header className="flex flex-col md:flex-row md:items-end justify-between gap-6 px-2">
         <div className="flex flex-col gap-2">
-          <h3 className="text-xs font-black text-slate-400 uppercase tracking-[0.2em] ml-1">Consolidado Quantitativo</h3>
-          <h4 className="text-2xl font-black text-slate-900 tracking-tight">Itens por Localização</h4>
+          <h2 className="text-4xl font-display font-black text-slate-900 tracking-tighter uppercase leading-none">Relatórios Analíticos</h2>
+          <span className="text-[10px] font-bold text-slate-400 uppercase tracking-[0.2em]">Painel de Inteligência de Dados</span>
         </div>
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
-           {locationSummary.map(loc => (
-             <Card 
-               key={loc.id} 
-               className="p-8 flex flex-col gap-6 border-slate-50 hover:border-indigo-200 transition-all group rounded-[2.5rem] bg-white shadow-sm hover:shadow-xl hover:shadow-indigo-500/5"
-               onClick={() => generateSingleLocationReport(loc.id)}
-             >
-                <div className="flex items-center justify-between">
-                   <div className="w-12 h-12 rounded-2xl bg-indigo-50 text-indigo-400 flex items-center justify-center group-hover:bg-indigo-600 group-hover:text-white transition-colors duration-500 shadow-sm">
-                      <FileText className="w-6 h-6" />
-                   </div>
-                   <span className={cn(
-                     "text-[10px] font-black px-3 py-1.5 rounded-xl uppercase tracking-tighter shadow-sm border",
-                     loc.itemCount > 0 ? "bg-emerald-50 text-emerald-600 border-emerald-100" : "bg-slate-50 text-slate-400 border-slate-100"
-                   )}>
-                     {loc.itemCount} Bens
-                   </span>
-                </div>
-                <div className="flex flex-col">
-                   <span className="font-bold text-slate-900 group-hover:text-indigo-600 transition-colors truncate text-lg tracking-tight mb-1">{loc.name}</span>
-                   <span className="text-[9px] text-slate-400 uppercase font-black tracking-widest leading-relaxed line-clamp-1 opacity-70 italic">{loc.description}</span>
-                </div>
-                <button className="flex items-center gap-2 text-[10px] font-black text-indigo-600 uppercase tracking-widest opacity-0 translate-y-2 group-hover:opacity-100 group-hover:translate-y-0 transition-all duration-500">
-                   GERAR PDF <Download className="w-3.5 h-3.5" />
-                </button>
-             </Card>
-           ))}
+        <div className="flex items-center gap-3">
+           <Button variant="outline" icon={FileSpreadsheet} onClick={generateCSV} className="h-12 px-6 border-slate-200 text-slate-600 font-black text-[10px] uppercase tracking-widest bg-white hover:bg-slate-50 rounded-xl">
+             Exportar Excel
+           </Button>
+           <Button variant="accent" icon={FileText} onClick={generatePDF} className="h-12 px-6 shadow-lg shadow-indigo-500/20 font-black text-[10px] uppercase tracking-widest rounded-xl">
+             Gerar PDF Oficial
+           </Button>
         </div>
+      </header>
+
+      {/* DASHBOARD DE MÉTRICAS */}
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+        <Card className="p-6 bg-slate-900 text-white rounded-[2rem] border-none shadow-xl shadow-slate-900/10 flex flex-col justify-between h-40 group">
+          <div className="w-10 h-10 bg-white/10 rounded-[1rem] flex items-center justify-center">
+            <BarChart3 className="w-5 h-5 text-indigo-400" />
+          </div>
+          <div className="flex flex-col">
+            <span className="text-4xl font-display font-black tracking-tight">{totalAssets}</span>
+            <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mt-1">Total de Unidades</span>
+          </div>
+        </Card>
+        
+        <Card className="p-6 bg-white border-slate-100 rounded-[2rem] shadow-sm hover:shadow-md transition-all flex flex-col justify-between h-40">
+          <div className="w-10 h-10 bg-emerald-50 rounded-[1rem] flex items-center justify-center">
+            <CheckCircle2 className="w-5 h-5 text-emerald-500" />
+          </div>
+          <div className="flex flex-col">
+            <span className="text-4xl font-display font-black tracking-tight text-slate-900">{conditionBom}</span>
+            <span className="text-[10px] font-bold text-emerald-600 uppercase tracking-widest mt-1">Bons / Novos</span>
+          </div>
+        </Card>
+
+        <Card className="p-6 bg-white border-slate-100 rounded-[2rem] shadow-sm hover:shadow-md transition-all flex flex-col justify-between h-40">
+          <div className="w-10 h-10 bg-amber-50 rounded-[1rem] flex items-center justify-center">
+            <AlertCircle className="w-5 h-5 text-amber-500" />
+          </div>
+          <div className="flex flex-col">
+            <span className="text-4xl font-display font-black tracking-tight text-slate-900">{conditionRegular}</span>
+            <span className="text-[10px] font-bold text-amber-600 uppercase tracking-widest mt-1">Estado Regular</span>
+          </div>
+        </Card>
+
+        <Card className="p-6 bg-white border-slate-100 rounded-[2rem] shadow-sm hover:shadow-md transition-all flex flex-col justify-between h-40">
+          <div className="w-10 h-10 bg-rose-50 rounded-[1rem] flex items-center justify-center">
+            <AlertCircle className="w-5 h-5 text-rose-500" />
+          </div>
+          <div className="flex flex-col">
+            <span className="text-4xl font-display font-black tracking-tight text-slate-900">{conditionRuim}</span>
+            <span className="text-[10px] font-bold text-rose-600 uppercase tracking-widest mt-1">Requer Atenção (Ruim)</span>
+          </div>
+        </Card>
       </div>
 
-      {showBiddingDraft && (
-        <div className="fixed inset-0 z-[100] flex items-center justify-center p-6 bg-slate-950/40 backdrop-blur-md animate-in fade-in duration-300">
-          <Card className="w-full max-w-4xl max-h-[90vh] flex flex-col border-none shadow-[0_50px_100px_-20px_rgba(0,0,0,0.25)] relative overflow-hidden rounded-[3.5rem] bg-white">
-            <div className="absolute top-0 left-0 w-full h-2 bg-amber-500"></div>
-            <div className="flex items-center justify-between p-10 pb-6">
-              <div className="flex items-center gap-6">
-                <div className="w-16 h-16 bg-amber-500 rounded-[1.8rem] flex items-center justify-center text-white shadow-2xl shadow-amber-500/20">
-                   <Lightbulb className="w-8 h-8" />
-                </div>
-                <div className="flex flex-col">
-                  <h2 className="text-3xl font-black text-slate-900 tracking-tight leading-none uppercase">Estudo Técnico (ETP)</h2>
-                  <span className="text-[10px] font-black tracking-[0.3em] text-slate-400 mt-2 uppercase">Geração Automatizada • Lei 14.133</span>
-                </div>
-              </div>
-              <button 
-                onClick={() => setShowBiddingDraft(false)}
-                className="w-12 h-12 flex items-center justify-center bg-slate-50 rounded-2xl text-slate-400 hover:text-rose-500 hover:bg-rose-50 transition-all border border-slate-100"
-              >
-                <X className="w-6 h-6" />
-              </button>
-            </div>
-            
-            <div className="flex-1 overflow-y-auto px-10 py-4">
-               <textarea 
-                 readOnly
-                 value={getBiddingDraftText()}
-                 className="w-full h-full min-h-[450px] p-10 rounded-[2.5rem] border-2 border-slate-50 bg-slate-50/30 text-slate-700 font-mono text-sm leading-loose focus:outline-none resize-none shadow-inner"
-               />
-            </div>
-
-            <div className="p-10 bg-white flex flex-col md:flex-row justify-between items-center gap-8">
-              <div className="flex items-start gap-4 flex-1">
-                 <div className="w-10 h-10 bg-amber-50 rounded-xl flex items-center justify-center shrink-0 border border-amber-100">
-                    <AlertCircle className="w-5 h-5 text-amber-600" />
-                 </div>
-                 <p className="text-[11px] font-medium text-slate-400 leading-relaxed max-w-md">
-                   Este documento é um rascunho baseado nos bens classificados em <strong>estado crítico</strong>. Revise cuidadosamente antes de anexar ao seu processo administrativo.
-                 </p>
-              </div>
-              <Button 
-                variant="accent" 
-                className={cn("px-12 h-16 text-xs uppercase tracking-widest transition-all duration-500", copied ? "bg-emerald-600 scale-95" : "bg-slate-900")}
-                onClick={copyToClipboard}
-              >
-                {copied ? "TEXTO COPIADO!" : "COPIAR ESTRUTURA"} {copied ? <Download className="w-4 h-4 ml-2" /> : <Copy className="w-4 h-4 ml-2" />}
-              </Button>
-            </div>
-          </Card>
+      {/* ÁREA DE FILTROS E TABELA */}
+      <Card className="flex flex-col rounded-[2.5rem] border-slate-100 bg-white shadow-sm overflow-hidden p-0">
+        
+        {/* Barra de Filtros */}
+        <div className="p-6 lg:p-8 border-b border-slate-100 bg-slate-50/50 flex flex-col md:flex-row gap-6">
+          <div className="flex items-center gap-3">
+             <div className="w-10 h-10 bg-white border border-slate-200 rounded-xl flex items-center justify-center shrink-0">
+                <Filter className="w-5 h-5 text-slate-400" />
+             </div>
+             <div className="flex flex-col">
+                <span className="text-sm font-black text-slate-900 uppercase tracking-tight">Filtros de Dados</span>
+                <span className="text-[9px] font-bold text-slate-400 uppercase tracking-widest mt-0.5">Refine a sua busca</span>
+             </div>
+          </div>
+          
+          <div className="flex flex-col sm:flex-row flex-1 gap-4">
+             <div className="flex-1 flex flex-col gap-1.5">
+               <label className="text-[9px] font-black text-slate-500 uppercase tracking-widest ml-1">Localização / Setor</label>
+               <select 
+                 value={selectedLocation} 
+                 onChange={e => setSelectedLocation(e.target.value)}
+                 className="w-full h-12 px-4 rounded-xl border border-slate-200 text-sm font-bold text-slate-700 bg-white focus:ring-2 focus:ring-indigo-600 focus:outline-none transition-all cursor-pointer"
+               >
+                 <option value="all">Todos os Setores</option>
+                 {locations.map(loc => (
+                   <option key={loc.id} value={loc.id}>{loc.name}</option>
+                 ))}
+               </select>
+             </div>
+             
+             <div className="flex-1 flex flex-col gap-1.5">
+               <label className="text-[9px] font-black text-slate-500 uppercase tracking-widest ml-1">Estado de Conservação</label>
+               <select 
+                 value={selectedCondition} 
+                 onChange={e => setSelectedCondition(e.target.value)}
+                 className="w-full h-12 px-4 rounded-xl border border-slate-200 text-sm font-bold text-slate-700 bg-white focus:ring-2 focus:ring-indigo-600 focus:outline-none transition-all cursor-pointer"
+               >
+                 <option value="all">Todas as Condições</option>
+                 <option value="novo">Novo</option>
+                 <option value="bom">Bom</option>
+                 <option value="regular">Regular</option>
+                 <option value="ruim">Ruim</option>
+                 <option value="inservivel">Inservível</option>
+               </select>
+             </div>
+          </div>
         </div>
-      )}
+
+        {/* Tabela de Pré-visualização */}
+        <div className="overflow-x-auto custom-scrollbar">
+          {filteredAssets.length === 0 ? (
+            <div className="flex flex-col items-center justify-center py-20 text-slate-300">
+               <ShieldCheck className="w-12 h-12 mb-4 opacity-20" />
+               <p className="font-bold text-xs uppercase tracking-widest text-slate-400">Nenhum item corresponde a estes filtros.</p>
+            </div>
+          ) : (
+            <table className="w-full text-left border-collapse">
+              <thead>
+                <tr className="bg-white border-b border-slate-100">
+                  <th className="py-4 px-8 text-[10px] font-black text-slate-400 uppercase tracking-widest">Património</th>
+                  <th className="py-4 px-8 text-[10px] font-black text-slate-400 uppercase tracking-widest">Descrição</th>
+                  <th className="py-4 px-8 text-[10px] font-black text-slate-400 uppercase tracking-widest">Setor</th>
+                  <th className="py-4 px-8 text-[10px] font-black text-slate-400 uppercase tracking-widest">Estado</th>
+                  <th className="py-4 px-8 text-[10px] font-black text-slate-400 uppercase tracking-widest text-right">Qtd</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-50">
+                {filteredAssets.slice(0, 50).map(asset => {
+                  const insp = inspections.find(i => i.id === asset.inspectionId);
+                  const loc = locations.find(l => l.id === insp?.locationId);
+                  return (
+                    <tr key={asset.id} className="hover:bg-slate-50/50 transition-colors group">
+                      <td className="py-4 px-8 font-mono text-xs font-black text-slate-600">{asset.patrimonyNumber || '-'}</td>
+                      <td className="py-4 px-8 text-sm font-bold text-slate-900">{asset.name}</td>
+                      <td className="py-4 px-8 text-xs font-bold text-slate-500">{loc?.name || 'N/A'}</td>
+                      <td className="py-4 px-8">
+                        <span className={cn(
+                          "px-3 py-1 rounded-lg text-[9px] font-black uppercase tracking-widest",
+                          asset.condition === 'bom' || asset.condition === 'novo' ? "bg-emerald-50 text-emerald-600" :
+                          asset.condition === 'regular' ? "bg-amber-50 text-amber-600" : "bg-rose-50 text-rose-600"
+                        )}>
+                          {asset.condition}
+                        </span>
+                      </td>
+                      <td className="py-4 px-8 text-sm font-black text-slate-900 text-right">{asset.quantity || 1}</td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
+          )}
+          {filteredAssets.length > 50 && (
+            <div className="p-4 bg-slate-50 border-t border-slate-100 text-center">
+              <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">
+                A exibir os primeiros 50 itens de {filteredAssets.length}. Exporte o ficheiro para ver a lista completa.
+              </span>
+            </div>
+          )}
+        </div>
+      </Card>
     </div>
-  );
-}
-
-function ReportAction({ title, description, icon: Icon, variant = 'slate', onClick }: { title: string, description: string, icon: any, variant?: 'rose' | 'indigo' | 'amber' | 'slate', onClick: () => void }) {
-  const styles = {
-    rose: "bg-rose-50 text-rose-600 border-rose-100 hover:bg-rose-600 hover:text-white",
-    indigo: "bg-indigo-50 text-indigo-600 border-indigo-100 hover:bg-indigo-600 hover:text-white",
-    amber: "bg-amber-50 text-amber-600 border-amber-100 hover:bg-amber-500 hover:text-white",
-    slate: "bg-slate-50 text-slate-500 border-slate-100 hover:bg-slate-900 hover:text-white",
-  }[variant];
-
-  return (
-    <Card className="px-8 py-10 flex flex-col gap-6 rounded-[2.5rem] border-slate-100 hover:border-transparent transition-all duration-500 cursor-pointer shadow-sm hover:shadow-2xl group relative overflow-hidden" onClick={onClick}>
-       <div className={cn("w-14 h-14 rounded-2xl flex items-center justify-center transition-all duration-700 shadow-sm border", styles)}>
-          <Icon className="w-7 h-7 transform group-hover:rotate-12 transition-transform duration-500" />
-       </div>
-       <div className="flex flex-col">
-          <span className="font-black text-slate-900 text-lg uppercase tracking-tight leading-none group-hover:text-indigo-600 transition-colors mb-2">{title}</span>
-          <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest leading-none opacity-80">{description}</span>
-       </div>
-       <button className="flex items-center gap-2 text-[10px] font-black text-slate-900 uppercase tracking-widest opacity-0 translate-y-2 group-hover:opacity-100 group-hover:translate-y-0 transition-all duration-500">
-          PDF <Download className="w-3.5 h-3.5" />
-       </button>
-    </Card>
   );
 }
