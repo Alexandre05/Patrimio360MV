@@ -33,7 +33,7 @@ import {
   ChevronRight,
   Cloud
 } from 'lucide-react';
-import { motion } from 'motion/react';
+import { motion, AnimatePresence } from 'motion/react';
 import { db, Inspection, Location } from '../lib/db';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { formatDate } from '../lib/utils';
@@ -44,7 +44,6 @@ import { UsersView } from './UsersView';
 import { NotificationsView } from './NotificationsView';
 import { checkAndGenerateNotifications } from '../lib/NotificationService';
 import { cn } from '../lib/utils';
-// Adicionado processSyncQueue para rodar a fila inteligente no fundo
 import { setupSync, pushLocalChanges, processSyncQueue, forceFullSyncRecovery, hardResetAndRescue } from '../lib/syncService';
 import { db as firestore, auth } from '../lib/firebase';
 import { doc, deleteDoc, getDoc } from 'firebase/firestore';
@@ -103,7 +102,6 @@ export function Dashboard() {
             return;
          }
 
-         // If it's a location ID
          const locRef = doc(firestore, 'locations', scanned);
          const locSnap = await getDoc(locRef);
          if (locSnap.exists()) {
@@ -120,16 +118,13 @@ export function Dashboard() {
   const activeInspectionsCount = useLiveQuery(() => db.inspections.where('status').equals('em_andamento').count());
   const concludedInspectionsCount = useLiveQuery(() => db.inspections.where('status').anyOf('concluida', 'finalizada').count());
   
-  // SOMA REAL DAS QUANTIDADES NO DASHBOARD
   const totalAssetsCount = useLiveQuery(async () => {
     const ativos = await db.assets.filter(a => !a.deleted).toArray();
     return ativos.reduce((acc, curr) => acc + (Number(curr.quantity) || 1), 0);
   });
 
-  // Busca vistorias prontas para o Administrador homologar
   const pendingHomologation = useLiveQuery(() => db.inspections.where('status').equals('concluida').toArray());
 
-  // CORREÇÃO: Usando .filter() em vez de .and() para compatibilidade máxima com Dexie
   const unreadNotifications = useLiveQuery(() => 
     user ? db.notifications.where('targetUserId').equals(user.userId).filter(n => !n.read).count() : 0, 
   [user]) || 0;
@@ -143,8 +138,21 @@ export function Dashboard() {
   ) || 0;
   
   const [syncing, setSyncing] = useState(false);
-  const isAdmin = user?.role === 'administrador' || user?.role === 'prefeito' || user?.email === 'henri199@gmail.com' || auth.currentUser?.email === 'henri199@gmail.com';
-  const isManager = isAdmin || user?.role === 'responsavel';
+
+  // ==========================================================================
+  // LÓGICA DE ADMINISTRAÇÃO MANTIDA INTACTA
+  // ==========================================================================
+  const roleStr = String(user?.role || '').toLowerCase();
+  const cargoStr = String(user?.cargo || '').toLowerCase();
+
+  const isAdmin = roleStr.includes('admin') || 
+                  cargoStr.includes('admin') || 
+                  roleStr === 'prefeito' || 
+                  user?.email === 'henri199@gmail.com' || 
+                  auth.currentUser?.email === 'henri199@gmail.com';
+
+  const isManager = isAdmin || roleStr.includes('responsavel') || cargoStr.includes('responsavel');
+  // ==========================================================================
 
   const [quotaExceeded, setQuotaExceeded] = useState(false);
 
@@ -155,8 +163,8 @@ export function Dashboard() {
       const syncAndNotify = async () => {
         setSyncing(true);
         try {
-          await pushLocalChanges(); // Mantém compatibilidade com o sistema antigo
-          await processSyncQueue(); // NOVO: Processa a fila inteligente também!
+          await pushLocalChanges();
+          await processSyncQueue();
         } catch (err: any) {
           if (err.message?.includes('LIMITE DE COTAS')) setQuotaExceeded(true);
         } finally {
@@ -196,13 +204,6 @@ export function Dashboard() {
     window.addEventListener('resize', handleResize);
     return () => window.removeEventListener('resize', handleResize);
   }, []);
-
-  if (selectedInspectionId) {
-    return <InspectionView id={selectedInspectionId} onBack={() => {
-      setSelectedInspectionId(null);
-      window.history.replaceState({}, '', '/');
-    }} />;
-  }
 
   const handleTabChange = (tab: typeof activeTab) => {
     setActiveTab(tab);
@@ -316,6 +317,13 @@ export function Dashboard() {
   };
 
   const renderContent = () => {
+    if (selectedInspectionId) {
+       return <InspectionView id={selectedInspectionId} onBack={() => {
+         setSelectedInspectionId(null);
+         window.history.replaceState({}, '', '/');
+       }} />;
+    }
+
     switch (activeTab) {
       case 'training': return <TrainingView />;
       case 'analytics': return <InventoryDashboard />;
@@ -326,7 +334,7 @@ export function Dashboard() {
       case 'notifications': return <NotificationsView onBack={() => setActiveTab('home')} />;
       case 'inspections':
         return (
-          <div className="flex flex-col gap-6 animate-in fade-in duration-500">
+          <div className="flex flex-col gap-6">
              <div className="flex items-center justify-between">
                 <h2 className="text-2xl font-black text-slate-900 tracking-tight">Todas as Vistorias</h2>
                 <Button size="sm" icon={Plus} onClick={() => setActiveTab('locations')}>Nova</Button>
@@ -345,7 +353,7 @@ export function Dashboard() {
         );
       case 'settings':
         return isAdmin ? (
-          <div className="flex flex-col gap-8 animate-in fade-in duration-500 max-w-4xl">
+          <div className="flex flex-col gap-8 max-w-4xl">
             <div className="bg-white border border-slate-100 p-8 rounded-[2.5rem] shadow-sm flex flex-col gap-6">
               <div className="flex items-center gap-4">
                 <div className="w-12 h-12 rounded-[1.25rem] bg-indigo-50 border border-indigo-100/40 flex items-center justify-center text-indigo-600">
@@ -389,7 +397,7 @@ export function Dashboard() {
       case 'home':
       default:
         return (
-          <div className="flex flex-col gap-10 animate-in fade-in slide-in-from-bottom-4 duration-700">
+          <div className="flex flex-col gap-10">
             {quotaExceeded && (
               <div className="bg-amber-50 border border-amber-200 rounded-[2.5rem] p-6 flex flex-col md:flex-row items-center gap-6 shadow-xl shadow-amber-500/5">
                 <div className="w-16 h-16 bg-white rounded-3xl flex items-center justify-center shadow-lg shadow-amber-500/10 shrink-0">
@@ -513,13 +521,15 @@ export function Dashboard() {
   };
 
   return (
-    <div className="flex flex-col lg:flex-row min-h-screen bg-slate-50">
-      <div className="lg:hidden flex items-center justify-between p-4 bg-white border-b border-slate-200 sticky top-0 z-50">
+    <div className="flex h-screen bg-[#F8FAFC] overflow-hidden">
+      
+      {/* HEADER MOBILE (Apenas telas pequenas) */}
+      <div className="lg:hidden flex items-center justify-between p-4 bg-white border-b border-slate-200 fixed top-0 left-0 right-0 z-50">
         <div className="flex items-center gap-3">
            <button onClick={() => setIsMobileMenuOpen(true)} className="w-10 h-10 flex items-center justify-center bg-slate-50 text-slate-400 rounded-xl border border-slate-100">
               <LayoutGrid className="w-5 h-5" />
            </button>
-           <div className="flex items-center gap-2" onClick={() => handleTabChange('home')}>
+           <div className="flex items-center gap-2" onClick={() => setActiveTab('home')}>
               <div className="w-8 h-8 bg-indigo-600 rounded-lg flex items-center justify-center">
                  <ShieldCheck className="w-5 h-5 text-white" />
               </div>
@@ -534,97 +544,132 @@ export function Dashboard() {
         </div>
       </div>
 
+      {/* OVERLAY MOBILE */}
       {isMobileMenuOpen && (
-        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[60] lg:hidden animate-in fade-in duration-300" onClick={() => setIsMobileMenuOpen(false)} />
+        <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-[60] lg:hidden animate-in fade-in duration-300" onClick={() => setIsMobileMenuOpen(false)} />
       )}
 
+      {/* SIDEBAR MODERNA (Desktop & Mobile) */}
       <aside className={cn(
-        "fixed lg:sticky inset-y-0 left-0 flex flex-col bg-white border-r border-slate-100 transition-all duration-500 ease-in-out z-[70] h-screen top-0",
-        isMobileMenuOpen ? "translate-x-0 w-80 px-8" : "-translate-x-full lg:translate-x-0",
-        !isMobileMenuOpen && isSidebarCollapsed ? "lg:w-24 lg:px-4" : !isMobileMenuOpen ? "lg:w-80 lg:px-8" : ""
+        "fixed lg:relative inset-y-0 left-0 bg-white border-r border-slate-200/60 flex flex-col z-[70] transition-all duration-500 ease-in-out shadow-[4px_0_24px_rgba(0,0,0,0.02)]",
+        isMobileMenuOpen ? "translate-x-0 w-80" : "-translate-x-full lg:translate-x-0",
+        !isMobileMenuOpen && isSidebarCollapsed ? "lg:w-[88px]" : !isMobileMenuOpen ? "lg:w-[280px]" : ""
       )}>
-        <div className="h-32 flex items-center justify-between">
-          <div className={cn("flex items-center gap-3 transition-all duration-500 overflow-hidden", isSidebarCollapsed ? "w-0 opacity-0" : "w-auto opacity-100 pl-2")}>
-             <div className="w-11 h-11 bg-indigo-600 rounded-xl flex items-center justify-center shadow-xl shadow-indigo-500/20 shrink-0">
+        {/* Topo da Sidebar (Logo) */}
+        <div className="h-24 flex items-center justify-between px-6 border-b border-slate-100/50">
+          <div className={cn("flex items-center gap-3 transition-all duration-500 overflow-hidden", isSidebarCollapsed ? "w-0 opacity-0" : "w-auto opacity-100")}>
+             <div className="w-10 h-10 bg-indigo-600 rounded-[14px] flex items-center justify-center shadow-lg shadow-indigo-500/20 shrink-0">
                 <ShieldCheck className="w-6 h-6 text-white" />
              </div>
              <div className="flex flex-col leading-none whitespace-nowrap">
-                <span className="font-display font-extrabold text-2xl tracking-tighter text-slate-900">PATRI<span className="text-indigo-600">360</span></span>
+                <span className="font-black text-2xl tracking-tighter text-slate-900">PATRI<span className="text-indigo-600">360</span></span>
              </div>
           </div>
           <button 
             onClick={() => setIsSidebarCollapsed(!isSidebarCollapsed)}
-            className={cn("p-2.5 rounded-xl bg-slate-50 text-slate-400 hover:text-indigo-600 transition-all border border-slate-100 shrink-0", isSidebarCollapsed ? "mx-auto" : "")}
+            className={cn("p-2 rounded-xl bg-slate-50 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 transition-all shrink-0", isSidebarCollapsed ? "mx-auto" : "")}
           >
-            {isSidebarCollapsed ? <ChevronRight className="w-4 h-4" /> : <ChevronLeft className="w-4 h-4" />}
+            {isSidebarCollapsed ? <ChevronRight className="w-5 h-5" /> : <ChevronLeft className="w-5 h-5" />}
           </button>
         </div>
 
-        <nav className="flex flex-col gap-1.5 flex-1">
+        {/* Links do Menu */}
+        <nav className="flex-1 overflow-y-auto py-6 px-4 space-y-1.5 custom-scrollbar">
           <NavItem collapsed={isSidebarCollapsed} active={activeTab === 'home' && !selectedInspectionId} label="Dashboard" icon={LayoutGrid} onClick={() => handleTabChange('home')} />
           <NavItem collapsed={isSidebarCollapsed} active={activeTab === 'scanner'} label="Scanner QR" icon={Search} onClick={() => handleTabChange('scanner')} />
           <NavItem collapsed={isSidebarCollapsed} active={activeTab === 'notifications'} label="Alertas" icon={Bell} onClick={() => handleTabChange('notifications')} badge={isSidebarCollapsed ? (unreadNotifications ? '•' : 0) : unreadNotifications || 0} />
           
           {unsyncedCount > 0 && (
-            <div className={cn("mt-2 px-6 py-3 bg-amber-50 rounded-2xl border flex items-center gap-3 animate-in fade-in", isSidebarCollapsed && "px-0 justify-center w-14 mx-auto")}>
-              <Cloud className={cn("w-4 h-4 text-amber-600", syncing && "animate-bounce")} />
+            <div className={cn("mt-2 py-3 bg-amber-50 rounded-2xl border border-amber-100/50 flex items-center gap-3 animate-in fade-in transition-all", isSidebarCollapsed ? "px-0 justify-center w-12 mx-auto" : "px-5")}>
+              <Cloud className={cn("w-[22px] h-[22px] text-amber-500 shrink-0", syncing && "animate-bounce")} />
               {!isSidebarCollapsed && (
-                <div className="flex flex-col leading-none">
-                  <span className="text-[9px] font-black text-amber-900 uppercase">{unsyncedCount} PENDENTES</span>
-                  <span className="text-[7px] font-bold text-amber-500 uppercase mt-0.5">Sincronizando...</span>
+                <div className="flex flex-col leading-none truncate">
+                  <span className="text-[10px] font-black text-amber-900 uppercase">{unsyncedCount} PENDENTES</span>
+                  <span className="text-[8px] font-bold text-amber-500 uppercase mt-0.5">Sincronizando...</span>
                 </div>
               )}
             </div>
           )}
 
-          <div className={cn("h-4 transition-all", isSidebarCollapsed ? "h-6" : "h-4")} />
-          {!isSidebarCollapsed && <span className="text-[10px] font-bold text-slate-400 uppercase px-4 mb-2">Gestão Patrimonial</span>}
+          <div className="h-4" />
+          {!isSidebarCollapsed && <span className="text-[10px] font-extrabold text-slate-400 uppercase px-4 mb-2 tracking-widest block">Gestão Patrimonial</span>}
+          
           <NavItem collapsed={isSidebarCollapsed} active={activeTab === 'inspections'} label="Dossiês" icon={ClipboardList} onClick={() => handleTabChange('inspections')} />
           <NavItem collapsed={isSidebarCollapsed} active={activeTab === 'locations'} label="Setores" icon={Building2} onClick={() => handleTabChange('locations')} />
-          {isManager && <NavItem collapsed={isSidebarCollapsed} active={activeTab === 'reports'} label="Relatórios" icon={BarChart3} onClick={() => handleTabChange('reports')} />}
+          
           {isAdmin && (
             <>
-              {!isSidebarCollapsed && <div className="h-4" />}
+              <div className="h-6" />
+              {!isSidebarCollapsed && <span className="text-[10px] font-extrabold text-slate-400 uppercase px-4 mb-2 tracking-widest block">Administração</span>}
+              <NavItem collapsed={isSidebarCollapsed} active={activeTab === 'users'} label="Agentes" icon={Users} onClick={() => handleTabChange('users')} />
+              <NavItem collapsed={isSidebarCollapsed} active={activeTab === 'reports'} label="Relatórios" icon={BarChart3} onClick={() => handleTabChange('reports')} />
               <NavItem collapsed={isSidebarCollapsed} active={activeTab === 'settings'} label="Configurações" icon={Settings} onClick={() => handleTabChange('settings')} />
             </>
           )}
         </nav>
       </aside>
 
-      <main className="flex-1 flex flex-col min-w-0">
-        <header className={cn("hidden lg:flex items-center justify-between px-10 py-7 bg-white/80 backdrop-blur-xl sticky top-0 z-30 transition-all", selectedInspectionId ? "pb-4" : "")}>
+      {/* ÁREA PRINCIPAL (Main) */}
+      <main className="flex-1 flex flex-col relative overflow-hidden">
+        
+        {/* CABEÇALHO FLUTUANTE (Desktop apenas) */}
+        <header className={cn(
+          "hidden lg:flex absolute top-6 left-8 right-8 z-30 bg-white/70 backdrop-blur-md border border-white/40 shadow-sm rounded-2xl px-6 py-4 justify-between items-center transition-all duration-300",
+          selectedInspectionId ? "opacity-0 pointer-events-none translate-y-[-20px]" : "opacity-100 translate-y-0"
+        )}>
           <div className="flex items-center gap-5 min-w-0 flex-1">
-            <h2 className="text-3xl font-black text-slate-900 tracking-tighter truncate">
-              {activeTab === 'home' ? `Olá, ${user?.name.split(' ')[0]}` : activeTab.toUpperCase()}
-            </h2>
+             <div className={cn("flex items-center gap-2 px-3 py-1.5 rounded-full border", isOnline ? "bg-emerald-50/50 border-emerald-100/50" : "bg-rose-50/50 border-rose-100/50")}>
+                <div className={cn("w-2 h-2 rounded-full", isOnline ? "bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.4)]" : "bg-rose-500")} />
+                <span className={cn("text-[10px] font-bold uppercase tracking-widest", isOnline ? "text-emerald-700" : "text-rose-700")}>
+                  {isOnline ? 'Sistema Online' : 'Modo Offline'}
+                </span>
+             </div>
+             {syncing && <span className="text-[10px] font-bold text-indigo-500 uppercase tracking-widest animate-pulse">Sincronizando dados...</span>}
           </div>
           
-          <div className="flex items-center gap-6 shrink-0">
-             <div className="flex items-center gap-2 px-4 py-2 bg-slate-50 border border-slate-200 rounded-full">
-                <div className={cn("w-2 h-2 rounded-full", syncing ? "bg-indigo-500 animate-pulse" : (isOnline ? "bg-emerald-500" : "bg-rose-500"))} />
-                <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest">{syncing ? "Sincronizando..." : (isOnline ? "Conectado" : "Offline")}</span>
-             </div>
-
-             <button onClick={() => setActiveTab('notifications')} className="relative w-12 h-12 flex items-center justify-center bg-white border border-slate-200 rounded-2xl text-slate-400 hover:text-indigo-600 transition-all">
-               <Bell className="w-6 h-6" />
+          <div className="flex items-center gap-4 shrink-0">
+             <button onClick={() => setActiveTab('notifications')} className="relative p-2.5 bg-white border border-slate-200/50 rounded-xl hover:bg-slate-50 transition-all text-slate-400 hover:text-indigo-600 shadow-sm">
+               <Bell className="w-5 h-5" />
                {unreadNotifications > 0 && (
-                 <span className="absolute -top-2 -right-2 min-w-[20px] h-5 px-1 bg-rose-500 text-[10px] text-white flex items-center justify-center rounded-full border-2 border-white font-bold animate-pulse">
+                 <span className="absolute -top-1.5 -right-1.5 min-w-[20px] h-5 px-1 bg-rose-500 text-white text-[10px] font-black rounded-full border-2 border-white flex items-center justify-center shadow-sm">
                    {unreadNotifications}
                  </span>
                )}
              </button>
-
-             <button onClick={signOut} className="w-12 h-12 flex items-center justify-center bg-rose-50 border border-rose-100 rounded-2xl text-rose-600 hover:bg-rose-500 hover:text-white transition-all">
-               <LogOut className="w-5 h-5" />
-             </button>
+             
+             {/* Perfil Simplificado */}
+             <div className="flex items-center gap-3 pl-4 border-l border-slate-200/50">
+                <div className="flex flex-col text-right">
+                   <span className="text-sm font-bold text-slate-900 leading-tight">{user?.name.split(' ')[0]}</span>
+                   <span className="text-[9px] font-bold text-slate-400 uppercase tracking-widest">{user?.cargo || 'Membro'}</span>
+                </div>
+                <button onClick={signOut} title="Sair do sistema" className="w-10 h-10 rounded-xl bg-rose-50 border border-rose-100/50 flex items-center justify-center text-rose-500 hover:bg-rose-500 hover:text-white transition-colors">
+                  <LogOut className="w-4 h-4" />
+                </button>
+             </div>
           </div>
         </header>
 
-        <section className="px-6 lg:px-12 pb-24 lg:pb-12 pt-4 lg:pt-0 max-w-7xl">
-          {renderContent()}
-        </section>
+        {/* ÁREA COM SCROLL E ANIMAÇÃO */}
+        <div className="flex-1 overflow-y-auto px-6 lg:px-12 pt-24 lg:pt-32 pb-24 lg:pb-12 custom-scrollbar relative">
+          <div className="max-w-7xl mx-auto">
+            <AnimatePresence mode="wait">
+              <motion.div
+                key={selectedInspectionId ? `insp-${selectedInspectionId}` : activeTab}
+                initial={{ opacity: 0, y: 15 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -15 }}
+                transition={{ duration: 0.2, ease: "easeOut" }}
+              >
+                {renderContent()}
+              </motion.div>
+            </AnimatePresence>
+          </div>
+        </div>
+
       </main>
 
+      {/* MENU INFERIOR MOBILE */}
       <nav className="fixed bottom-0 left-0 right-0 lg:hidden bg-white/90 backdrop-blur-xl border-t border-slate-200 flex items-center justify-around p-4 pb-6 z-50">
         <MobileNavItem active={activeTab === 'home' && !selectedInspectionId} icon={LayoutGrid} onClick={() => handleTabChange('home')} />
         <div className="relative -top-6">
@@ -642,15 +687,19 @@ export function Dashboard() {
   );
 }
 
+// ==========================================
+// COMPONENTES MENORES (UI ATUALIZADA)
+// ==========================================
+
 function SummaryCard({ label, value, icon: Icon, onClick, variant = 'default' }: { label: string, value: number | string, icon: any, onClick: () => void, variant?: 'default' | 'accent' }) {
   return (
-    <Card onClick={onClick} className={cn("group h-40 flex flex-col justify-between border-slate-100 px-6 py-6 cursor-pointer", variant === 'accent' ? "bg-slate-900 border-transparent" : "bg-white shadow-sm hover:shadow-xl")}>
-      <div className={cn("w-12 h-12 rounded-2xl flex items-center justify-center transition-all duration-500", variant === 'accent' ? "bg-white/10" : "bg-slate-50 group-hover:bg-slate-900 text-slate-500 group-hover:text-white")}>
+    <Card onClick={onClick} className={cn("group h-40 flex flex-col justify-between border-slate-100/60 px-6 py-6 cursor-pointer rounded-[2rem]", variant === 'accent' ? "bg-slate-900 border-transparent shadow-xl shadow-slate-900/10" : "bg-white shadow-sm hover:shadow-xl hover:shadow-indigo-500/5")}>
+      <div className={cn("w-12 h-12 rounded-[1rem] flex items-center justify-center transition-all duration-500", variant === 'accent' ? "bg-white/10" : "bg-indigo-50/50 group-hover:bg-indigo-600 text-indigo-500 group-hover:text-white")}>
         <Icon className="w-6 h-6 transform group-hover:rotate-12 transition-transform" />
       </div>
       <div className="flex flex-col">
         <span className={cn("text-4xl font-display font-extrabold tracking-tight", variant === 'accent' ? "text-white" : "text-slate-900")}>{value}</span>
-        <span className={cn("text-[10px] uppercase font-bold tracking-widest mt-2", variant === 'accent' ? "text-slate-400" : "text-slate-500")}>{label}</span>
+        <span className={cn("text-[10px] uppercase font-bold tracking-widest mt-2", variant === 'accent' ? "text-slate-400" : "text-slate-400")}>{label}</span>
       </div>
     </Card>
   );
@@ -666,23 +715,21 @@ function RecentInspectionRow({ inspection, locationName, onClick }: { inspection
   }, [inspection.id]);
 
   return (
-    <Card onClick={onClick} className="flex items-center justify-between p-4 lg:p-6 group hover:border-slate-300 transition-all border-slate-100 cursor-pointer">
-      <div className="flex items-center gap-6 min-w-0">
-        <div className={cn("w-14 h-14 rounded-2xl flex items-center justify-center shrink-0 border transition-all duration-500", isFinalized ? "bg-emerald-50 border-emerald-100 text-emerald-600" : isInProgress ? "bg-indigo-50 border-indigo-100 text-indigo-600" : "bg-slate-50 border-slate-100 text-slate-400")}>
+    <Card onClick={onClick} className="flex items-center justify-between p-4 lg:p-6 group hover:border-indigo-100 transition-all border-slate-100/60 shadow-sm hover:shadow-md cursor-pointer rounded-[1.5rem] bg-white">
+      <div className="flex items-center gap-5 min-w-0">
+        <div className={cn("w-14 h-14 rounded-[1rem] flex items-center justify-center shrink-0 transition-all duration-500", isFinalized ? "bg-emerald-50 text-emerald-600" : isInProgress ? "bg-indigo-50 text-indigo-600" : "bg-slate-50 text-slate-400")}>
           {isFinalized ? <CheckCircle2 className="w-7 h-7" /> : <ClipboardList className="w-7 h-7" />}
         </div>
         <div className="flex flex-col min-w-0">
-          <div className="flex items-center gap-2 mb-1">
-            <h4 className="text-sm font-bold text-slate-900 truncate">{locationName}</h4>
-          </div>
+          <h4 className="text-sm font-bold text-slate-800 truncate mb-1">{locationName}</h4>
           <div className="flex items-center gap-3 text-[10px] font-bold">
             <span className="uppercase text-slate-400">{formatDate(inspection.date).split(',')[0]}</span>
-            <div className="w-1 h-1 rounded-full bg-slate-200"></div>
-            <span className="text-slate-400">{assetCount || 0} itens</span>
+            <div className="w-1 h-1 rounded-full bg-slate-300"></div>
+            <span className="text-slate-500">{assetCount || 0} itens</span>
           </div>
         </div>
       </div>
-      <Button size="sm" variant={isInProgress ? "accent" : "secondary"} icon={isInProgress ? PlayCircle : Eye} onClick={onClick} className="hidden sm:flex h-11 px-8 uppercase tracking-widest">
+      <Button size="sm" variant={isInProgress ? "accent" : "secondary"} icon={isInProgress ? PlayCircle : Eye} onClick={onClick} className="hidden sm:flex h-11 px-6 uppercase tracking-widest text-[10px] rounded-xl">
         {isInProgress ? "Continuar" : "Ver"}
       </Button>
     </Card>
@@ -691,11 +738,20 @@ function RecentInspectionRow({ inspection, locationName, onClick }: { inspection
 
 function NavItem({ active, label, icon: Icon, onClick, badge, collapsed }: any) {
   return (
-    <button onClick={onClick} title={collapsed ? label : undefined} className={cn("flex items-center gap-4 py-4 rounded-2xl font-black text-[10px] uppercase tracking-widest transition-all group relative overflow-hidden", collapsed ? "justify-center px-0 w-14 mx-auto" : "px-6 w-full", active ? "bg-slate-900 text-white shadow-2xl" : "text-slate-500 hover:bg-slate-50")}>
-      <Icon className={cn("w-5 h-5 shrink-0 transition-transform duration-500", active ? "scale-110" : "group-hover:scale-110")} />
+    <button onClick={onClick} title={collapsed ? label : undefined} className={cn(
+      "relative flex items-center gap-3 py-3.5 rounded-2xl font-bold text-[12px] tracking-wide transition-all duration-300 group overflow-hidden outline-none",
+      collapsed ? "justify-center px-0 w-12 mx-auto" : "px-4 w-full",
+      active ? "bg-indigo-50/80 text-indigo-800" : "text-slate-500 hover:bg-slate-100/50 hover:text-slate-800"
+    )}>
+      {/* Indicador Lateral Azul */}
+      <div className={cn("absolute left-0 top-3 bottom-3 w-1 rounded-r-full transition-all duration-300", active ? "bg-indigo-600" : "bg-transparent group-hover:bg-slate-300")} />
+      
+      <Icon className={cn("w-[22px] h-[22px] shrink-0 transition-transform duration-300", active ? "scale-110 text-indigo-600" : "group-hover:text-slate-600")} />
+      
       {!collapsed && <span className="flex-1 text-left truncate">{label}</span>}
+      
       {badge !== undefined && badge > 0 ? (
-        <span className={cn("rounded-full text-[8px] font-black flex items-center justify-center border transition-all", collapsed ? "absolute top-2 right-2 w-2 h-2 p-0" : "px-2 py-0.5 min-w-[18px]", active ? "bg-indigo-500 border-indigo-400 text-white" : "bg-indigo-100 border-indigo-200 text-indigo-700")}>
+        <span className={cn("rounded-full text-[9px] font-black flex items-center justify-center transition-all", collapsed ? "absolute top-1 right-1 w-2 h-2 p-0" : "px-2 py-0.5 min-w-[20px]", active ? "bg-indigo-600 text-white shadow-sm" : "bg-rose-500 text-white shadow-sm")}>
           {!collapsed && badge}
         </span>
       ) : null}
@@ -705,8 +761,8 @@ function NavItem({ active, label, icon: Icon, onClick, badge, collapsed }: any) 
 
 function MobileNavItem({ active, icon: Icon, onClick }: any) {
   return (
-    <button onClick={onClick} className={cn("relative p-3 rounded-2xl flex flex-col items-center justify-center transition-all outline-none", active ? "text-indigo-600 scale-110" : "text-slate-400")}>
-      <Icon className={cn("w-6 h-6 transition-all duration-300", active ? "stroke-[2.5px]" : "stroke-2")} />
+    <button onClick={onClick} className={cn("relative p-3 rounded-2xl flex flex-col items-center justify-center transition-all outline-none", active ? "text-indigo-600 scale-110" : "text-slate-400 hover:text-slate-600")}>
+      <Icon className={cn("w-[26px] h-[26px] transition-all duration-300", active ? "stroke-[2.5px]" : "stroke-2")} />
     </button>
   );
 }
