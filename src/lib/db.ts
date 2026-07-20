@@ -78,6 +78,7 @@ export interface Asset {
   quantity?: number;
   updatedAt?: number;
   deleted?: boolean;
+  isTrashed?: boolean;
 }
 
 export interface AppSettings {

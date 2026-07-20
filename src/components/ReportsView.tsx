@@ -34,37 +34,71 @@ export function ReportsView() {
   const conditionRegular = filteredAssets.filter(a => a.condition === 'regular').reduce((acc, curr) => acc + (Number(curr.quantity) || 1), 0);
   const conditionRuim = filteredAssets.filter(a => a.condition === 'ruim' || a.condition === 'inservivel').reduce((acc, curr) => acc + (Number(curr.quantity) || 1), 0);
 
-  const generatePDF = () => {
+ const generatePDF = () => {
     const doc = new jsPDF();
     
-    // Cabeçalho Oficial
+   // CONFIGURAÇÕES DE CORES E ESTILO INSTITUCIONAL (COM TIPAGEM DE TUPLA EXATA)
+    const corPrimaria: [number, number, number] = [15, 23, 42]; // Slate 900
+    const corSecundaria: [number, number, number] = [79, 70, 229]; // Indigo 600
+    const corLinha = [226, 232, 240]; // Slate 200
+    
+    // 1. CABEÇALHO OFICIAL DA PREFEITURA
     doc.setFont('helvetica', 'bold');
-    doc.setFontSize(18);
-    doc.text('Relatório Analítico de Património', 14, 22);
+    doc.setFontSize(10);
+    doc.setTextColor(100);
+    doc.text('ESTADO DO RIO GRANDE DO SUL', 14, 15);
+    
+    doc.setFontSize(14);
+    doc.setTextColor(corPrimaria[0], corPrimaria[1], corPrimaria[2]);
+    doc.text('PREFEITURA MUNICIPAL DE MANOEL VIANA', 14, 22);
     
     doc.setFont('helvetica', 'normal');
+    doc.setFontSize(9);
+    doc.setTextColor(148, 163, 184);
+    doc.text('Patrimônio 360 • Painel Analítico Consolidado', 14, 27);
+
+    // Linha divisória elegante
+    doc.setDrawColor(corSecundaria[0], corSecundaria[1], corSecundaria[2]);
+    doc.setLineWidth(0.5);
+    doc.line(14, 30, 196, 30);
+
+    // 2. TÍTULO DO RELATÓRIO
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(16);
+    doc.setTextColor(corPrimaria[0], corPrimaria[1], corPrimaria[2]);
+    doc.text('Relatório Analítico de Patrimônio', 14, 42);
+    
+    // FILTROS ATIVOS DE BUSCA
+    doc.setFont('helvetica', 'normal');
     doc.setFontSize(10);
-    doc.text('Prefeitura Municipal de Manoel Viana', 14, 30);
+    doc.setTextColor(51);
     
     const locName = selectedLocation === 'all' ? 'Todos os Setores' : locations.find(l => l.id === selectedLocation)?.name || 'Setor Específico';
     const condName = selectedCondition === 'all' ? 'Todas as Condições' : selectedCondition.toUpperCase();
     
-    doc.text(`Filtros Aplicados: ${locName} | Estado: ${condName}`, 14, 36);
-    doc.text(`Data de Emissão: ${new Date().toLocaleDateString()}`, 14, 42);
+    doc.text(`Filtros Aplicados: ${locName} | Estado: ${condName}`, 14, 52);
+    doc.text(`Data de Emissão: ${new Date().toLocaleDateString()}`, 14, 58);
 
-    // Painel de Resumo
-    doc.setDrawColor(226, 232, 240);
-    doc.setFillColor(248, 250, 252);
-    doc.roundedRect(14, 48, 182, 16, 3, 3, 'FD');
+    // 3. PAINEL DE RESUMO MULTICOLUNA (ESTILIZADO)
+    doc.setDrawColor(corLinha[0], corLinha[1], corLinha[2]);
+    doc.setFillColor(248, 250, 252); // Slate 50
+    doc.roundedRect(14, 64, 182, 16, 3, 3, 'FD');
     
     doc.setFont('helvetica', 'bold');
-    doc.setFontSize(10);
-    doc.text(`Total de Itens: ${totalAssets} unidades`, 18, 57);
-    doc.text(`Bons/Novos: ${conditionBom}`, 75, 57);
-    doc.text(`Regulares: ${conditionRegular}`, 125, 57);
-    doc.text(`Críticos: ${conditionRuim}`, 165, 57);
+    doc.setFontSize(9);
+    doc.setTextColor(corPrimaria[0], corPrimaria[1], corPrimaria[2]);
+    doc.text(`Total Geral: ${totalAssets} u.`, 18, 74);
+    
+    doc.setTextColor(16, 185, 129); // Verde para os Bons
+    doc.text(`Bons/Novos: ${conditionBom}`, 68, 74);
+    
+    doc.setTextColor(245, 158, 11); // Amarelo para os Regulares
+    doc.text(`Regulares: ${conditionRegular}`, 115, 74);
+    
+    doc.setTextColor(225, 29, 72); // Vermelho para os Críticos
+    doc.text(`Críticos/Ruins: ${conditionRuim}`, 158, 74);
 
-    // Tabela de Dados
+    // 4. MAPEAMENTO DA TABELA DE DADOS (PRESERVANDO SUA LÓGICA ORIGINAL)
     const tableData = filteredAssets.map(asset => {
       const insp = inspections.find(i => i.id === asset.inspectionId);
       const loc = locations.find(l => l.id === insp?.locationId);
@@ -77,16 +111,26 @@ export function ReportsView() {
       ];
     });
 
+    // 5. RENDERIZAÇÃO DA TABELA FORMATADA
+   // 5. RENDERIZAÇÃO DA TABELA FORMATADA
     autoTable(doc, {
-      head: [['Património', 'Descrição do Bem', 'Localização', 'Estado', 'Qtd']],
+      head: [['Patrimônio', 'Descrição do Bem', 'Localização / Setor', 'Estado', 'Qtd']],
       body: tableData,
-      startY: 72,
+      startY: 88,
       theme: 'grid',
-      styles: { fontSize: 8 },
-      headStyles: { fillColor: [79, 70, 229], fontStyle: 'bold' },
-      alternateRowStyles: { fillColor: [248, 250, 252] }
+      headStyles: { fillColor: corPrimaria, fontStyle: 'bold', fontSize: 9 },
+      bodyStyles: { fontSize: 8, textColor: 51 },
+      alternateRowStyles: { fillColor: [248, 250, 252] },
+      columnStyles: {
+        0: { cellWidth: 25, fontStyle: 'bold', font: 'courier' }, // 🚀 Erro corrigido aqui!
+        1: { cellWidth: 'auto' },
+        2: { cellWidth: 45 },
+        3: { cellWidth: 25, fontStyle: 'bold' },
+        4: { cellWidth: 15, halign: 'center' }
+      }
     });
 
+    // SALVAMENTO COM NOME PADRONIZADO
     doc.save(`Relatorio_Patrimonio_${new Date().getTime()}.pdf`);
   };
 

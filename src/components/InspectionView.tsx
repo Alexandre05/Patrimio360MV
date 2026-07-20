@@ -37,7 +37,13 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
   const isOnline = useOnlineStatus();
   const inspection = useLiveQuery(() => db.inspections.get(id), [id]);
   const location = useLiveQuery(() => inspection ? db.locations.get(inspection.locationId) : undefined, [inspection]);
-  const assets = useLiveQuery(() => db.assets.where('inspectionId').equals(id).filter(a => !a.deleted).toArray(), [id]);
+  
+  // Busca única e infalível
+  const allInspectionAssets = useLiveQuery(() => db.assets.where('inspectionId').equals(id).toArray(), [id]);
+  
+  // MÁGICA AQUI: Usamos isTrashed para evitar que o sincronizador apague o item fisicamente
+  const assets = allInspectionAssets?.filter(a => !a.isTrashed && !a.deleted) || [];
+  const deletedAssets = allInspectionAssets?.filter(a => !!a.isTrashed) || [];
   
   const [searchTermAssets, setSearchTermAssets] = useState('');
   const [conditionFilter, setConditionFilter] = useState('all');
@@ -73,14 +79,12 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
   }, [allLocations, location]);
   const hasSubLocations = subLocations.length > 0;
 
-  // Aggregate assets from sub-locations if this is a parent
   const aggregatedSubAssets = useLiveQuery(async () => {
     if (!hasSubLocations || !subLocations) return [];
     
     const subLocationIds = subLocations.map(sl => sl.id);
     const latestInspectionIds: string[] = [];
 
-    // Busca apenas a vistoria mais recente (independente do status) para cada sub-local
     for (const subLocId of subLocationIds) {
       const inspectionsForLoc = await db.inspections
         .where('locationId').equals(subLocId)
@@ -88,7 +92,6 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
         .toArray();
 
       if (inspectionsForLoc.length > 0) {
-        // Ordena da mais recente para a mais antiga e pega a primeira
         inspectionsForLoc.sort((a, b) => b.date - a.date);
         latestInspectionIds.push(inspectionsForLoc[0].id);
       }
@@ -96,7 +99,7 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
     
     if (latestInspectionIds.length === 0) return [];
     
-    return await db.assets.where('inspectionId').anyOf(latestInspectionIds).filter(a => !a.deleted).toArray();
+    return await db.assets.where('inspectionId').anyOf(latestInspectionIds).filter(a => !a.isTrashed && !a.deleted).toArray();
   }, [hasSubLocations, subLocations]);
 
   const allVisibleAssets = hasSubLocations 
@@ -244,7 +247,6 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
 
     const hash = generateAssetHash(newItem.name, newItem.patrimonyNumber, inspection?.locationId || '');
     
-    // Check if we are transferring an existing asset
     if (transferCandidate && !editingAssetId) {
       try {
         const confirmTransfer = window.confirm(`Deseja TRANSFERIR o patrimônio ${transferCandidate.patrimonyNumber} para esta localização? ele será removido do local original.`);
@@ -271,7 +273,6 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
       }
     }
 
-    // Duplication Check (only for new items)
     if (!editingAssetId) {
       if (newItem.patrimonyNumber) {
         let globalExisting = await db.assets.where('patrimonyNumber').equals(newItem.patrimonyNumber).first();
@@ -280,20 +281,30 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
           try {
             const q = query(collection(firestore, 'assets'), where('patrimonyNumber', '==', newItem.patrimonyNumber));
             const snap = await getDocs(q);
-            if (!snap.empty) {
-               globalExisting = snap.docs[0].data() as Asset;
-            }
-          } catch(e) { console.warn('Offline, skipping remote patrimony check'); }
+            if (!snap.empty) globalExisting = snap.docs[0].data() as Asset;
+          } catch(e) { console.warn('Offline, pulando checagem remota'); }
         }
 
         if (globalExisting) {
           if (globalExisting.inspectionId === id) {
-              setDuplicateWarning(`O patrimônio ${newItem.patrimonyNumber} já foi cadastrado nesta vistoria.`);
+            // Suporta restauração de isTrashed e deleted
+            if (globalExisting.deleted || globalExisting.isTrashed) {
+              const restaurar = window.confirm(`O patrimônio ${newItem.patrimonyNumber} já foi cadastrado e EXCLUÍDO nesta vistoria. Deseja restaurá-lo com os dados originais?`);
+              if (restaurar) {
+                await db.assets.update(globalExisting.id, { deleted: false, isTrashed: false, needsSync: 1, updatedAt: Date.now() });
+                await (db as any).assetEvents.put({
+                  id: crypto.randomUUID(), assetId: globalExisting.id, type: 'criacao', description: 'Patrimônio restaurado da lixeira local', userId: user.userId, userName: user.name, date: Date.now()
+                });
+                pushLocalChanges(); setIsAdding(false); setDuplicateWarning(null);
+                toast("Item restaurado com sucesso!", "success");
+              }
               return;
+            }
+            setDuplicateWarning(`O patrimônio ${newItem.patrimonyNumber} já está ativo nesta vistoria.`);
+            return;
           }
           const otherInsp = await db.inspections.get(globalExisting.inspectionId);
           const otherLoc = otherInsp ? await db.locations.get(otherInsp.locationId) : null;
-          
           setTransferCandidate(globalExisting);
           setDuplicateWarning(`O patrimônio ${newItem.patrimonyNumber} já está vinculado ao local "${otherLoc?.name || 'outro setor'}".`);
           return;
@@ -305,78 +316,58 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
           try {
              const q = query(collection(firestore, 'assets'), where('hash', '==', hash));
              const snap = await getDocs(q);
-             if (!snap.empty) {
-                existingHash = snap.docs[0].data() as Asset;
-             }
-          } catch(e) { console.warn('Offline, skipping remote hash check'); }
+             if (!snap.empty) existingHash = snap.docs[0].data() as Asset;
+          } catch(e) { console.warn('Offline, pulando checagem remota'); }
         }
 
         if (existingHash) {
-          setDuplicateWarning("Este item já está cadastrado nesta sala. Edite o registro existente para alterar a quantidade.");
-          return;
+          if (existingHash.inspectionId === id && (existingHash.deleted || existingHash.isTrashed)) {
+            const restaurar = window.confirm(`Um item com a exata descrição "${newItem.name}" foi apagado nesta vistoria. Deseja restaurá-lo em vez de criar um novo?`);
+            if (restaurar) {
+              await db.assets.update(existingHash.id, { deleted: false, isTrashed: false, needsSync: 1, updatedAt: Date.now() });
+              await (db as any).assetEvents.put({
+                id: crypto.randomUUID(), assetId: existingHash.id, type: 'criacao', description: 'Item (sem plaqueta) restaurado da lixeira', userId: user.userId, userName: user.name, date: Date.now()
+              });
+              pushLocalChanges(); setIsAdding(false); setDuplicateWarning(null);
+              toast("Item restaurado com sucesso!", "success");
+            }
+            return;
+          }
+
+          if (existingHash.inspectionId === id && !existingHash.deleted && !existingHash.isTrashed) {
+            setDuplicateWarning("Este item já está cadastrado nesta sala. Edite o registro existente para alterar a quantidade.");
+            return;
+          }
         }
       }
     }
-
-    
 
     let finalAssetId = editingAssetId;
     let eventDescription = 'Património catalogado no sistema';
 
     if (editingAssetId) {
-      // 1. Puxar o item antigo para comparar
       const oldAsset = await db.assets.get(editingAssetId);
       const changes: string[] = [];
 
     if (oldAsset) {
-        // Compara Nome
-        if (oldAsset.name !== newItem.name) {
-          changes.push(`Nome (de '${oldAsset.name}' para '${newItem.name}')`);
-        }
-        
-        // Compara Património
+        if (oldAsset.name !== newItem.name) changes.push(`Nome (de '${oldAsset.name}' para '${newItem.name}')`);
         if (oldAsset.patrimonyNumber !== newItem.patrimonyNumber) {
           const oldPat = oldAsset.patrimonyNumber || 'Sem Nº';
           const newPat = newItem.patrimonyNumber || 'Sem Nº';
           changes.push(`Nº Património (de '${oldPat}' para '${newPat}')`);
         }
-        
-        // Compara Estado
-        if (oldAsset.condition !== newItem.condition) {
-          changes.push(`Estado (de '${oldAsset.condition.toUpperCase()}' para '${newItem.condition.toUpperCase()}')`);
-        }
-        
-        // Compara Quantidade
-        if (oldAsset.quantity !== newItem.quantity) {
-          changes.push(`Qtd (de ${oldAsset.quantity || 1} para ${newItem.quantity})`);
-        }
-        
-        // Compara Observações (aqui não colocamos de/para porque os textos podem ser gigantes e poluir o ecrã)
-        if (oldAsset.observations !== newItem.observations) {
-          changes.push(`Observações atualizadas`);
-        }
-        
-        // Compara Fotos
-        if (oldAsset.photos?.length !== newItem.photos.length) {
-          changes.push(`Fotos alteradas`);
-        }
+        if (oldAsset.condition !== newItem.condition) changes.push(`Estado (de '${oldAsset.condition.toUpperCase()}' para '${newItem.condition.toUpperCase()}')`);
+        if (oldAsset.quantity !== newItem.quantity) changes.push(`Qtd (de ${oldAsset.quantity || 1} para ${newItem.quantity})`);
+        if (oldAsset.observations !== newItem.observations) changes.push(`Observações atualizadas`);
+        if (oldAsset.photos?.length !== newItem.photos.length) changes.push(`Fotos alteradas`);
       }
 
-      // 2. Montar a mensagem inteligente com uma quebra de visualização bonita
       if (changes.length > 0) {
-        eventDescription = `Alterou: ${changes.join(' | ')}`; // Usa a barra (|) para separar se houver mais de uma alteração junta
+        eventDescription = `Alterou: ${changes.join(' | ')}`;
       } else {
         eventDescription = `Registro salvo sem alterações visíveis`;
       }
 
-      // 2. Montar a mensagem inteligente
-      if (changes.length > 0) {
-        eventDescription = `Alterou: ${changes.join(', ')}`;
-      } else {
-        eventDescription = `Registro salvo sem alterações visíveis`;
-      }
-
-      // 3. Atualizar o item
       await db.assets.update(editingAssetId, {
         name: newItem.name,
         patrimonyNumber: newItem.patrimonyNumber,
@@ -403,19 +394,19 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
         hash: hash,
         needsSync: 1,
         isPublic: true,
+        isTrashed: false, // Define explicitamente como falso ao criar
         quantity: newItem.quantity
       });
       toast("Item adicionado à vistoria!", "success", "Novo Patrimônio");
     }
 
-    // 🚀 GRAVAR LOG NA LINHA DO TEMPO COM A MENSAGEM INTELIGENTE
     try {
       if ((db as any).assetEvents) {
         await (db as any).assetEvents.put({
           id: crypto.randomUUID(),
           assetId: finalAssetId,
           type: editingAssetId ? 'edicao' : 'criacao',
-          description: eventDescription, // Usa a mensagem que montámos acima!
+          description: eventDescription,
           userId: user.userId,
           userName: user.name,
           date: Date.now()
@@ -425,9 +416,7 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
       console.warn("Aviso: Falha ao gravar log de eventos", err);
     }
 
-    // Trigger sync
     pushLocalChanges();
-
     setNewItem({ name: '', patrimonyNumber: '', condition: 'bom', observations: '', photos: [], quantity: 1 });
     setIsAdding(false);
     setEditingAssetId(null);
@@ -436,9 +425,7 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
 
   const handleSaveAndContinue = async () => {
     await handleAddItem();
-    setTimeout(() => {
-      setIsAdding(true);
-    }, 150);
+    setTimeout(() => { setIsAdding(true); }, 150);
   };
 
   const handleDeleteAsset = async (assetId: string) => {
@@ -452,16 +439,60 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
     }
 
     try {
+      // MÁGICA 2: Marcamos como isTrashed em vez de deleted
       await db.assets.update(assetId, { 
-        deleted: true, 
+        isTrashed: true, 
         needsSync: 1, 
         updatedAt: Date.now() 
       });
+      
+      try {
+        if ((db as any).assetEvents) {
+          await (db as any).assetEvents.put({
+            id: crypto.randomUUID(),
+            assetId: assetId,
+            type: 'exclusao',
+            description: 'Vistoriador enviou o item para a lixeira',
+            userId: user?.userId,
+            userName: user?.name,
+            date: Date.now()
+          });
+        }
+      } catch (err) {}
+
       setConfirmDeleteId(null);
       pushLocalChanges();
     } catch (err: any) {
       console.error("Erro ao deletar item:", err);
       setError("Não foi possível excluir o item.");
+    }
+  };
+  const handleEmptyTrash = async () => {
+    if (!isCommittee) {
+      setError("Apenas membros da comissão podem esvaziar a lixeira.");
+      return;
+    }
+    
+    const confirm = window.confirm("⚠️ ATENÇÃO: Deseja realmente esvaziar a lixeira? Esta ação apagará os itens permanentemente da nuvem e não poderá ser desfeita no inventário local.");
+    if (!confirm) return;
+
+    try {
+      const now = Date.now();
+      for (const asset of deletedAssets) {
+        // Passa a ordem para o syncService destruir o item fisicamente
+        await db.assets.update(asset.id, { 
+          deleted: true, 
+          isTrashed: false, 
+          needsSync: 1, 
+          updatedAt: now 
+        });
+      }
+      
+      pushLocalChanges();
+      if (typeof toast === 'function') toast("Lixeira esvaziada com sucesso!", "success");
+    } catch (err: any) {
+      console.error("Erro ao esvaziar lixeira:", err);
+      setError("Não foi possível esvaziar a lixeira.");
     }
   };
 
@@ -481,7 +512,7 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
   const handleCloneAsset = (asset: Asset) => {
     setNewItem({
       name: asset.name,
-      patrimonyNumber: '', // Deixa em branco para a nova plaqueta
+      patrimonyNumber: '',
       condition: asset.condition,
       observations: asset.observations,
       photos: asset.photos || [],
@@ -532,11 +563,7 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
         if (!insp) return null;
         const loc = await db.locations.get(insp.locationId);
         if (!loc) return null;
-        return {
-          asset: a,
-          inspection: insp,
-          location: loc
-        }
+        return { asset: a, inspection: insp, location: loc }
       }));
 
       const validHistory = historyData.filter(h => h !== null).sort((a, b) => b!.inspection.date - a!.inspection.date);
@@ -581,45 +608,23 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
 
   const handleConclude = async (force: boolean = false) => {
     if (!id || isConcluding) return;
-    
-    if (!isConfirmingConclude && !force) {
-      setIsConfirmingConclude(true);
-      return;
-    }
-
+    if (!isConfirmingConclude && !force) { setIsConfirmingConclude(true); return; }
     setIsConcluding(true);
     setError(null);
-    console.log("Tentando concluir vistoria ID:", id);
-    
     try {
       const assetsCount = await db.assets.where('inspectionId').equals(id).count();
-      if (assetsCount === 0) {
-        throw new Error("Não é possível concluir uma vistoria sem itens registrados.");
-      }
-
+      if (assetsCount === 0) throw new Error("Não é possível concluir uma vistoria sem itens registrados.");
       const current = await db.inspections.get(id);
-      if (!current) {
-        throw new Error(`Vistoria ${id} não encontrada no banco local.`);
-      }
+      if (!current) throw new Error(`Vistoria ${id} não encontrada no banco local.`);
 
       await db.inspections.put({
-        ...current,
-        status: 'concluida',
-        concludedBy: user?.userId,
-        concludedAt: Date.now(),
-        needsSync: 1
+        ...current, status: 'concluida', concludedBy: user?.userId, concludedAt: Date.now(), needsSync: 1
       });
-      
-      console.log("Status atualizado para 'concluida'.");
-      
       await syncInspection(id);
       await pushLocalChanges();
-      
       await new Promise(resolve => setTimeout(resolve, 400));
       setIsConfirmingConclude(false);
-      
     } catch (err: any) {
-      console.error("Erro crítico ao concluir:", err);
       setError(`Erro técnico: ${err.message || 'Falha na gravação'}`);
     } finally {
       setIsConcluding(false);
@@ -631,32 +636,18 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
       setError("Apenas o Prefeito, Responsável ou Administrador podem homologar vistorias.");
       return;
     }
-
     if (!id || isFinalizing) return;
-
-    if (!isConfirmingFinalize) {
-      setIsConfirmingFinalize(true);
-      setError(null);
-      return;
-    }
+    if (!isConfirmingFinalize) { setIsConfirmingFinalize(true); setError(null); return; }
 
     setIsFinalizing(true);
     setError(null);
-    console.log("Iniciando homologação da vistoria:", id);
-
     try {
       const current = await db.inspections.get(id);
       if (!current) throw new Error("Vistoria não encontrada.");
-
       const qrCodeDataPayload = `https://patrimonio360-75ade.web.app/vistoria/${id}`;
 
       await db.inspections.put({
-        ...current,
-        status: 'finalizada',
-        finalizedBy: user.userId,
-        finalizedAt: Date.now(),
-        qrCodeData: qrCodeDataPayload,
-        needsSync: 1
+        ...current, status: 'finalizada', finalizedBy: user.userId, finalizedAt: Date.now(), qrCodeData: qrCodeDataPayload, needsSync: 1
       });
       
       const assets = await db.assets.where('inspectionId').equals(id).toArray();
@@ -666,12 +657,10 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
       
       await syncInspection(id);
       await pushLocalChanges();
-      
       generatePDF();
       await new Promise(resolve => setTimeout(resolve, 400));
       setIsConfirmingFinalize(false);
     } catch (err: any) {
-      console.error("Erro ao finalizar vistoria:", err);
       setError(`Erro ao finalizar: ${err.message || 'Erro desconhecido'}`);
     } finally {
       setIsFinalizing(false);
@@ -679,10 +668,7 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
   };
 
   const handleReopen = async () => {
-    if (!isManager) {
-      setError("Apenas administradores podem reabrir vistorias concluídas.");
-      return;
-    }
+    if (!isManager) { setError("Apenas administradores podem reabrir vistorias concluídas."); return; }
     if (!id || isReopening) return;
 
     try {
@@ -698,33 +684,19 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
         return;
       }
 
-      if (!isConfirmingReopen) {
-        setIsConfirmingReopen(true);
-        setError(null);
-        return;
-      }
+      if (!isConfirmingReopen) { setIsConfirmingReopen(true); setError(null); return; }
 
       setIsReopening(true);
       setError(null);
-      console.log("Reabrindo e atualizando data da vistoria:", id);
-
       const now = Date.now();
       await db.inspections.put({
-        ...current,
-        status: 'em_andamento',
-        date: now,         
-        updatedAt: now,    
-        needsSync: 1       
+        ...current, status: 'em_andamento', date: now, updatedAt: now, needsSync: 1       
       });
       
       await new Promise(resolve => setTimeout(resolve, 400));
       setIsConfirmingReopen(false);
-      
-      if (typeof toast === 'function') {
-        toast("Vistoria reaberta com a data e hora atuais!", "success");
-      }
+      if (typeof toast === 'function') toast("Vistoria reaberta com a data e hora atuais!", "success");
     } catch (err: any) {
-      console.error("Erro ao reabrir vistoria:", err);
       setError(`Erro ao reabrir: ${err.message || 'Erro desconhecido'}`);
     } finally {
       setIsReopening(false);
@@ -733,12 +705,7 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
 
   const handleDeleteInspection = async () => {
     if (!id || isDeletingInspection) return;
-    
-    if (!isConfirmingDeleteInspection) {
-      setIsConfirmingDeleteInspection(true);
-      setError(null);
-      return;
-    }
+    if (!isConfirmingDeleteInspection) { setIsConfirmingDeleteInspection(true); setError(null); return; }
 
     setIsDeletingInspection(true);
     setError(null);
@@ -748,14 +715,10 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
       for (const asset of assetsToSoftDelete) {
         await db.assets.update(asset.id, { deleted: true, needsSync: 1, updatedAt: now });
       }
-
       await db.inspections.update(id, { deleted: true, needsSync: 1, updatedAt: now });
-      
-      console.log("Vistoria marcada para exclusão:", id);
       pushLocalChanges();
       onBack();
     } catch (err: any) {
-      console.error("Erro ao excluir vistoria:", err);
       setError(`Erro ao excluir: ${err.message || 'Falha no banco de dados'}`);
     } finally {
       setIsDeletingInspection(false);
@@ -768,32 +731,17 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
     setIsTransferring(true);
     try {
       let idsToTransfer: string[] = [];
-      
-      if (transferAssetId === 'batch') {
-        idsToTransfer = selectedAssetIds;
-      } else if (transferAssetId === 'all') {
-        idsToTransfer = assets?.map(a => a.id) || [];
-      } else {
-        idsToTransfer = [transferAssetId];
-      }
+      if (transferAssetId === 'batch') idsToTransfer = selectedAssetIds;
+      else if (transferAssetId === 'all') idsToTransfer = assets?.map(a => a.id) || [];
+      else idsToTransfer = [transferAssetId];
       
       if (idsToTransfer.length === 0) throw new Error("Nenhum item para transferir");
 
-      let targetInspection = await db.inspections
-        .where({ locationId: targetLocationId })
-        .filter(i => i.status === 'em_andamento')
-        .reverse()
-        .first();
+      let targetInspection = await db.inspections.where({ locationId: targetLocationId }).filter(i => i.status === 'em_andamento').reverse().first();
 
       if (!targetInspection) {
         const newId = generateId();
-        await db.inspections.add({
-          id: newId,
-          locationId: targetLocationId,
-          date: Date.now(),
-          participants: [],
-          status: 'em_andamento'
-        });
+        await db.inspections.add({ id: newId, locationId: targetLocationId, date: Date.now(), participants: [], status: 'em_andamento' });
         targetInspection = await db.inspections.get(newId);
       }
 
@@ -804,19 +752,10 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
         if (!asset) continue;
 
         const newHash = generateAssetHash(asset.name, asset.patrimonyNumber, targetLocationId);
-        
         const existingInTarget = await db.assets.where('hash').equals(newHash).first();
-        if (existingInTarget) {
-          console.warn(`Item ${asset.name} já existe no destino, pulando...`);
-          continue;
-        }
+        if (existingInTarget) continue;
 
-        await db.assets.update(assetId, {
-          inspectionId: targetInspection.id,
-          hash: newHash,
-          needsSync: 1,
-          updatedAt: Date.now()
-        });
+        await db.assets.update(assetId, { inspectionId: targetInspection.id, hash: newHash, needsSync: 1, updatedAt: Date.now() });
       }
 
       setSuccessMessage(`${idsToTransfer.length} item(ns) transferido(s) para ${allLocations?.find(l => l.id === targetLocationId)?.name}`);
@@ -824,7 +763,6 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
       setIsBatchMode(false);
       setSelectedAssetIds([]);
     } catch (err: any) {
-      console.error("Erro na transferência:", err);
       setError(err.message || "Erro ao transferir item");
     } finally {
       setIsTransferring(false);
@@ -835,11 +773,9 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
     try {
       setError(null);
       const doc = new jsPDF();
-      
       doc.setFont('helvetica', 'bold');
       doc.setFontSize(18);
       doc.text('Relatório de Vistoria Patrimonial', 14, 22);
-      
       doc.setFontSize(10);
       doc.setFont('helvetica', 'normal');
       doc.text(`Local Inspecionado: ${location?.name}`, 14, 32);
@@ -856,43 +792,29 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
       const finalDateToShow = getTimestampMs(inspection?.finalizedAt || inspection?.updatedAt || inspection?.date);
       doc.text(`Data de Emissão: ${formatDate(finalDateToShow)}`, 14, 38);
       
-      if (inspection?.concludedBy) {
-        doc.text(`Vistoriador Responsável: ${inspection.concludedBy === user?.userId ? user?.name : 'Identificado no Sistema'}`, 14, 44);
-      } else {
-        doc.text(`Vistoriador Responsável: ${user?.name}`, 14, 44);
-      }
+      if (inspection?.concludedBy) doc.text(`Vistoriador Responsável: ${inspection.concludedBy === user?.userId ? user?.name : 'Identificado no Sistema'}`, 14, 44);
+      else doc.text(`Vistoriador Responsável: ${user?.name}`, 14, 44);
       
-      if (inspection?.status === 'finalizada') {
-        doc.text(`Homologado por: ${inspection.finalizedBy === user?.userId ? user?.name : 'Autoridade Municipal'}`, 14, 50);
-      }
+      if (inspection?.status === 'finalizada') doc.text(`Homologado por: ${inspection.finalizedBy === user?.userId ? user?.name : 'Autoridade Municipal'}`, 14, 50);
 
       const totalUnidadesAbsolutas = assets?.reduce((acc, curr) => acc + (curr.quantity || 1), 0) || 0;
 
       doc.setDrawColor(226, 232, 240);
       doc.setFillColor(248, 250, 252);
       doc.roundedRect(14, 56, 182, 14, 3, 3, 'FD');
-      
       doc.setFont('helvetica', 'bold');
       doc.setFontSize(10);
       doc.setTextColor(15, 23, 42);
       doc.text(`RESUMO DO INVENTÁRIO:`, 18, 65);
-      
       doc.setFont('helvetica', 'normal');
       doc.text(`Total de Bens Catalogados: ${totalUnidadesAbsolutas} unidade(s) físicas`, 68, 65);
       doc.setTextColor(0);
-
       doc.setFontSize(9);
       doc.setTextColor(100);
       doc.text('Este documento contém um QR Code DINÂMICO. A leitura em tempo real sempre exibirá a versão mais atualizada.', 14, 76);
       doc.setTextColor(0);
 
-      const tableData = assets?.map(a => [
-        a.name,
-        a.patrimonyNumber || '-',
-        a.condition,
-        `${a.quantity || 1} u.`,
-        a.observations || '-'
-      ]);
+      const tableData = assets?.map(a => [ a.name, a.patrimonyNumber || '-', a.condition, `${a.quantity || 1} u.`, a.observations || '-' ]);
 
       autoTable(doc, {
         head: [['Item', 'Patrimônio', 'Estado', 'Qtd', 'Obs']],
@@ -903,11 +825,7 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
       });
 
       let finalY = (doc as any).lastAutoTable.finalY + 15;
-      
-      if (finalY > 220) {
-        doc.addPage();
-        finalY = 25;
-      }
+      if (finalY > 220) { doc.addPage(); finalY = 25; }
 
       doc.setFontSize(10);
       doc.setFont('helvetica', 'bold');
@@ -936,45 +854,31 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
         doc.setLineWidth(0.5);
         doc.setDrawColor(0, 0, 0);
         doc.line(110, finalY + 25, 190, finalY + 25);
-        
         doc.addImage(sectorSignature.signatureBase64, 'PNG', 125, finalY + 5, 50, 18);
-        
         doc.setFontSize(10);
         doc.setFont('helvetica', 'bold');
         doc.text(sectorSignature.responsibleName.toUpperCase(), 150, finalY + 31, { align: 'center' });
-        
         doc.setFontSize(8);
         doc.setFont('helvetica', 'normal');
         doc.text('RESPONSÁVEL PELO SETOR (ATESTADO DE CIÊNCIA)', 150, finalY + 36, { align: 'center' });
       }
 
-      try {
-        doc.save(`Vistoria_${location?.name}_${new Date().toLocaleDateString()}.pdf`);
-      } catch (saveErr) {
-        console.warn("doc.save falhou, abrindo em nova aba:", saveErr);
+      try { doc.save(`Vistoria_${location?.name}_${new Date().toLocaleDateString()}.pdf`); } 
+      catch (saveErr) {
         const blob = doc.output('blob');
         const url = URL.createObjectURL(blob);
         window.open(url, '_blank');
       }
-    } catch (err: any) {
-      console.error("Erro ao gerar PDF:", err);
-      setError(`Erro ao gerar PDF: ${err.message || 'Falha desconhecida'}`);
-    }
+    } catch (err: any) { setError(`Erro ao gerar PDF: ${err.message || 'Falha desconhecida'}`); }
   };
 
   const handlePrintQRCode = (type: 'vistoria' | 'local' = 'local') => {
     try {
-      const qrData = type === 'local' 
-        ? `https://patrimonio360-75ade.web.app/local/${location?.id}`
-        : inspection?.qrCodeData;
-
+      const qrData = type === 'local' ? `https://patrimonio360-75ade.web.app/local/${location?.id}` : inspection?.qrCodeData;
       if (!qrData) return;
 
       const printWindow = window.open('', '_blank');
-      if (!printWindow) {
-        setError("O navegador bloqueou a janela de impressão. Por favor, permita popups.");
-        return;
-      }
+      if (!printWindow) { setError("O navegador bloqueou a janela de impressão. Por favor, permita popups."); return; }
 
       const qrSvg = document.querySelector(type === 'local' ? '#qr-code-dynamic svg' : '#qr-code-container svg')?.outerHTML || '';
       
@@ -1003,17 +907,12 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
               ${type === 'local' ? '<div class="dynamic-badge">Este código não expira e será atualizado em cada nova vistoria homologada.</div>' : ''}
               <p style="font-size: 8px; color: #cbd5e1; margin-top: 20px;">ID: ${type === 'local' ? location?.id : inspection?.id}</p>
             </div>
-            <script>
-              setTimeout(() => { window.print(); window.close(); }, 500);
-            </script>
+            <script> setTimeout(() => { window.print(); window.close(); }, 500); </script>
           </body>
         </html>
       `);
       printWindow.document.close();
-    } catch (err: any) {
-      console.error("Erro ao imprimir:", err);
-      setError("Erro ao preparar a impressão do QR Code.");
-    }
+    } catch (err: any) { setError("Erro ao preparar a impressão do QR Code."); }
   };
 
   if (!inspection || !location) return null;
@@ -1024,9 +923,7 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
 
   const handleStartSubInspection = async (subLocId: string) => {
     const existing = await db.inspections.where({ locationId: subLocId }).filter(i => !i.deleted && i.status !== 'finalizada').first();
-    if (existing) {
-       onBack(); 
-    }
+    if (existing) onBack(); 
   };
 
   const handleBack = async () => {
@@ -1038,7 +935,6 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
           const now = Date.now();
           await db.inspections.update(id, { deleted: true, needsSync: 1, updatedAt: now });
           pushLocalChanges();
-          console.log("Vistoria vazia marcada para exclusão ao voltar.");
         }
       }
     }
@@ -1051,9 +947,7 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
         <div className="bg-rose-50 border border-rose-100 p-5 rounded-[1.5rem] flex items-center gap-4 text-rose-600 animate-in slide-in-from-top-4 duration-500 shadow-xl shadow-rose-500/5">
            <AlertCircle className="w-6 h-6 shrink-0" />
            <p className="text-xs font-bold uppercase tracking-widest flex-1">{error}</p>
-           <button onClick={() => setError(null)} className="p-2 hover:bg-rose-100 rounded-xl transition-colors">
-              <X className="w-5 h-5" />
-           </button>
+           <button onClick={() => setError(null)} className="p-2 hover:bg-rose-100 rounded-xl transition-colors"><X className="w-5 h-5" /></button>
         </div>
       )}
 
@@ -1066,27 +960,17 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
 
       <header className="flex flex-col md:flex-row md:items-center justify-between gap-6">
         <div className="flex flex-col gap-4">
-          <button 
-            onClick={handleBack} 
-            className="flex items-center gap-2 text-slate-400 font-bold text-[10px] uppercase tracking-widest hover:text-slate-900 transition-all group w-fit"
-          >
+          <button onClick={handleBack} className="flex items-center gap-2 text-slate-400 font-bold text-[10px] uppercase tracking-widest hover:text-slate-900 transition-all group w-fit">
             <ArrowLeft className="w-4 h-4 transition-transform group-hover:-translate-x-1" /> Voltar ao Painel
           </button>
           <div className="flex flex-col gap-1">
             <div className="flex items-center gap-3">
-              <h2 className="text-3xl lg:text-4xl font-display font-extrabold text-slate-900 tracking-tight leading-none truncate">
-                {location.name}
-              </h2>
-              <div className={cn(
-                "px-3 py-1 rounded-full text-[9px] font-black uppercase tracking-[0.2em] shadow-sm",
-                isFinalized ? "bg-emerald-100 text-emerald-700" : isConcluded ? "bg-indigo-100 text-indigo-700" : "bg-blue-100 text-blue-700"
-              )}>
+              <h2 className="text-3xl lg:text-4xl font-display font-extrabold text-slate-900 tracking-tight leading-none truncate">{location.name}</h2>
+              <div className={cn("px-3 py-1 rounded-full text-[9px] font-black uppercase tracking-[0.2em] shadow-sm", isFinalized ? "bg-emerald-100 text-emerald-700" : isConcluded ? "bg-indigo-100 text-indigo-700" : "bg-blue-100 text-blue-700")}>
                 {isFinalized ? "Homologada" : isConcluded ? "Concluída" : "Em Aberto"}
               </div>
             </div>
-            <p className="text-slate-400 text-xs font-medium uppercase tracking-widest mt-1">
-              {location.description || "Auditoria Patrimonial Municipal"}
-            </p>
+            <p className="text-slate-400 text-xs font-medium uppercase tracking-widest mt-1">{location.description || "Auditoria Patrimonial Municipal"}</p>
           </div>
         </div>
 
@@ -1095,26 +979,13 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
             <div className="flex items-center">
               {isConfirmingDeleteInspection ? (
                 <div className="flex items-center gap-2 bg-rose-50 border border-rose-100 p-1.5 rounded-2xl animate-in slide-in-from-right-4 duration-300">
-                  <button 
-                    onClick={handleDeleteInspection}
-                    disabled={isDeletingInspection}
-                    className="px-4 py-2 bg-rose-600 text-white rounded-xl shadow-lg shadow-rose-600/20 hover:bg-rose-700 transition-all font-black text-[10px] uppercase tracking-widest"
-                  >
+                  <button onClick={handleDeleteInspection} disabled={isDeletingInspection} className="px-4 py-2 bg-rose-600 text-white rounded-xl shadow-lg shadow-rose-600/20 hover:bg-rose-700 transition-all font-black text-[10px] uppercase tracking-widest">
                     {isDeletingInspection ? "..." : "EXCLUIR"}
                   </button>
-                  <button 
-                    onClick={() => setIsConfirmingDeleteInspection(false)}
-                    className="p-2 text-slate-400 hover:text-slate-900 rounded-xl transition-all"
-                  >
-                    <X className="w-5 h-5" />
-                  </button>
+                  <button onClick={() => setIsConfirmingDeleteInspection(false)} className="p-2 text-slate-400 hover:text-slate-900 rounded-xl transition-all"><X className="w-5 h-5" /></button>
                 </div>
               ) : (
-                <button 
-                  onClick={() => setIsConfirmingDeleteInspection(true)}
-                  className="p-3 text-slate-400 hover:text-rose-500 hover:bg-rose-50 rounded-2xl transition-all"
-                  title="Excluir Auditoria"
-                >
+                <button onClick={() => setIsConfirmingDeleteInspection(true)} className="p-3 text-slate-400 hover:text-rose-500 hover:bg-rose-50 rounded-2xl transition-all" title="Excluir Auditoria">
                   <Trash2 className="w-6 h-6" />
                 </button>
               )}
@@ -1154,10 +1025,7 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
              </div>
              <div className="flex flex-col gap-1">
                 <span className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Status</span>
-                <span className={cn(
-                  "font-display text-2xl font-black tracking-tight uppercase",
-                  isFinalized ? "text-emerald-400" : isConcluded ? "text-indigo-400" : "text-blue-400"
-                )}>
+                <span className={cn("font-display text-2xl font-black tracking-tight uppercase", isFinalized ? "text-emerald-400" : isConcluded ? "text-indigo-400" : "text-blue-400")}>
                   {hasSubLocations ? 'GERAL' : inspection.status.split('_')[0]}
                 </span>
              </div>
@@ -1178,16 +1046,12 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
               </p>
               {sectorSignature && (
                 <div className="mt-4 p-4 bg-slate-50 rounded-2xl border border-slate-100 flex items-center gap-4">
-                  <div className="w-10 h-10 bg-white rounded-xl shadow-sm flex items-center justify-center text-indigo-600 border border-slate-100">
-                    <Signature className="w-5 h-5" />
-                  </div>
+                  <div className="w-10 h-10 bg-white rounded-xl shadow-sm flex items-center justify-center text-indigo-600 border border-slate-100"><Signature className="w-5 h-5" /></div>
                   <div className="flex flex-col">
                     <span className="text-[10px] font-black uppercase text-slate-400 tracking-widest leading-none mb-1">Responsável Setorial</span>
                     <span className="text-sm font-bold text-slate-700">{sectorSignature.responsibleName}</span>
                   </div>
-                  <div className="ml-auto">
-                    <img src={sectorSignature.signatureBase64} alt="Assinatura" className="h-10 opacity-70 grayscale hover:grayscale-0 transition-all" />
-                  </div>
+                  <div className="ml-auto"><img src={sectorSignature.signatureBase64} alt="Assinatura" className="h-10 opacity-70 grayscale hover:grayscale-0 transition-all" /></div>
                 </div>
               )}
            </div>
@@ -1209,14 +1073,8 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
            </div>
            <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-4">
               {subLocations?.map(sl => (
-                <button 
-                  key={sl.id}
-                  onClick={onBack} 
-                  className="bg-white border border-slate-100 p-6 rounded-3xl hover:border-indigo-300 hover:shadow-xl hover:shadow-indigo-600/5 transition-all text-left flex flex-col gap-3 group"
-                >
-                   <div className="w-10 h-10 bg-slate-50 rounded-xl flex items-center justify-center text-slate-400 group-hover:bg-indigo-600 group-hover:text-white transition-all">
-                      <Home className="w-5 h-5" />
-                   </div>
+                <button key={sl.id} onClick={onBack} className="bg-white border border-slate-100 p-6 rounded-3xl hover:border-indigo-300 hover:shadow-xl hover:shadow-indigo-600/5 transition-all text-left flex flex-col gap-3 group">
+                   <div className="w-10 h-10 bg-slate-50 rounded-xl flex items-center justify-center text-slate-400 group-hover:bg-indigo-600 group-hover:text-white transition-all"><Home className="w-5 h-5" /></div>
                    <div className="flex flex-col">
                       <span className="text-xs font-black text-slate-900 group-hover:text-indigo-600 transition-colors uppercase truncate">{sl.name}</span>
                       <span className="text-[9px] font-bold text-slate-400 uppercase tracking-widest mt-1">Ver Itens</span>
@@ -1224,11 +1082,8 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
                 </button>
               ))}
            </div>
-           
            <div className="bg-amber-50 border border-amber-100 p-6 rounded-[2rem] flex flex-col md:flex-row items-center gap-6 shadow-xl shadow-amber-500/5">
-              <div className="w-14 h-14 bg-white rounded-2xl flex items-center justify-center shadow-lg text-amber-500 shrink-0">
-                 <AlertCircle className="w-7 h-7" />
-              </div>
+              <div className="w-14 h-14 bg-white rounded-2xl flex items-center justify-center shadow-lg text-amber-500 shrink-0"><AlertCircle className="w-7 h-7" /></div>
               <div className="flex flex-col gap-1 text-center md:text-left">
                 <span className="text-sm font-black text-amber-900 uppercase tracking-tight">Bloqueio de Inclusão Direta</span>
                 <p className="text-[11px] font-medium text-amber-600 leading-relaxed uppercase tracking-widest">
@@ -1252,9 +1107,7 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
             <div className="flex flex-col gap-8">
               <div className="flex flex-col gap-3">
                  <div className="flex items-center gap-3">
-                    <div className="w-12 h-12 bg-emerald-600 rounded-2xl flex items-center justify-center text-white shadow-xl shadow-emerald-500/20">
-                       <ShieldCheck className="w-7 h-7" />
-                    </div>
+                    <div className="w-12 h-12 bg-emerald-600 rounded-2xl flex items-center justify-center text-white shadow-xl shadow-emerald-500/20"><ShieldCheck className="w-7 h-7" /></div>
                     <h3 className="font-display font-extrabold text-3xl text-slate-900 tracking-tight leading-none uppercase">Selo de Transparência</h3>
                  </div>
                  <p className="text-lg text-slate-500 leading-relaxed font-medium max-w-xl">
@@ -1262,49 +1115,23 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
                  </p>
                  {sectorSignature && (
                     <div className="mt-2 p-4 bg-emerald-50/50 rounded-2xl border border-emerald-100 flex items-center gap-4">
-                      <div className="w-10 h-10 bg-white rounded-xl shadow-sm flex items-center justify-center text-emerald-600">
-                        <Signature className="w-5 h-5" />
-                      </div>
+                      <div className="w-10 h-10 bg-white rounded-xl shadow-sm flex items-center justify-center text-emerald-600"><Signature className="w-5 h-5" /></div>
                       <div className="flex flex-col">
                         <span className="text-[10px] font-black uppercase text-emerald-700/50 tracking-widest leading-none mb-1">Atestado por</span>
                         <span className="text-sm font-bold text-slate-700">{sectorSignature.responsibleName}</span>
                       </div>
-                      <div className="ml-auto bg-white/50 p-1 rounded-lg">
-                        <img src={sectorSignature.signatureBase64} alt="Assinatura" className="h-8" />
-                      </div>
+                      <div className="ml-auto bg-white/50 p-1 rounded-lg"><img src={sectorSignature.signatureBase64} alt="Assinatura" className="h-8" /></div>
                     </div>
                  )}
               </div>
               
               <div className="flex flex-wrap gap-4">
-                 <div id="qr-code-container" className="hidden">
-                   <QRCodeSVG value={inspection.qrCodeData || ''} size={512} level="H" />
-                 </div>
-                 <div id="qr-code-dynamic" className="hidden">
-                   <QRCodeSVG value={`https://patrimonio360-75ade.web.app/local/${location.id}`} size={512} level="H" />
-                 </div>
-
-                 <Button variant="accent" size="sm" onClick={generatePDF} icon={Save} className="px-8 md:px-10 h-16 text-[10px] uppercase tracking-widest rounded-2xl">
-                   Baixar Dossiê (PDF)
-                 </Button>
-                 
+                 <div id="qr-code-container" className="hidden"><QRCodeSVG value={inspection.qrCodeData || ''} size={512} level="H" /></div>
+                 <div id="qr-code-dynamic" className="hidden"><QRCodeSVG value={`https://patrimonio360-75ade.web.app/local/${location.id}`} size={512} level="H" /></div>
+                 <Button variant="accent" size="sm" onClick={generatePDF} icon={Save} className="px-8 md:px-10 h-16 text-[10px] uppercase tracking-widest rounded-2xl">Baixar Dossiê (PDF)</Button>
                  <div className="flex flex-1 gap-2">
-                    <Button 
-                      variant="outline" 
-                      onClick={() => handlePrintQRCode('local')}
-                      icon={ImageIcon}
-                      className="flex-1 h-16 border-indigo-100 text-indigo-600 font-black text-[10px] uppercase tracking-widest hover:bg-indigo-50 rounded-2xl bg-white"
-                    >
-                      QR Permanente
-                    </Button>
-                    <Button 
-                      variant="outline" 
-                      onClick={() => handlePrintQRCode('vistoria')}
-                      icon={Database}
-                      className="flex-1 h-16 border-slate-200 text-slate-500 font-black text-[10px] uppercase tracking-widest hover:bg-slate-50 rounded-2xl bg-white"
-                    >
-                      Etiqueta Data
-                    </Button>
+                    <Button variant="outline" onClick={() => handlePrintQRCode('local')} icon={ImageIcon} className="flex-1 h-16 border-indigo-100 text-indigo-600 font-black text-[10px] uppercase tracking-widest hover:bg-indigo-50 rounded-2xl bg-white">QR Permanente</Button>
+                    <Button variant="outline" onClick={() => handlePrintQRCode('vistoria')} icon={Database} className="flex-1 h-16 border-slate-200 text-slate-500 font-black text-[10px] uppercase tracking-widest hover:bg-slate-50 rounded-2xl bg-white">Etiqueta Data</Button>
                  </div>
               </div>
             </div>
@@ -1323,135 +1150,121 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
           <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3">
             <div className="relative group">
               <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400 group-focus-within:text-slate-900 transition-colors" />
-              <input 
-                type="text" 
-                placeholder="Buscar item ou patrimônio..." 
-                value={searchTermAssets}
-                onChange={e => setSearchTermAssets(e.target.value)}
-                className="pl-11 pr-6 py-2.5 bg-white border border-slate-100 rounded-xl text-sm font-bold text-slate-900 shadow-sm focus:ring-2 focus:ring-slate-900 focus:outline-none transition-all w-full sm:w-64"
-              />
+              <input type="text" placeholder="Buscar item ou patrimônio..." value={searchTermAssets} onChange={e => setSearchTermAssets(e.target.value)} className="pl-11 pr-6 py-2.5 bg-white border border-slate-100 rounded-xl text-sm font-bold text-slate-900 shadow-sm focus:ring-2 focus:ring-slate-900 focus:outline-none transition-all w-full sm:w-64" />
             </div>
             {!isLocked && !hasSubLocations && (
                 <div className="flex items-center gap-2">
                 {isCommittee && (
                   <>
-                    <Button 
-                      variant="outline" 
-                      size="sm" 
-                      icon={Zap}
-                      onClick={() => setTransferAssetId('all')}
-                      className="rounded-xl px-4 h-11 border-amber-100 text-amber-600 bg-amber-50 hover:bg-amber-100 transition-all font-black text-[10px] uppercase tracking-widest"
-                    >
-                      Mover Tudo
-                    </Button>
-                    <Button 
-                      variant="outline" 
-                      size="sm" 
-                      icon={isBatchMode ? X : Copy}
-                      onClick={() => {
-                        setIsBatchMode(!isBatchMode);
-                        setSelectedAssetIds([]);
-                      }}
-                      className={cn(
-                        "rounded-xl px-4 h-11 transition-all",
-                        isBatchMode ? "border-rose-200 text-rose-500 bg-rose-50" : "border-slate-100 text-slate-400"
-                      )}
-                    >
+                    <Button variant="outline" size="sm" icon={Zap} onClick={() => setTransferAssetId('all')} className="rounded-xl px-4 h-11 border-amber-100 text-amber-600 bg-amber-50 hover:bg-amber-100 transition-all font-black text-[10px] uppercase tracking-widest">Mover Tudo</Button>
+                    <Button variant="outline" size="sm" icon={isBatchMode ? X : Copy} onClick={() => { setIsBatchMode(!isBatchMode); setSelectedAssetIds([]); }} className={cn("rounded-xl px-4 h-11 transition-all", isBatchMode ? "border-rose-200 text-rose-500 bg-rose-50" : "border-slate-100 text-slate-400")}>
                       {isBatchMode ? 'Mover Vários' : 'Selecionar'}
                     </Button>
                   </>
                 )}
-                
-                <Button variant="accent" size="sm" icon={Plus} onClick={() => setIsAdding(true)} className="rounded-xl px-8 h-11 shadow-xl shadow-blue-600/10">
-                  ADICIONAR ITEM
-                </Button>
+                <Button variant="accent" size="sm" icon={Plus} onClick={() => setIsAdding(true)} className="rounded-xl px-8 h-11 shadow-xl shadow-blue-600/10">ADICIONAR ITEM</Button>
               </div>
             )}
           </div>
         </div>
 
+        {/* 🚀 GAVETA DE ITENS RECÉM-EXCLUÍDOS (MOVIDA PARA O TOPO) 🚀 */}
+        {deletedAssets && deletedAssets.length > 0 && (
+          <div className="mb-2 p-6 bg-rose-50 border border-rose-200 border-dashed rounded-[2rem] animate-in fade-in slide-in-from-top-4 duration-500 shadow-sm">
+            <div className="flex items-center justify-between mb-4">
+               <div className="flex items-center gap-3">
+                 <div className="w-10 h-10 bg-white rounded-xl flex items-center justify-center shadow-sm border border-rose-100">
+                   <Trash2 className="w-5 h-5 text-rose-500" />
+                 </div>
+                 <div className="flex flex-col">
+                   <span className="text-xs font-black text-rose-700 uppercase tracking-widest">Lixeira da Vistoria</span>
+                   <span className="text-[9px] font-bold text-rose-500 uppercase tracking-widest">Itens excluídos nesta sessão.</span>
+                 </div>
+               </div>
+               
+               {/* BOTÃO ESVAZIAR LIXEIRA */}
+               <button
+                 onClick={handleEmptyTrash}
+                 className="px-4 py-2 bg-rose-100 hover:bg-rose-600 text-rose-700 hover:text-white text-[9px] font-black uppercase tracking-widest rounded-xl transition-all shadow-sm flex items-center gap-2"
+                 title="Apagar itens permanentemente"
+               >
+                 <Trash2 className="w-4 h-4" />
+                 Esvaziar Lixeira
+               </button>
+             
+            </div>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              {deletedAssets.map(deletedAsset => (
+                <div key={deletedAsset.id} className="bg-white p-4 rounded-xl border border-rose-100 flex items-center justify-between gap-4 shadow-sm opacity-90 hover:opacity-100 transition-opacity">
+                  <div className="flex flex-col min-w-0">
+                    <span className="font-bold text-sm text-slate-800 truncate">{deletedAsset.name}</span>
+                    <span className="text-[10px] font-mono text-slate-400 mt-0.5">Patr: {deletedAsset.patrimonyNumber || 'S/N'}</span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      await db.assets.update(deletedAsset.id, { isTrashed: false, deleted: false, needsSync: 1, updatedAt: Date.now() });
+                      try {
+                        if ((db as any).assetEvents) {
+                          await (db as any).assetEvents.put({ id: crypto.randomUUID(), assetId: deletedAsset.id, type: 'criacao', description: 'Item recuperado da lixeira pelo vistoriador', userId: user?.userId, userName: user?.name, date: Date.now() });
+                        }
+                      } catch(e) {}
+                      pushLocalChanges();
+                      toast("Item recuperado com sucesso!", "success");
+                    }}
+                    className="px-4 py-2 bg-rose-100 hover:bg-rose-500 text-rose-700 hover:text-white text-[9px] font-black uppercase tracking-widest rounded-lg transition-all shrink-0 cursor-pointer shadow-sm"
+                  >
+                    Restaurar
+                  </button>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
         {isBatchMode && selectedAssetIds.length > 0 && (
           <div className="bg-amber-600 p-6 rounded-[2rem] flex items-center justify-between shadow-xl shadow-amber-600/20 animate-in slide-in-from-top-4">
             <div className="flex items-center gap-4 text-white">
-               <div className="w-12 h-12 bg-white/20 rounded-2xl flex items-center justify-center">
-                  <Zap className="w-6 h-6" />
-               </div>
+               <div className="w-12 h-12 bg-white/20 rounded-2xl flex items-center justify-center"><Zap className="w-6 h-6" /></div>
                <div className="flex flex-col">
                   <span className="text-lg font-black tracking-tight leading-none">Transferência em Massa</span>
                   <span className="text-[10px] font-bold opacity-80 uppercase tracking-widest mt-1">{selectedAssetIds.length} Itens Selecionados</span>
                </div>
             </div>
-            <Button 
-              variant="accent" 
-              className="bg-white text-amber-600 hover:bg-slate-50 font-black uppercase text-[10px] px-8 h-12 rounded-xl"
-              onClick={() => setTransferAssetId('batch')}
-            >
-              Escolher Destino
-            </Button>
+            <Button variant="accent" className="bg-white text-amber-600 hover:bg-slate-50 font-black uppercase text-[10px] px-8 h-12 rounded-xl" onClick={() => setTransferAssetId('batch')}>Escolher Destino</Button>
           </div>
         )}
 
         {isAdding && (
           <div className="fixed inset-0 z-[200] flex flex-col bg-slate-900/40 backdrop-blur-sm md:p-6 md:justify-center md:items-center animate-in fade-in duration-300">
             <Card className="w-full h-full md:h-auto md:max-h-[90vh] md:max-w-4xl flex flex-col overflow-hidden rounded-none md:rounded-[2.5rem] border-none shadow-[0_40px_100px_-20px_rgba(0,0,0,0.3)] relative z-10 p-0 bg-white">
-               
-               {/* 1. Header Fixo */}
+               {/* Header Fixo */}
                <div className="flex items-center justify-between p-8 bg-slate-900 text-white shadow-xl z-20 shrink-0">
                   <div className="flex items-center gap-5">
-                    <div className="w-12 h-12 bg-white/10 rounded-2xl flex items-center justify-center border border-white/20">
-                      <Plus className="w-6 h-6 text-white" />
-                    </div>
+                    <div className="w-12 h-12 bg-white/10 rounded-2xl flex items-center justify-center border border-white/20"><Plus className="w-6 h-6 text-white" /></div>
                     <div className="flex flex-col">
-                       <h3 className="font-display font-bold text-2xl uppercase tracking-tight text-white leading-none">
-                        {editingAssetId ? 'Editar Detalhes' : 'Novo Registro'}
-                       </h3>
-                       <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mt-2">
-                        Inventário Digital • Manoel Viana
-                       </span>
+                       <h3 className="font-display font-bold text-2xl uppercase tracking-tight text-white leading-none">{editingAssetId ? 'Editar Detalhes' : 'Novo Registro'}</h3>
+                       <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mt-2">Inventário Digital • Manoel Viana</span>
                     </div>
                   </div>
                   <div className="flex items-center gap-3">
-                     <button type="button" onClick={() => { setIsAdding(false); setEditingAssetId(null); setDuplicateWarning(null); }} className="p-3 rounded-2xl bg-white/5 text-slate-400 hover:text-white hover:bg-white/10 transition-all border border-white/10">
-                       <X className="w-6 h-6" />
-                     </button>
+                     <button type="button" onClick={() => { setIsAdding(false); setEditingAssetId(null); setDuplicateWarning(null); }} className="p-3 rounded-2xl bg-white/5 text-slate-400 hover:text-white hover:bg-white/10 transition-all border border-white/10"><X className="w-6 h-6" /></button>
                   </div>
                </div>
                
-               {/* 2. Área do Formulário */}
+               {/* Área do Formulário */}
                <div className="flex-1 overflow-y-auto custom-scrollbar p-8 lg:p-12 flex flex-col gap-10 bg-white pb-32">
-                 
                  <div className="flex flex-col gap-4">
                     <div className="flex flex-col">
                       <label className="text-[10px] font-bold text-slate-900 uppercase tracking-widest ml-1">Descrição do Patrimônio</label>
                       <span className="text-slate-400 text-[9px] ml-1 mb-2 font-medium">O que é este item? Ex: Cadeira giratória preta</span>
                     </div>
-                   <Input 
-                     ref={nameRef}
-                     placeholder="Ex: Mesa de Escritório, Cadeira de Rodas..." 
-                     value={newItem.name}
-                     onChange={e => {
-                       setNewItem({...newItem, name: e.target.value});
-                       if (duplicateWarning) { setDuplicateWarning(null); setTransferCandidate(null); }
-                     }}
-                     onKeyDown={e => handleKeyDown(e, 0)}
-                     error={duplicateWarning || undefined}
-                     autoFocus
-                     className="text-xl h-16 px-6"
-                   />
+                   <Input ref={nameRef} placeholder="Ex: Mesa de Escritório, Cadeira de Rodas..." value={newItem.name} onChange={e => { setNewItem({...newItem, name: e.target.value}); if (duplicateWarning) { setDuplicateWarning(null); setTransferCandidate(null); } }} onKeyDown={e => handleKeyDown(e, 0)} error={duplicateWarning || undefined} autoFocus className="text-xl h-16 px-6" />
                    {duplicateWarning && (
                      <div className="flex flex-col gap-4 p-6 bg-rose-50 border border-rose-100 rounded-[1.5rem] animate-in fade-in slide-in-from-top-2">
-                       <div className="flex items-center gap-3 text-rose-600 font-bold text-sm">
-                          <AlertCircle className="w-6 h-6 shrink-0"/> 
-                          <span className="leading-tight">{duplicateWarning}</span>
-                       </div>
+                       <div className="flex items-center gap-3 text-rose-600 font-bold text-sm"><AlertCircle className="w-6 h-6 shrink-0"/> <span className="leading-tight">{duplicateWarning}</span></div>
                        {transferCandidate && (
-                         <Button 
-                           variant="accent" 
-                           onClick={handleAddItem}
-                           className="bg-rose-600 hover:bg-rose-700 h-14 rounded-xl text-[10px] font-black uppercase tracking-widest"
-                         >
-                            Confirmar Transferência para este Local
-                         </Button>
+                         <Button variant="accent" onClick={handleAddItem} className="bg-rose-600 hover:bg-rose-700 h-14 rounded-xl text-[10px] font-black uppercase tracking-widest">Confirmar Transferência para este Local</Button>
                        )}
                      </div>
                    )}
@@ -1463,14 +1276,7 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
                        <label className="text-[10px] font-bold text-slate-900 uppercase tracking-widest ml-1">Etiq. Patrimônio</label>
                        <span className="text-slate-400 text-[9px] ml-1 mb-2 font-medium">Número da plaqueta de tombo (se houver)</span>
                       </div>
-                      <Input 
-                        ref={patrimonyRef}
-                        placeholder="Nº de Registro" 
-                        value={newItem.patrimonyNumber}
-                        onChange={e => setNewItem({...newItem, patrimonyNumber: e.target.value})}
-                        onKeyDown={e => handleKeyDown(e, 1)}
-                        className="text-lg h-16 px-6 font-mono tracking-widest"
-                      />
+                      <Input ref={patrimonyRef} placeholder="Nº de Registro" value={newItem.patrimonyNumber} onChange={e => setNewItem({...newItem, patrimonyNumber: e.target.value})} onKeyDown={e => handleKeyDown(e, 1)} className="text-lg h-16 px-6 font-mono tracking-widest" />
                     </div>
 
                     <div className="flex flex-col gap-4">
@@ -1478,19 +1284,7 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
                        <label className="text-[10px] font-bold text-slate-900 uppercase tracking-widest ml-1">Estado Físico</label>
                        <span className="text-slate-400 text-[9px] ml-1 mb-2 font-medium">Qual a condição de uso atual do bem?</span>
                       </div>
-                      <Select 
-                        ref={conditionRef}
-                        value={newItem.condition}
-                        onChange={e => setNewItem({...newItem, condition: e.target.value as any})}
-                        onKeyDown={e => handleKeyDown(e, 2)}
-                        className="h-16 px-6 text-sm"
-                        options={[
-                          { value: 'bom', label: 'Bom Estado' },
-                          { value: 'regular', label: 'Regular' },
-                          { value: 'ruim', label: 'Ruim (Requer Manutenção)' },
-                          { value: 'inservivel', label: 'Inservível (Descarte)' }
-                        ]}
-                      />
+                      <Select ref={conditionRef} value={newItem.condition} onChange={e => setNewItem({...newItem, condition: e.target.value as any})} onKeyDown={e => handleKeyDown(e, 2)} className="h-16 px-6 text-sm" options={[{ value: 'bom', label: 'Bom Estado' }, { value: 'regular', label: 'Regular' }, { value: 'ruim', label: 'Ruim (Requer Manutenção)' }, { value: 'inservivel', label: 'Inservível (Descarte)' }]} />
                     </div>
 
                     <div className="flex flex-col gap-4">
@@ -1498,15 +1292,7 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
                        <label className="text-[10px] font-bold text-slate-900 uppercase tracking-widest ml-1">Quantidade</label>
                        <span className="text-slate-400 text-[9px] ml-1 mb-2 font-medium">Quantos itens idênticos no local?</span>
                       </div>
-                      <Input 
-                        ref={quantityRef}
-                        type="number"
-                        value={newItem.quantity?.toString()}
-                        onChange={e => setNewItem({...newItem, quantity: Math.max(1, parseInt(e.target.value) || 1)})}
-                        onKeyDown={e => handleKeyDown(e, 3)}
-                        min={1}
-                        className="text-center font-bold text-lg h-16 shadow-sm"
-                      />
+                      <Input ref={quantityRef} type="number" value={newItem.quantity?.toString()} onChange={e => setNewItem({...newItem, quantity: Math.max(1, parseInt(e.target.value) || 1)})} onKeyDown={e => handleKeyDown(e, 3)} min={1} className="text-center font-bold text-lg h-16 shadow-sm" />
                     </div>
                  </div>
 
@@ -1514,108 +1300,46 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
                     <div className="flex flex-col">
                         <div className="flex items-center justify-between pb-1 pr-1 w-full">
                           <label className="text-[10px] font-bold text-slate-900 uppercase tracking-widest ml-1">Observações Técnicas</label>
-                          <button
-                            type="button"
-                            onClick={handleVoiceDictation}
-                            className={cn(
-                              "flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[9px] font-black uppercase tracking-widest border transition-all cursor-pointer",
-                              isListening 
-                                ? "bg-rose-500 border-rose-500 text-white animate-pulse" 
-                                : "bg-slate-50 hover:bg-slate-100 border-slate-200 text-slate-600"
-                            )}
-                            title="Digitar por voz (API Web Speech)"
-                          >
-                            <Mic className={cn("w-3.5 h-3.5", isListening && "text-white animate-bounce")} />
-                            {isListening ? "Ouvindo..." : "Ditado por Voz"}
+                          <button type="button" onClick={handleVoiceDictation} className={cn("flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[9px] font-black uppercase tracking-widest border transition-all cursor-pointer", isListening ? "bg-rose-500 border-rose-500 text-white animate-pulse" : "bg-slate-50 hover:bg-slate-100 border-slate-200 text-slate-600")} title="Digitar por voz (API Web Speech)">
+                            <Mic className={cn("w-3.5 h-3.5", isListening && "text-white animate-bounce")} />{isListening ? "Ouvindo..." : "Ditado por Voz"}
                           </button>
                         </div>
                         <span className="text-slate-400 text-[9px] ml-1 mb-2 font-medium">Anote avarias, faltas de peças ou necessidade de descarte.</span>
                      </div>
-                    <Textarea 
-                      ref={obsRef}
-                      placeholder="Identificou avarias ou detalhes específicos? Descreva aqui..." 
-                      value={newItem.observations}
-                      onChange={e => setNewItem({...newItem, observations: e.target.value})}
-                      onKeyDown={e => handleKeyDown(e, 4)}
-                      className="text-base p-6 min-h-[160px] resize-none"
-                    />
+                    <Textarea ref={obsRef} placeholder="Identificou avarias ou detalhes específicos? Descreva aqui..." value={newItem.observations} onChange={e => setNewItem({...newItem, observations: e.target.value})} onKeyDown={e => handleKeyDown(e, 4)} className="text-base p-6 min-h-[160px] resize-none" />
                  </div>
 
                  <div className="flex flex-col gap-6">
                     <input type="file" hidden ref={fileInputRef} accept="image/*" multiple onChange={handlePhotoCapture} />
                     <div className="flex items-center justify-between">
                        <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Evidências Fotográficas ({newItem.photos.length}/4)</label>
-                       <button 
-                        onClick={() => fileInputRef.current?.click()}
-                        className="flex items-center gap-2 text-[10px] font-black text-indigo-600 uppercase tracking-widest hover:text-indigo-700 transition-colors"
-                       >
-                          <Camera className="w-5 h-5" /> Adicionar Foto
-                       </button>
+                       <button onClick={() => fileInputRef.current?.click()} className="flex items-center gap-2 text-[10px] font-black text-indigo-600 uppercase tracking-widest hover:text-indigo-700 transition-colors"><Camera className="w-5 h-5" /> Adicionar Foto</button>
                     </div>
                     {newItem.photos.length > 0 ? (
                       <div className="flex flex-wrap gap-6">
                         {newItem.photos.map((photo, index) => (
                           <div key={index} className="relative w-32 h-32 rounded-[1.5rem] overflow-hidden border-2 border-slate-100 shadow-sm group cursor-pointer" onClick={() => setPreviewPhoto(photo)}>
                              <img src={photo} alt="" className="w-full h-full object-cover hover:opacity-80 transition-all" />
-                             <button 
-                                onClick={(e) => { e.stopPropagation(); removePhoto(index); }}
-                                className="absolute top-2 right-2 bg-rose-600 text-white p-2 rounded-xl shadow-lg opacity-0 group-hover:opacity-100 transition-all transform translate-y-2 group-hover:translate-y-0"
-                              >
-                                <Trash2 className="w-4 h-4" />
-                             </button>
+                             <button onClick={(e) => { e.stopPropagation(); removePhoto(index); }} className="absolute top-2 right-2 bg-rose-600 text-white p-2 rounded-xl shadow-lg opacity-0 group-hover:opacity-100 transition-all transform translate-y-2 group-hover:translate-y-0"><Trash2 className="w-4 h-4" /></button>
                           </div>
                         ))}
                       </div>
                     ) : (
-                      <button 
-                        onClick={() => fileInputRef.current?.click()}
-                        className="w-full py-12 border-2 border-dashed border-slate-100 rounded-[2rem] flex flex-col items-center gap-3 text-slate-400 hover:border-indigo-200 hover:text-indigo-400 transition-all group"
-                      >
+                      <button onClick={() => fileInputRef.current?.click()} className="w-full py-12 border-2 border-dashed border-slate-100 rounded-[2rem] flex flex-col items-center gap-3 text-slate-400 hover:border-indigo-200 hover:text-indigo-400 transition-all group">
                          <Camera className="w-10 h-10 transition-transform group-hover:scale-110" />
                          <span className="text-[10px] font-black uppercase tracking-widest">Toque para capturar imagem</span>
                       </button>
                     )}
                  </div>
 
-                 {/* 🚀 LINHA DO TEMPO APARECE AQUI NA EDIÇÃO */}
-                 {editingAssetId && (
-                   <div className="mt-8 border-t border-slate-100 pt-8">
-                     <AssetTimeline assetId={editingAssetId} />
-                   </div>
-                 )}
+                 {editingAssetId && (<div className="mt-8 border-t border-slate-100 pt-8"><AssetTimeline assetId={editingAssetId} /></div>)}
                </div>
 
                {/* Footer Fixo */}
                <div className="absolute bottom-0 inset-x-0 p-8 pt-4 bg-white border-t border-slate-100 flex items-center gap-4 z-30">
-                  <Button 
-                    variant="secondary" 
-                    onClick={() => { setIsAdding(false); setEditingAssetId(null); setDuplicateWarning(null); }}
-                    className="flex-1 h-16 rounded-2xl text-[10px] uppercase font-black tracking-widest"
-                  >
-                    Cancelar
-                  </Button>
-                  
-                  <Button 
-                    ref={addButtonRef}
-                    variant={editingAssetId ? "accent" : "outline"}
-                    onClick={handleAddItem}
-                    onKeyDown={e => handleKeyDown(e, 5)}
-                    disabled={!newItem.name}
-                    className="flex-1 h-16 rounded-2xl text-[10px] uppercase font-black tracking-widest border-slate-200"
-                  >
-                    {editingAssetId ? 'Salvar Alterações' : 'Salvar e Fechar'}
-                  </Button>
-
-                  {!editingAssetId && (
-                    <Button 
-                      variant="accent" 
-                      onClick={handleSaveAndContinue}
-                      disabled={!newItem.name}
-                      className="flex-1 h-16 rounded-2xl text-[10px] uppercase font-black tracking-widest shadow-xl shadow-indigo-500/20"
-                    >
-                      <Plus className="w-4 h-4 mr-2" /> Salvar e Novo
-                    </Button>
-                  )}
+                  <Button variant="secondary" onClick={() => { setIsAdding(false); setEditingAssetId(null); setDuplicateWarning(null); }} className="flex-1 h-16 rounded-2xl text-[10px] uppercase font-black tracking-widest">Cancelar</Button>
+                  <Button ref={addButtonRef} variant={editingAssetId ? "accent" : "outline"} onClick={handleAddItem} onKeyDown={e => handleKeyDown(e, 5)} disabled={!newItem.name} className="flex-1 h-16 rounded-2xl text-[10px] uppercase font-black tracking-widest border-slate-200">{editingAssetId ? 'Salvar Alterações' : 'Salvar e Fechar'}</Button>
+                  {!editingAssetId && (<Button variant="accent" onClick={handleSaveAndContinue} disabled={!newItem.name} className="flex-1 h-16 rounded-2xl text-[10px] uppercase font-black tracking-widest shadow-xl shadow-indigo-500/20"><Plus className="w-4 h-4 mr-2" /> Salvar e Novo</Button>)}
                </div>
             </Card>
           </div>
@@ -1624,117 +1348,40 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
          {/* Barra de Filtro Semafórico Visual - Zero Digitação */}
          <div className="flex flex-wrap items-center justify-between gap-5 bg-white border border-slate-100 p-5 rounded-[2rem] px-8 select-none shadow-sm mb-4">
            <div className="flex items-center gap-3">
-             <div className="w-10 h-10 rounded-[1.25rem] bg-indigo-50 border border-indigo-100/40 flex items-center justify-center text-indigo-500">
-               <Filter className="w-5 h-5" />
-             </div>
+             <div className="w-10 h-10 rounded-[1.25rem] bg-indigo-50 border border-indigo-100/40 flex items-center justify-center text-indigo-500"><Filter className="w-5 h-5" /></div>
              <div className="flex flex-col">
                <span className="text-[10px] font-black text-slate-800 uppercase tracking-widest leading-none">Filtro Rápido Estado</span>
                <span className="text-slate-400 text-[8px] font-bold uppercase tracking-widest mt-1">Conformidade do Acervo</span>
              </div>
            </div>
             <div className="flex flex-wrap gap-2">
-             <button
-               type="button"
-               onClick={() => setConditionFilter('all')}
-               className={cn(
-                 "px-5 py-3 rounded-2xl text-[10px] font-black uppercase tracking-widest border transition-all cursor-pointer",
-                 conditionFilter === 'all'
-                   ? "bg-slate-900 border-slate-900 text-white shadow-xl shadow-slate-900/15"
-                   : "bg-slate-50 border-slate-200 hover:bg-slate-100 text-slate-600"
-               )}
-             >
-               Todos ({allVisibleAssets.reduce((acc, curr) => acc + (Number(curr.quantity) || 1), 0)})
-             </button>
-             <button
-               type="button"
-               onClick={() => setConditionFilter('bom')}
-               className={cn(
-                 "px-5 py-3 rounded-2xl text-[10px] font-black uppercase tracking-widest border flex items-center gap-2.5 transition-all cursor-pointer",
-                 conditionFilter === 'bom'
-                   ? "bg-emerald-600 border-emerald-600 text-white shadow-xl"
-                   : "bg-emerald-50/50 border-emerald-100 hover:bg-emerald-50 text-emerald-600"
-               )}
-             >
-               <span className={cn("w-2 h-2 rounded-full", conditionFilter === 'bom' ? "bg-white" : "bg-emerald-500")} />
-               Bons ({allVisibleAssets.filter(a => a.condition === 'bom' || a.condition === 'novo').reduce((acc, curr) => acc + (Number(curr.quantity) || 1), 0)})
-             </button>
-             <button
-               type="button"
-               onClick={() => setConditionFilter('regular')}
-               className={cn(
-                 "px-5 py-3 rounded-2xl text-[10px] font-black uppercase tracking-widest border flex items-center gap-2.5 transition-all cursor-pointer",
-                 conditionFilter === 'regular'
-                   ? "bg-amber-500 border-amber-500 text-white shadow-xl"
-                   : "bg-amber-50/50 border-amber-100 hover:bg-amber-50 text-amber-600"
-               )}
-             >
-               <span className={cn("w-2 h-2 rounded-full", conditionFilter === 'regular' ? "bg-white" : "bg-amber-500")} />
-               Regulares/Ruins ({allVisibleAssets.filter(a => a.condition === 'regular' || a.condition === 'ruim').reduce((acc, curr) => acc + (Number(curr.quantity) || 1), 0)})
-             </button>
-             <button
-               type="button"
-               onClick={() => setConditionFilter('inservivel')}
-               className={cn(
-                 "px-5 py-3 rounded-2xl text-[10px] font-black uppercase tracking-widest border flex items-center gap-2.5 transition-all cursor-pointer",
-                 conditionFilter === 'inservivel'
-                   ? "bg-rose-500 border-rose-500 text-white shadow-xl"
-                   : "bg-rose-50/50 border-rose-100 hover:bg-rose-50 text-rose-600"
-               )}
-             >
-               <span className={cn("w-2 h-2 rounded-full", conditionFilter === 'inservivel' ? "bg-white" : "bg-rose-500")} />
-               Inservíveis ({allVisibleAssets.filter(a => a.condition === 'inservivel').reduce((acc, curr) => acc + (Number(curr.quantity) || 1), 0)})
-             </button>
+             <button type="button" onClick={() => setConditionFilter('all')} className={cn("px-5 py-3 rounded-2xl text-[10px] font-black uppercase tracking-widest border transition-all cursor-pointer", conditionFilter === 'all' ? "bg-slate-900 border-slate-900 text-white shadow-xl shadow-slate-900/15" : "bg-slate-50 border-slate-200 hover:bg-slate-100 text-slate-600")}>Todos ({allVisibleAssets.reduce((acc, curr) => acc + (Number(curr.quantity) || 1), 0)})</button>
+             <button type="button" onClick={() => setConditionFilter('bom')} className={cn("px-5 py-3 rounded-2xl text-[10px] font-black uppercase tracking-widest border flex items-center gap-2.5 transition-all cursor-pointer", conditionFilter === 'bom' ? "bg-emerald-600 border-emerald-600 text-white shadow-xl" : "bg-emerald-50/50 border-emerald-100 hover:bg-emerald-50 text-emerald-600")}><span className={cn("w-2 h-2 rounded-full", conditionFilter === 'bom' ? "bg-white" : "bg-emerald-500")} />Bons ({allVisibleAssets.filter(a => a.condition === 'bom' || a.condition === 'novo').reduce((acc, curr) => acc + (Number(curr.quantity) || 1), 0)})</button>
+             <button type="button" onClick={() => setConditionFilter('regular')} className={cn("px-5 py-3 rounded-2xl text-[10px] font-black uppercase tracking-widest border flex items-center gap-2.5 transition-all cursor-pointer", conditionFilter === 'regular' ? "bg-amber-500 border-amber-500 text-white shadow-xl" : "bg-amber-50/50 border-amber-100 hover:bg-amber-50 text-amber-600")}><span className={cn("w-2 h-2 rounded-full", conditionFilter === 'regular' ? "bg-white" : "bg-amber-500")} />Regulares/Ruins ({allVisibleAssets.filter(a => a.condition === 'regular' || a.condition === 'ruim').reduce((acc, curr) => acc + (Number(curr.quantity) || 1), 0)})</button>
+             <button type="button" onClick={() => setConditionFilter('inservivel')} className={cn("px-5 py-3 rounded-2xl text-[10px] font-black uppercase tracking-widest border flex items-center gap-2.5 transition-all cursor-pointer", conditionFilter === 'inservivel' ? "bg-rose-500 border-rose-500 text-white shadow-xl" : "bg-rose-50/50 border-rose-100 hover:bg-rose-50 text-rose-600")}><span className={cn("w-2 h-2 rounded-full", conditionFilter === 'inservivel' ? "bg-white" : "bg-rose-500")} />Inservíveis ({allVisibleAssets.filter(a => a.condition === 'inservivel').reduce((acc, curr) => acc + (Number(curr.quantity) || 1), 0)})</button>
            </div>
          </div>
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
           {displayedAssets?.map(asset => (
-            <Card key={asset.id} className={cn(
-              "flex flex-col gap-6 group hover:shadow-2xl hover:-translate-y-1 transition-all duration-500 rounded-[2rem] p-8 border-slate-100 bg-white relative",
-              isBatchMode && selectedAssetIds.includes(asset.id) && "ring-4 ring-amber-500 border-amber-200"
-            )}>
+            <Card key={asset.id} className={cn("flex flex-col gap-6 group hover:shadow-2xl hover:-translate-y-1 transition-all duration-500 rounded-[2rem] p-8 border-slate-100 bg-white relative", isBatchMode && selectedAssetIds.includes(asset.id) && "ring-4 ring-amber-500 border-amber-200")}>
               {isBatchMode && (
                 <div className="absolute top-6 left-6 z-10">
-                  <input 
-                    type="checkbox" 
-                    className="w-8 h-8 rounded-lg text-amber-600 focus:ring-amber-500 border-slate-300 transition-all cursor-pointer shadow-sm"
-                    checked={selectedAssetIds.includes(asset.id)}
-                    onChange={(e) => {
-                      if (e.target.checked) {
-                        setSelectedAssetIds(prev => [...prev, asset.id]);
-                      } else {
-                        setSelectedAssetIds(prev => prev.filter(id => id !== asset.id));
-                      }
-                    }}
-                  />
+                  <input type="checkbox" className="w-8 h-8 rounded-lg text-amber-600 focus:ring-amber-500 border-slate-300 transition-all cursor-pointer shadow-sm" checked={selectedAssetIds.includes(asset.id)} onChange={(e) => { if (e.target.checked) { setSelectedAssetIds(prev => [...prev, asset.id]); } else { setSelectedAssetIds(prev => prev.filter(id => id !== asset.id)); } }} />
                 </div>
               )}
               <div className={cn("flex items-start justify-between", isBatchMode && "pl-10")}>
                 <div className="flex flex-col gap-1 pr-12">
                   <h4 className="font-display font-extrabold text-xl text-slate-900 group-hover:text-indigo-600 transition-colors tracking-tight leading-tight">{asset.name}</h4>
                   <div className="flex flex-wrap items-center gap-3 mt-2">
-                     <div className="flex items-center gap-2 px-2 py-1 bg-slate-50 border border-slate-100 rounded-lg">
-                        <span className="text-[9px] text-slate-400 font-bold uppercase tracking-widest">Patr.</span>
-                        <span className="text-xs text-slate-700 font-mono font-black">{asset.patrimonyNumber || 'N/A'}</span>
-                     </div>
-                     <div className="flex items-center gap-2 px-2 py-1 bg-slate-50 border border-slate-100 rounded-lg">
-                        <span className="text-[9px] text-slate-400 font-bold uppercase tracking-widest">Qtd</span>
-                        <span className="text-xs text-slate-700 font-black">{asset.quantity || 1}</span>
-                     </div>
+                     <div className="flex items-center gap-2 px-2 py-1 bg-slate-50 border border-slate-100 rounded-lg"><span className="text-[9px] text-slate-400 font-bold uppercase tracking-widest">Patr.</span><span className="text-xs text-slate-700 font-mono font-black">{asset.patrimonyNumber || 'N/A'}</span></div>
+                     <div className="flex items-center gap-2 px-2 py-1 bg-slate-50 border border-slate-100 rounded-lg"><span className="text-[9px] text-slate-400 font-bold uppercase tracking-widest">Qtd</span><span className="text-xs text-slate-700 font-black">{asset.quantity || 1}</span></div>
                      {hasSubLocations && locationNames[asset.inspectionId] && (
-                        <div className="flex items-center gap-2 px-2 py-1 bg-indigo-50 border border-indigo-100 rounded-lg">
-                           <Home className="w-3 h-3 text-indigo-400" />
-                           <span className="text-[9px] text-indigo-600 font-black uppercase tracking-widest">{locationNames[asset.inspectionId]}</span>
-                        </div>
+                        <div className="flex items-center gap-2 px-2 py-1 bg-indigo-50 border border-indigo-100 rounded-lg"><Home className="w-3 h-3 text-indigo-400" /><span className="text-[9px] text-indigo-600 font-black uppercase tracking-widest">{locationNames[asset.inspectionId]}</span></div>
                      )}
                   </div>
                 </div>
-                <div className={cn(
-                  "px-3 py-1.5 rounded-xl text-[9px] font-black uppercase tracking-widest border transition-all",
-                  asset.condition === 'bom' ? "bg-emerald-50 text-emerald-600 border-emerald-100 shadow-sm" :
-                  asset.condition === 'regular' ? "bg-amber-50 text-amber-600 border-amber-100 shadow-sm" :
-                  "bg-rose-50 text-rose-600 border-rose-100 shadow-sm"
-                )}>
+                <div className={cn("px-3 py-1.5 rounded-xl text-[9px] font-black uppercase tracking-widest border transition-all", asset.condition === 'bom' ? "bg-emerald-50 text-emerald-600 border-emerald-100 shadow-sm" : asset.condition === 'regular' ? "bg-amber-50 text-amber-600 border-amber-100 shadow-sm" : "bg-rose-50 text-rose-600 border-rose-100 shadow-sm")}>
                   {asset.condition || 'Não Inf.'}
                 </div>
               </div>
@@ -1742,9 +1389,7 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
               <div className="h-px bg-slate-50" />
               
               <div className="flex flex-col md:flex-row md:items-end justify-between gap-6">
-                <p className="text-sm text-slate-500 font-medium leading-relaxed flex-1">
-                  {asset.observations || "Sem detalhes adicionais registrados."}
-                </p>
+                <p className="text-sm text-slate-500 font-medium leading-relaxed flex-1">{asset.observations || "Sem detalhes adicionais registrados."}</p>
                 <div className="flex flex-col gap-4">
                   <div className="flex -space-x-3 justify-end">
                     {(asset.photos && asset.photos.length > 0) ? (
@@ -1754,56 +1399,22 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
                         </div>
                       ))
                     ) : (
-                      <div className="w-14 h-14 rounded-2xl bg-slate-50 border-2 border-white flex items-center justify-center shadow-sm">
-                         <ImageIcon className="w-5 h-5 text-slate-300" />
-                      </div>
+                      <div className="w-14 h-14 rounded-2xl bg-slate-50 border-2 border-white flex items-center justify-center shadow-sm"><ImageIcon className="w-5 h-5 text-slate-300" /></div>
                     )}
                   </div>
                   
                   <div className="flex items-center justify-end gap-2">
                     {isBatchMode ? (
-                      <div className="h-11 flex items-center">
-                        <span className="text-[10px] font-black text-slate-300 uppercase tracking-widest">Em Seleção</span>
-                      </div>
+                      <div className="h-11 flex items-center"><span className="text-[10px] font-black text-slate-300 uppercase tracking-widest">Em Seleção</span></div>
                     ) : (
                       <>
-                        <button 
-                          onClick={() => loadHistory(asset)}
-                          className="p-3 bg-white text-slate-400 hover:text-indigo-600 rounded-2xl border border-slate-100 hover:border-indigo-100 shadow-sm transition-all"
-                          title="Histórico"
-                        >
-                          <History className="w-5 h-5" />
-                        </button>
+                        <button onClick={() => loadHistory(asset)} className="p-3 bg-white text-slate-400 hover:text-indigo-600 rounded-2xl border border-slate-100 hover:border-indigo-100 shadow-sm transition-all" title="Histórico"><History className="w-5 h-5" /></button>
                         {!isLocked && (
                           <>
-                            <button 
-                              onClick={() => handleCloneAsset(asset)}
-                              className="p-3 bg-white text-slate-400 hover:text-emerald-600 rounded-2xl border border-slate-100 hover:border-emerald-100 shadow-sm transition-all"
-                              title="Clonagem Rápida (Zero Digitação)"
-                            >
-                              <Copy className="w-5 h-5" />
-                            </button>
-                            <button 
-                              onClick={() => handleEditAsset(asset)}
-                              className="p-3 bg-white text-slate-400 hover:text-blue-600 rounded-2xl border border-slate-100 hover:border-blue-100 shadow-sm transition-all"
-                            >
-                              <Edit2 className="w-5 h-5" />
-                            </button>
-                            <button 
-                              onClick={() => setConfirmDeleteId(asset.id)}
-                              className="p-3 bg-white text-slate-400 hover:text-rose-600 rounded-2xl border border-slate-100 hover:border-rose-100 shadow-sm transition-all"
-                            >
-                              <Trash2 className="w-5 h-5" />
-                            </button>
-                            {isCommittee && (
-                              <button 
-                                onClick={() => setTransferAssetId(asset.id)}
-                                className="p-3 bg-white text-slate-400 hover:text-amber-600 rounded-2xl border border-slate-100 hover:border-amber-100 shadow-sm transition-all"
-                                title="Mover"
-                              >
-                                <Zap className="w-5 h-5" />
-                              </button>
-                            )}
+                            <button onClick={() => handleCloneAsset(asset)} className="p-3 bg-white text-slate-400 hover:text-emerald-600 rounded-2xl border border-slate-100 hover:border-emerald-100 shadow-sm transition-all" title="Clonagem Rápida (Zero Digitação)"><Copy className="w-5 h-5" /></button>
+                            <button onClick={() => handleEditAsset(asset)} className="p-3 bg-white text-slate-400 hover:text-blue-600 rounded-2xl border border-slate-100 hover:border-blue-100 shadow-sm transition-all"><Edit2 className="w-5 h-5" /></button>
+                            <button onClick={() => setConfirmDeleteId(asset.id)} className="p-3 bg-white text-slate-400 hover:text-rose-600 rounded-2xl border border-slate-100 hover:border-rose-100 shadow-sm transition-all"><Trash2 className="w-5 h-5" /></button>
+                            {isCommittee && (<button onClick={() => setTransferAssetId(asset.id)} className="p-3 bg-white text-slate-400 hover:text-amber-600 rounded-2xl border border-slate-100 hover:border-amber-100 shadow-sm transition-all" title="Mover"><Zap className="w-5 h-5" /></button>)}
                           </>
                         )}
                       </>
@@ -1815,56 +1426,36 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
               {confirmDeleteId === asset.id && (
                 <div className="absolute inset-0 z-40 bg-white/90 backdrop-blur-sm rounded-[2rem] flex flex-col items-center justify-center p-8 animate-in fade-in duration-300">
                   <div className="flex flex-col items-center text-center gap-4">
-                    <div className="w-16 h-16 bg-rose-50 text-rose-600 rounded-3xl flex items-center justify-center">
-                      <Trash2 className="w-8 h-8" />
-                    </div>
+                    <div className="w-16 h-16 bg-rose-50 text-rose-600 rounded-3xl flex items-center justify-center"><Trash2 className="w-8 h-8" /></div>
                     <div className="flex flex-col">
                       <h5 className="font-bold text-slate-900">Excluir este item?</h5>
                       <p className="text-sm text-slate-500">Esta ação não pode ser desfeita no inventário local.</p>
                     </div>
                     <div className="flex items-center gap-3 w-full mt-2">
-                       <button 
-                        onClick={() => handleDeleteAsset(asset.id)}
-                        className="flex-1 bg-rose-600 text-white font-black text-xs uppercase tracking-widest h-12 rounded-xl shadow-lg shadow-rose-600/20"
-                       >
-                         Excluir
-                       </button>
-                       <button 
-                        onClick={() => setConfirmDeleteId(null)}
-                        className="flex-1 bg-slate-100 text-slate-700 font-black text-xs uppercase tracking-widest h-12 rounded-xl"
-                       >
-                         Manter
-                       </button>
+                       <button onClick={() => handleDeleteAsset(asset.id)} className="flex-1 bg-rose-600 text-white font-black text-xs uppercase tracking-widest h-12 rounded-xl shadow-lg shadow-rose-600/20">Excluir</button>
+                       <button onClick={() => setConfirmDeleteId(null)} className="flex-1 bg-slate-100 text-slate-700 font-black text-xs uppercase tracking-widest h-12 rounded-xl">Manter</button>
                     </div>
                   </div>
                 </div>
               )}
             </Card>
           ))}
+
           {filteredAssets && filteredAssets.length > (displayedAssets?.length || 0) && !searchTermAssets && (
              <div className="col-span-full pt-4">
-                <button 
-                  onClick={() => setDisplayLimit(prev => prev + 20)}
-                  className="w-full py-6 bg-slate-50 hover:bg-slate-100 text-slate-500 font-bold uppercase tracking-[0.2em] text-[10px] rounded-[2rem] border-2 border-dashed border-slate-200 transition-all flex flex-col items-center gap-2"
-                >
-                  Carregar mais itens
-                 <span className="text-[10px] opacity-40 font-black">({assets?.reduce((acc, curr) => acc + (Number(curr.quantity) || 1), 0)} totais)</span>
+                <button onClick={() => setDisplayLimit(prev => prev + 20)} className="w-full py-6 bg-slate-50 hover:bg-slate-100 text-slate-500 font-bold uppercase tracking-[0.2em] text-[10px] rounded-[2rem] border-2 border-dashed border-slate-200 transition-all flex flex-col items-center gap-2">
+                  Carregar mais itens <span className="text-[10px] opacity-40 font-black">({assets?.reduce((acc, curr) => acc + (Number(curr.quantity) || 1), 0)} totais)</span>
                 </button>
              </div>
           )}
+
          {assets?.length === 0 && !isAdding && !hasSubLocations && (
              <div className="col-span-full py-16 px-8 lg:py-24 lg:px-16 flex flex-col items-center justify-center border-2 border-dashed border-slate-100 rounded-[3.5rem] bg-slate-50/20 group animate-in fade-in duration-1000">
                 <div className="max-w-2xl w-full flex flex-col items-center gap-10">
                   <div className="flex flex-col items-center text-center gap-4">
-                    <div className="w-20 h-20 bg-indigo-600 rounded-[2rem] flex items-center justify-center shadow-2xl shadow-indigo-600/20 mb-2 transform group-hover:scale-110 group-hover:rotate-6 transition-all duration-700">
-                      <ShieldCheck className="w-10 h-10 text-white" />
-                    </div>
-                    <h3 className="font-display font-black text-3xl lg:text-4xl text-slate-900 tracking-tight leading-tight">
-                      Pronto para iniciar a auditoria?
-                    </h3>
-                    <p className="text-slate-500 font-medium text-lg leading-relaxed">
-                      Siga os passos abaixo para catalogar os bens deste ambiente com precisão.
-                    </p>
+                    <div className="w-20 h-20 bg-indigo-600 rounded-[2rem] flex items-center justify-center shadow-2xl shadow-indigo-600/20 mb-2 transform group-hover:scale-110 group-hover:rotate-6 transition-all duration-700"><ShieldCheck className="w-10 h-10 text-white" /></div>
+                    <h3 className="font-display font-black text-3xl lg:text-4xl text-slate-900 tracking-tight leading-tight">Pronto para iniciar a auditoria?</h3>
+                    <p className="text-slate-500 font-medium text-lg leading-relaxed">Siga os passos abaixo para catalogar os bens deste ambiente com precisão.</p>
                   </div>
 
                   <div className="grid grid-cols-1 md:grid-cols-3 gap-6 w-full">
@@ -1874,9 +1465,7 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
                       { icon: Camera, title: "Fotografar", desc: "Registre avarias ou faltas de peças." }
                     ].map((step, idx) => (
                       <div key={idx} className="bg-white p-8 rounded-[2rem] border border-slate-100 shadow-sm flex flex-col items-center text-center gap-4 hover:shadow-xl hover:border-indigo-100 transition-all duration-500">
-                        <div className="w-12 h-12 bg-slate-50 text-indigo-600 rounded-2xl flex items-center justify-center">
-                          <step.icon className="w-6 h-6" />
-                        </div>
+                        <div className="w-12 h-12 bg-slate-50 text-indigo-600 rounded-2xl flex items-center justify-center"><step.icon className="w-6 h-6" /></div>
                         <div className="flex flex-col gap-1">
                           <h4 className="font-black text-[10px] uppercase tracking-widest text-slate-900">{step.title}</h4>
                           <p className="text-xs text-slate-400 font-medium leading-relaxed">{step.desc}</p>
@@ -1885,14 +1474,7 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
                     ))}
                   </div>
 
-                  <Button 
-                    variant="accent" 
-                    size="lg" 
-                    onClick={() => setIsAdding(true)} 
-                    className="w-full max-w-sm h-20 rounded-[1.5rem] font-display font-black text-lg lg:text-xl uppercase tracking-[0.2em] shadow-2xl shadow-indigo-600/30 hover:scale-[1.02] transition-all"
-                  >
-                    COMEÇAR AGORA
-                  </Button>
+                  <Button variant="accent" size="lg" onClick={() => setIsAdding(true)} className="w-full max-w-sm h-20 rounded-[1.5rem] font-display font-black text-lg lg:text-xl uppercase tracking-[0.2em] shadow-2xl shadow-indigo-600/30 hover:scale-[1.02] transition-all">COMEÇAR AGORA</Button>
                 </div>
              </div>
           )}
@@ -1912,23 +1494,9 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
                   </div>
                 )}
                 <div className="flex flex-col gap-3">
-                  <Button 
-                    disabled={(assets?.length || 0) === 0}
-                    className={cn(
-                      "h-24 text-xl font-display font-black uppercase tracking-[0.2em] shadow-[0_30px_60px_-15px_rgba(79,70,229,0.3)] rounded-[2rem] transition-all duration-700",
-                      (assets?.length || 0) === 0 
-                        ? "bg-slate-100 text-slate-400 border-slate-200 grayscale shadow-none" 
-                        : "bg-indigo-600 hover:bg-indigo-700 shadow-indigo-600/30 hover:scale-[1.02]"
-                    )} 
-                    icon={Signature} 
-                    onClick={() => setIsSignOffModalOpen(true)}
-                  >
-                    Encerrar Vistoria do Setor
-                  </Button>
+                  <Button disabled={(assets?.length || 0) === 0} className={cn("h-24 text-xl font-display font-black uppercase tracking-[0.2em] shadow-[0_30px_60px_-15px_rgba(79,70,229,0.3)] rounded-[2rem] transition-all duration-700", (assets?.length || 0) === 0 ? "bg-slate-100 text-slate-400 border-slate-200 grayscale shadow-none" : "bg-indigo-600 hover:bg-indigo-700 shadow-indigo-600/30 hover:scale-[1.02]")} icon={Signature} onClick={() => setIsSignOffModalOpen(true)}>Encerrar Vistoria do Setor</Button>
                   <div className="bg-slate-50 p-4 rounded-xl border border-slate-100 mt-2">
-                    <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest leading-relaxed text-center">
-                      Ao encerrar, o responsável pelo setor assinará o Termo de Responsabilidade digitalmente.
-                    </p>
+                    <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest leading-relaxed text-center">Ao encerrar, o responsável pelo setor assinará o Termo de Responsabilidade digitalmente.</p>
                   </div>
                 </div>
               </div>
@@ -1936,27 +1504,10 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
               <div className="flex flex-col gap-6">
                 {(user?.role === 'prefeito' || user?.role === 'responsavel' || user?.role === 'administrador') && (
                   <div className="flex flex-col gap-3">
-                    <Button 
-                      className={cn(
-                        "h-24 text-xl font-display font-black uppercase tracking-[0.2em] shadow-[10px_30px_80px_-20px_rgba(99,102,241,0.4)] rounded-[2rem] transition-all duration-700 animate-pulse",
-                        isConfirmingFinalize
-                          ? "bg-emerald-600 hover:bg-emerald-700 shadow-emerald-500/20 animate-none ring-8 ring-emerald-500/10"
-                          : "bg-slate-900 border-none hover:scale-[1.02]"
-                      )} 
-                      icon={isConfirmingFinalize ? ShieldCheck : Save} 
-                      onClick={handleFinalize}
-                      loading={isFinalizing}
-                    >
+                    <Button className={cn("h-24 text-xl font-display font-black uppercase tracking-[0.2em] shadow-[10px_30px_80px_-20px_rgba(99,102,241,0.4)] rounded-[2rem] transition-all duration-700 animate-pulse", isConfirmingFinalize ? "bg-emerald-600 hover:bg-emerald-700 shadow-emerald-500/20 animate-none ring-8 ring-emerald-500/10" : "bg-slate-900 border-none hover:scale-[1.02]")} icon={isConfirmingFinalize ? ShieldCheck : Save} onClick={handleFinalize} loading={isFinalizing}>
                       {isConfirmingFinalize ? "Protocolar Homologação?" : "Homologar Dossiê"}
                     </Button>
-                    {isConfirmingFinalize && (
-                      <button 
-                        onClick={() => setIsConfirmingFinalize(false)}
-                        className="text-[10px] font-black text-slate-400 uppercase tracking-widest hover:text-rose-500 transition-colors py-2"
-                      >
-                        Manter apenas Concluída
-                      </button>
-                    )}
+                    {isConfirmingFinalize && (<button onClick={() => setIsConfirmingFinalize(false)} className="text-[10px] font-black text-slate-400 uppercase tracking-widest hover:text-rose-500 transition-colors py-2">Manter apenas Concluída</button>)}
                   </div>
                 )}
               </div>
@@ -1966,34 +1517,14 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
 
         {(isConcluded || isFinalized) && isManager && (
           <div className="flex flex-col gap-3">
-            <Button 
-              variant="outline"
-              className={cn(
-                "h-16 font-bold uppercase tracking-widest rounded-2xl transition-all duration-500 bg-white border-2",
-                isConfirmingReopen ? "bg-rose-50 border-rose-600 text-rose-600 ring-4 ring-rose-500/5 text-[10px]" : "border-slate-100 text-slate-900 text-[10px]"
-              )} 
-              icon={isConfirmingReopen ? AlertCircle : History} 
-              onClick={handleReopen}
-              loading={isReopening}
-            >
+            <Button variant="outline" className={cn("h-16 font-bold uppercase tracking-widest rounded-2xl transition-all duration-500 bg-white border-2", isConfirmingReopen ? "bg-rose-50 border-rose-600 text-rose-600 ring-4 ring-rose-500/5 text-[10px]" : "border-slate-100 text-slate-900 text-[10px]")} icon={isConfirmingReopen ? AlertCircle : History} onClick={handleReopen} loading={isReopening}>
               {isConfirmingReopen ? "Reabrir para Novas Vistorias?" : "Reabrir Edição do Inventário"}
             </Button>
-            {isConfirmingReopen && (
-              <button 
-                onClick={() => setIsConfirmingReopen(false)}
-                className="text-[10px] font-black text-slate-400 uppercase tracking-widest hover:text-slate-900 transition-colors py-1"
-              >
-                Cancelar
-              </button>
-            )}
+            {isConfirmingReopen && (<button onClick={() => setIsConfirmingReopen(false)} className="text-[10px] font-black text-slate-400 uppercase tracking-widest hover:text-slate-900 transition-colors py-1">Cancelar</button>)}
           </div>
         )}
 
-        {!isFinalized && (
-          <p className="text-[10px] font-bold text-center text-slate-400 uppercase tracking-widest px-12 leading-relaxed opacity-60">
-            O encerramento imobiliza os registros locais. A homologação autentica o dossiê perante o controle interno municipal.
-          </p>
-        )}
+        {!isFinalized && (<p className="text-[10px] font-bold text-center text-slate-400 uppercase tracking-widest px-12 leading-relaxed opacity-60">O encerramento imobiliza os registros locais. A homologação autentica o dossiê perante o controle interno municipal.</p>)}
       </div>
 
       {transferAssetId && (
@@ -2002,79 +1533,51 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
           <Card className="w-full max-w-lg flex flex-col p-8 overflow-hidden shadow-2xl animate-in zoom-in-95 duration-300 rounded-[3rem] border-none bg-white relative z-10 text-slate-900">
              <div className="flex items-center justify-between mb-8">
                 <div className="flex items-center gap-4">
-                   <div className="w-12 h-12 bg-amber-100 rounded-2xl flex items-center justify-center">
-                      <Zap className="w-6 h-6 text-amber-600" />
-                   </div>
+                   <div className="w-12 h-12 bg-amber-100 rounded-2xl flex items-center justify-center"><Zap className="w-6 h-6 text-amber-600" /></div>
                    <div className="flex flex-col">
                       <h3 className="font-black text-xl uppercase tracking-tight">Transferir Item</h3>
                       <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest leading-none mt-1">Mudar de localização</span>
                    </div>
                 </div>
-                <button onClick={() => setTransferAssetId(null)} className="p-2 hover:bg-slate-100 rounded-xl transition-colors">
-                   <X className="w-6 h-6 text-slate-400" />
-                </button>
+                <button onClick={() => setTransferAssetId(null)} className="p-2 hover:bg-slate-100 rounded-xl transition-colors"><X className="w-6 h-6 text-slate-400" /></button>
              </div>
 
              <div className="flex flex-col gap-3 max-h-[50vh] overflow-y-auto pr-2 custom-scrollbar">
                 <p className="text-xs font-bold text-slate-500 mb-2 uppercase tracking-widest">Selecione o Destino:</p>
                 {allLocations?.filter(l => l.id !== location.id).map(loc => (
-                  <button 
-                    key={loc.id}
-                    onClick={() => handleTransfer(loc.id)}
-                    disabled={isTransferring}
-                    className="flex flex-col p-5 bg-slate-50 border border-slate-100 rounded-2xl hover:bg-slate-900 hover:text-white group transition-all text-left"
-                  >
+                  <button key={loc.id} onClick={() => handleTransfer(loc.id)} disabled={isTransferring} className="flex flex-col p-5 bg-slate-50 border border-slate-100 rounded-2xl hover:bg-slate-900 hover:text-white group transition-all text-left">
                      <span className="font-black text-sm uppercase tracking-tight transition-colors">{loc.name}</span>
                      <span className="text-[10px] text-slate-400 group-hover:text-slate-500 transition-colors mt-1">{loc.description}</span>
                   </button>
                 ))}
              </div>
-
-             {isTransferring && (
-               <div className="absolute inset-0 bg-white/80 backdrop-blur-sm flex items-center justify-center rounded-[3rem]">
-                  <div className="flex flex-col items-center gap-3">
-                     <div className="w-10 h-10 border-4 border-slate-900 border-t-transparent rounded-full animate-spin"></div>
-                     <span className="text-[10px] font-black text-slate-900 uppercase tracking-[0.2em]">Processando...</span>
-                  </div>
-               </div>
-             )}
+             {isTransferring && (<div className="absolute inset-0 bg-white/80 backdrop-blur-sm flex items-center justify-center rounded-[3rem]"><div className="flex flex-col items-center gap-3"><div className="w-10 h-10 border-4 border-slate-900 border-t-transparent rounded-full animate-spin"></div><span className="text-[10px] font-black text-slate-900 uppercase tracking-[0.2em]">Processando...</span></div></div>)}
           </Card>
         </div>
       )}
 
-     {/* Modal de Histórico Completo (Global + Edições Locais) */}
+     {/* Modal de Histórico Completo */}
       {historyAsset && (
         <div className="fixed inset-0 z-[110] flex items-center justify-center p-4 md:p-10">
           <div className="absolute inset-0 bg-slate-900/60 backdrop-blur-md" onClick={() => setHistoryAsset(null)} />
           <Card className="w-full max-w-2xl flex flex-col p-8 md:p-10 overflow-hidden shadow-2xl animate-in zoom-in-95 duration-300 rounded-[3rem] border-none bg-white relative z-10 text-slate-900 max-h-[90vh]">
             <div className="flex items-center justify-between mb-8 pb-6 border-b border-slate-100">
                <div className="flex items-center gap-4">
-                  <div className="w-14 h-14 bg-emerald-100 rounded-[1.5rem] flex items-center justify-center border border-emerald-200">
-                     <History className="w-7 h-7 text-emerald-600" />
-                  </div>
+                  <div className="w-14 h-14 bg-emerald-100 rounded-[1.5rem] flex items-center justify-center border border-emerald-200"><History className="w-7 h-7 text-emerald-600" /></div>
                   <div className="flex flex-col">
                      <h3 className="font-black text-2xl uppercase tracking-tight text-slate-900 leading-none">Dossiê do Item</h3>
                      <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest leading-none mt-2">{historyAsset.name} {historyAsset.patrimonyNumber ? `(Nº ${historyAsset.patrimonyNumber})` : ''}</span>
                   </div>
                </div>
-               <button onClick={() => setHistoryAsset(null)} className="p-3 hover:bg-slate-100 rounded-2xl transition-colors border border-transparent hover:border-slate-200">
-                  <X className="w-6 h-6 text-slate-400" />
-               </button>
+               <button onClick={() => setHistoryAsset(null)} className="p-3 hover:bg-slate-100 rounded-2xl transition-colors border border-transparent hover:border-slate-200"><X className="w-6 h-6 text-slate-400" /></button>
             </div>
 
             <div className="flex flex-col gap-4 overflow-y-auto custom-scrollbar flex-1 pr-2">
-               {/* 1. HISTÓRICO DE VISTORIAS ANTIGAS */}
                <h3 className="text-[10px] font-black uppercase text-slate-400 tracking-widest mt-2">Vistorias Anteriores</h3>
                {isLoadingHistory ? (
-                 <div className="py-10 flex flex-col items-center justify-center">
-                    <div className="w-8 h-8 border-4 border-slate-200 border-t-emerald-500 rounded-full animate-spin"></div>
-                    <span className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] mt-4">Procurando nos arquivos...</span>
-                 </div>
+                 <div className="py-10 flex flex-col items-center justify-center"><div className="w-8 h-8 border-4 border-slate-200 border-t-emerald-500 rounded-full animate-spin"></div><span className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] mt-4">Procurando nos arquivos...</span></div>
                ) : !assetHistory || assetHistory.length === 0 ? (
-                 <div className="py-6 flex flex-col items-center justify-center text-slate-300 bg-slate-50 rounded-2xl border border-slate-100 border-dashed">
-                    <History className="w-8 h-8 opacity-20 mb-2" />
-                    <p className="font-bold tracking-widest text-[9px] uppercase text-slate-400">Sem vistorias passadas registadas</p>
-                 </div>
+                 <div className="py-6 flex flex-col items-center justify-center text-slate-300 bg-slate-50 rounded-2xl border border-slate-100 border-dashed"><History className="w-8 h-8 opacity-20 mb-2" /><p className="font-bold tracking-widest text-[9px] uppercase text-slate-400">Sem vistorias passadas registadas</p></div>
                ) : (
                  <div className="relative border-l-2 border-slate-100 ml-4 py-2 space-y-8 mb-4">
                    {assetHistory.map((entry, idx) => (
@@ -2084,54 +1587,28 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
                          <span className="text-[10px] font-black uppercase tracking-widest text-emerald-600 bg-emerald-50 self-start px-2 py-0.5 rounded-lg mb-1">{formatDate(entry.inspection.date)}</span>
                          <h4 className="font-black text-base text-slate-900 tracking-tight leading-tight">{entry.location.name}</h4>
                          <span className="text-sm font-semibold text-slate-500">Condição: <span className="uppercase text-slate-700">{entry.asset.condition}</span></span>
-                         {(entry.asset.quantity && entry.asset.quantity > 1) ? (
-                            <span className="text-xs font-semibold text-slate-400">Qtd: {entry.asset.quantity}</span>
-                         ) : null}
-                         {entry.asset.observations && (
-                           <p className="text-xs text-slate-500 bg-slate-50 p-3 rounded-xl mt-2 border border-slate-100 italic">
-                             "{entry.asset.observations}"
-                           </p>
-                         )}
+                         {(entry.asset.quantity && entry.asset.quantity > 1) ? (<span className="text-xs font-semibold text-slate-400">Qtd: {entry.asset.quantity}</span>) : null}
+                         {entry.asset.observations && (<p className="text-xs text-slate-500 bg-slate-50 p-3 rounded-xl mt-2 border border-slate-100 italic">"{entry.asset.observations}"</p>)}
                        </div>
                      </div>
                    ))}
                  </div>
                )}
-               
-               {/* 2. NOSSA NOVA LINHA DO TEMPO (EDIÇÕES DESTA VISTORIA) */}
-               <div className="mt-4 pt-8 border-t border-slate-100">
-                  <AssetTimeline assetId={historyAsset.id} />
-               </div>
-
+               <div className="mt-4 pt-8 border-t border-slate-100"><AssetTimeline assetId={historyAsset.id} /></div>
             </div>
           </Card>
         </div>
       )}
 
       {isSignOffModalOpen && (
-        <SectorInspectionSignOffModal
-          isOpen={isSignOffModalOpen}
-          onClose={() => setIsSignOffModalOpen(false)}
-          inspection={inspection}
-          location={location}
-          assets={assets || []}
-          onComplete={async () => {
-              setIsSignOffModalOpen(false);
-              await handleConclude(true);
-          }}
-        />
+        <SectorInspectionSignOffModal isOpen={isSignOffModalOpen} onClose={() => setIsSignOffModalOpen(false)} inspection={inspection} location={location} assets={assets || []} onComplete={async () => { setIsSignOffModalOpen(false); await handleConclude(true); }} />
       )}
 
       {previewPhoto && (
         <div className="fixed inset-0 z-[300] flex items-center justify-center p-4 md:p-10" onClick={() => setPreviewPhoto(null)}>
           <div className="absolute inset-0 bg-slate-900/95 backdrop-blur-sm" />
           <div className="relative z-10 w-full max-w-4xl flex items-center justify-center">
-            <button 
-              onClick={(e) => { e.stopPropagation(); setPreviewPhoto(null); }}
-              className="absolute -top-12 right-0 md:-right-12 p-2 bg-white/10 hover:bg-rose-500 text-white rounded-full transition-colors"
-            >
-              <X className="w-6 h-6" />
-            </button>
+            <button onClick={(e) => { e.stopPropagation(); setPreviewPhoto(null); }} className="absolute -top-12 right-0 md:-right-12 p-2 bg-white/10 hover:bg-rose-500 text-white rounded-full transition-colors"><X className="w-6 h-6" /></button>
             <img src={previewPhoto} alt="Visualização ampliada" className="max-w-full max-h-[85vh] object-contain rounded-xl shadow-2xl" onClick={e => e.stopPropagation()} />
           </div>
         </div>
@@ -2152,10 +1629,7 @@ function AssetTimeline({ assetId }: { assetId: string }) {
 
   return (
     <div className="space-y-4 animate-in fade-in duration-500">
-      <h3 className="text-[10px] font-black uppercase text-slate-400 tracking-widest flex items-center gap-2">
-        <Clock className="w-4 h-4" /> Histórico de Alterações
-      </h3>
-      
+      <h3 className="text-[10px] font-black uppercase text-slate-400 tracking-widest flex items-center gap-2"><Clock className="w-4 h-4" /> Histórico de Alterações</h3>
       {!events || events.length === 0 ? (
         <div className="bg-slate-50 border border-slate-100 border-dashed rounded-2xl p-6 flex flex-col items-center justify-center text-center">
            <History className="w-6 h-6 text-slate-300 mb-2" />
@@ -2179,11 +1653,7 @@ function AssetTimeline({ assetId }: { assetId: string }) {
 
 function Building2(props: any) {
   return (
-    <svg 
-      {...props}
-      xmlns="http://www.w3.org/2000/svg" 
-      viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" 
-    >
+    <svg {...props} xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" >
       <path d="M6 22V4a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v18Z"/><path d="M6 12H4a2 2 0 0 0-2 2v6a2 2 0 0 0 2 2h2"/><path d="M18 9h2a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2h-2"/><path d="M10 6h4"/><path d="M10 10h4"/><path d="M10 14h4"/><path d="M10 18h4"/>
     </svg>
   );
