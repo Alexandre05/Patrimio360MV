@@ -12,7 +12,7 @@
 import React, { useState, useRef } from 'react';
 import { Card, Button, Input, Select, Textarea } from './UI';
 import { useOnlineStatus } from '../lib/hooks';
-import { ArrowLeft, Plus, Image as ImageIcon, Trash2, Camera, UserPlus, Save, CheckCircle2, History, Eye, PlayCircle, ArrowRight, X, Edit2, Search, ShieldCheck, AlertCircle, Home, ChevronLeft, ChevronRight, Zap, Copy, Database, Signature, Mic, Filter, Clock } from 'lucide-react';
+import { ArrowLeft, Plus, Image as ImageIcon, Trash2, Camera, UserPlus, Save, CheckCircle2, History, Eye, PlayCircle, ArrowRight, X, Edit2, Search, ShieldCheck, AlertCircle, Home, ChevronLeft, ChevronRight, Zap, Copy, Database, Signature, Mic, Filter, Clock, ScanText } from 'lucide-react';
 import { db, Asset, generateAssetHash, generateId, AssetCondition, InspectionStatus, Inspection, Location } from '../lib/db';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { useAuth } from '../lib/AuthContext';
@@ -26,12 +26,36 @@ import { pushLocalChanges, syncInspection } from '../lib/syncService';
 import { db as firestore, auth } from '../lib/firebase';
 import { doc, deleteDoc, collection, query, where, getDocs } from 'firebase/firestore';
 import { SectorInspectionSignOffModal } from './SectorInspectionSignOffModal';
+import Tesseract from 'tesseract.js';
+import * as tf from '@tensorflow/tfjs';
+import * as cocoSsd from '@tensorflow-models/coco-ssd';
+import { Sparkles } from 'lucide-react'; // Ícone mágico para a nossa IA
+// Tradutor do modelo de IA (Inglês -> Português)
+const dicionarioIA: Record<string, string> = {
+  'chair': 'Cadeira',
+  'laptop': 'Notebook / Portátil',
+  'tv': 'Monitor / TV',
+  'keyboard': 'Teclado',
+  'mouse': 'Mouse',
+  'couch': 'Sofá / Poltrona',
+  'bed': 'Cama / Maca',
+  'dining table': 'Mesa',
+  'cell phone': 'Telefone / Celular',
+  'refrigerator': 'Frigorífico / Geladeira',
+  'book': 'Livro / Documento',
+  'clock': 'Relógio',
+  'vase': 'Vaso / Decoração',
+  'cup': 'Copo / Taça',
+  'bottle': 'Garrafa',
+  'sink': 'Pia / Lavatório',
+  'toilet': 'Vaso Sanitário'
+};
 
 export function InspectionView({ id, onBack }: { id: string, onBack: () => void }) {
   const { user } = useAuth();
   const { toast } = useToast();
   const [previewPhoto, setPreviewPhoto] = useState<string | null>(null);
-  const isAdmin = user?.role === 'administrador' || user?.role === 'prefeito' || user?.email === 'henri199@gmail.com' || auth.currentUser?.email === 'henri199@gmail.com';
+  const isAdmin = user?.role === 'administrador' || user?.role === 'prefeito' || user?.email === 'alexandremenna05@gmail.com' || auth.currentUser?.email === 'alexandremenna05@gmail.com';
   const isManager = isAdmin || user?.role === 'responsavel';
   const isCommittee = isManager || user?.role === 'vistoriador';
   const isOnline = useOnlineStatus();
@@ -41,13 +65,13 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
   // Busca única e infalível
   const allInspectionAssets = useLiveQuery(() => db.assets.where('inspectionId').equals(id).toArray(), [id]);
   
-  // MÁGICA AQUI: Usamos isTrashed para evitar que o sincronizador apague o item fisicamente
   const assets = allInspectionAssets?.filter(a => !a.isTrashed && !a.deleted) || [];
   const deletedAssets = allInspectionAssets?.filter(a => !!a.isTrashed) || [];
   
   const [searchTermAssets, setSearchTermAssets] = useState('');
   const [conditionFilter, setConditionFilter] = useState('all');
   const [isListening, setIsListening] = useState(false);
+  const [isOcrProcessing, setIsOcrProcessing] = useState(false);
   const [displayLimit, setDisplayLimit] = useState(20);
   const [isAdding, setIsAdding] = useState(false);
   const [isConcluding, setIsConcluding] = useState(false);
@@ -153,6 +177,7 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
   }, [id, isOnline, inspection?.status]);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const ocrInputRef = useRef<HTMLInputElement>(null);
   const nameRef = useRef<HTMLInputElement>(null);
   const patrimonyRef = useRef<HTMLInputElement>(null);
   const conditionRef = useRef<HTMLSelectElement>(null);
@@ -195,7 +220,48 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
       }
     }
   };
+const [isVisionProcessing, setIsVisionProcessing] = useState(false);
+  const visionInputRef = useRef<HTMLInputElement>(null);
 
+  const handleObjectRecognition = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    setIsVisionProcessing(true);
+    try {
+      if (typeof toast === 'function') toast("A aquecer os motores da Inteligência Artificial... (Pode demorar na primeira vez)", "info");
+      
+      // Converte a imagem para um formato que a IA entende
+      const img = new Image();
+      img.src = URL.createObjectURL(file);
+      await new Promise((resolve) => { img.onload = resolve; });
+
+      // Carrega o modelo visual do Google
+      const model = await cocoSsd.load();
+      
+      // A IA olha para a imagem e tenta adivinhar o que é
+      const predictions = await model.detect(img);
+
+      if (predictions && predictions.length > 0) {
+        // Pega no palpite com maior nível de certeza (score)
+        const melhorPalpite = predictions.reduce((prev, current) => (prev.score > current.score) ? prev : current);
+        
+        // Traduz o palpite para português, ou capitaliza se não estiver no dicionário
+        const nomeEmPortugues = dicionarioIA[melhorPalpite.class] || melhorPalpite.class;
+        
+        setNewItem(prev => ({ ...prev, name: nomeEmPortugues }));
+        if (typeof toast === 'function') toast(`A IA detetou: ${nomeEmPortugues} (Certeza: ${Math.round(melhorPalpite.score * 100)}%)`, "success");
+      } else {
+        setError("A IA não conseguiu identificar o objeto com clareza. Tente outro ângulo.");
+      }
+    } catch (err) {
+      console.error("Erro na Visão Computacional:", err);
+      setError("Falha ao processar a imagem com a Inteligência Artificial.");
+    } finally {
+      setIsVisionProcessing(false);
+      if (visionInputRef.current) visionInputRef.current.value = '';
+    }
+  };
   const [locationNames, setLocationNames] = useState<Record<string, string>>({});
 
   React.useEffect(() => {
@@ -236,6 +302,34 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
       return () => clearTimeout(timer);
     }
   }, [successMessage]);
+
+  // 🚀 MOTOR DE RECONHECIMENTO ÓTICO DE CARACTERES (OCR)
+  const handlePatrimonyOCR = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    setIsOcrProcessing(true);
+    try {
+      if (typeof toast === 'function') toast("A ler a plaqueta... Por favor, aguarde.", "info");
+      
+      const result = await Tesseract.recognize(file, 'por');
+      const textoLido = result.data.text;
+      const apenasNumeros = textoLido.replace(/[^0-9]/g, '');
+
+      if (apenasNumeros) {
+        setNewItem(prev => ({ ...prev, patrimonyNumber: apenasNumeros }));
+        if (typeof toast === 'function') toast("Número identificado com sucesso!", "success");
+      } else {
+        setError("Não foi possível encontrar números legíveis nesta foto. Tente novamente com melhor iluminação.");
+      }
+    } catch (err) {
+      console.error("Erro no OCR:", err);
+      setError("Falha ao processar o reconhecimento de imagem.");
+    } finally {
+      setIsOcrProcessing(false);
+      if (ocrInputRef.current) ocrInputRef.current.value = '';
+    }
+  };
 
   const handleAddItem = async () => {
     if (hasSubLocations) {
@@ -287,7 +381,6 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
 
         if (globalExisting) {
           if (globalExisting.inspectionId === id) {
-            // Suporta restauração de isTrashed e deleted
             if (globalExisting.deleted || globalExisting.isTrashed) {
               const restaurar = window.confirm(`O patrimônio ${newItem.patrimonyNumber} já foi cadastrado e EXCLUÍDO nesta vistoria. Deseja restaurá-lo com os dados originais?`);
               if (restaurar) {
@@ -394,7 +487,7 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
         hash: hash,
         needsSync: 1,
         isPublic: true,
-        isTrashed: false, // Define explicitamente como falso ao criar
+        isTrashed: false,
         quantity: newItem.quantity
       });
       toast("Item adicionado à vistoria!", "success", "Novo Patrimônio");
@@ -439,7 +532,6 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
     }
 
     try {
-      // MÁGICA 2: Marcamos como isTrashed em vez de deleted
       await db.assets.update(assetId, { 
         isTrashed: true, 
         needsSync: 1, 
@@ -467,6 +559,7 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
       setError("Não foi possível excluir o item.");
     }
   };
+
   const handleEmptyTrash = async () => {
     if (!isCommittee) {
       setError("Apenas membros da comissão podem esvaziar a lixeira.");
@@ -479,7 +572,6 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
     try {
       const now = Date.now();
       for (const asset of deletedAssets) {
-        // Passa a ordem para o syncService destruir o item fisicamente
         await db.assets.update(asset.id, { 
           deleted: true, 
           isTrashed: false, 
@@ -1168,21 +1260,20 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
           </div>
         </div>
 
-        {/* 🚀 GAVETA DE ITENS RECÉM-EXCLUÍDOS (MOVIDA PARA O TOPO) 🚀 */}
+        {/* LIXEIRA DA VISTORIA */}
         {deletedAssets && deletedAssets.length > 0 && (
           <div className="mb-2 p-6 bg-rose-50 border border-rose-200 border-dashed rounded-[2rem] animate-in fade-in slide-in-from-top-4 duration-500 shadow-sm">
             <div className="flex items-center justify-between mb-4">
                <div className="flex items-center gap-3">
-                 <div className="w-10 h-10 bg-white rounded-xl flex items-center justify-center shadow-sm border border-rose-100">
-                   <Trash2 className="w-5 h-5 text-rose-500" />
-                 </div>
-                 <div className="flex flex-col">
-                   <span className="text-xs font-black text-rose-700 uppercase tracking-widest">Lixeira da Vistoria</span>
-                   <span className="text-[9px] font-bold text-rose-500 uppercase tracking-widest">Itens excluídos nesta sessão.</span>
-                 </div>
+                  <div className="w-10 h-10 bg-white rounded-xl flex items-center justify-center shadow-sm border border-rose-100">
+                    <Trash2 className="w-5 h-5 text-rose-500" />
+                  </div>
+                  <div className="flex flex-col">
+                    <span className="text-xs font-black text-rose-700 uppercase tracking-widest">Lixeira da Vistoria</span>
+                    <span className="text-[9px] font-bold text-rose-500 uppercase tracking-widest">Itens excluídos nesta sessão.</span>
+                  </div>
                </div>
                
-               {/* BOTÃO ESVAZIAR LIXEIRA */}
                <button
                  onClick={handleEmptyTrash}
                  className="px-4 py-2 bg-rose-100 hover:bg-rose-600 text-rose-700 hover:text-white text-[9px] font-black uppercase tracking-widest rounded-xl transition-all shadow-sm flex items-center gap-2"
@@ -1191,7 +1282,6 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
                  <Trash2 className="w-4 h-4" />
                  Esvaziar Lixeira
                </button>
-             
             </div>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               {deletedAssets.map(deletedAsset => (
@@ -1235,10 +1325,10 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
           </div>
         )}
 
+        {/* MODAL ADICIONAR / EDITAR COM OCR INTEGRADO */}
         {isAdding && (
           <div className="fixed inset-0 z-[200] flex flex-col bg-slate-900/40 backdrop-blur-sm md:p-6 md:justify-center md:items-center animate-in fade-in duration-300">
             <Card className="w-full h-full md:h-auto md:max-h-[90vh] md:max-w-4xl flex flex-col overflow-hidden rounded-none md:rounded-[2.5rem] border-none shadow-[0_40px_100px_-20px_rgba(0,0,0,0.3)] relative z-10 p-0 bg-white">
-               {/* Header Fixo */}
                <div className="flex items-center justify-between p-8 bg-slate-900 text-white shadow-xl z-20 shrink-0">
                   <div className="flex items-center gap-5">
                     <div className="w-12 h-12 bg-white/10 rounded-2xl flex items-center justify-center border border-white/20"><Plus className="w-6 h-6 text-white" /></div>
@@ -1252,31 +1342,61 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
                   </div>
                </div>
                
-               {/* Área do Formulário */}
                <div className="flex-1 overflow-y-auto custom-scrollbar p-8 lg:p-12 flex flex-col gap-10 bg-white pb-32">
-                 <div className="flex flex-col gap-4">
-                    <div className="flex flex-col">
+               <div className="flex flex-col">
                       <label className="text-[10px] font-bold text-slate-900 uppercase tracking-widest ml-1">Descrição do Patrimônio</label>
                       <span className="text-slate-400 text-[9px] ml-1 mb-2 font-medium">O que é este item? Ex: Cadeira giratória preta</span>
                     </div>
-                   <Input ref={nameRef} placeholder="Ex: Mesa de Escritório, Cadeira de Rodas..." value={newItem.name} onChange={e => { setNewItem({...newItem, name: e.target.value}); if (duplicateWarning) { setDuplicateWarning(null); setTransferCandidate(null); } }} onKeyDown={e => handleKeyDown(e, 0)} error={duplicateWarning || undefined} autoFocus className="text-xl h-16 px-6" />
-                   {duplicateWarning && (
-                     <div className="flex flex-col gap-4 p-6 bg-rose-50 border border-rose-100 rounded-[1.5rem] animate-in fade-in slide-in-from-top-2">
-                       <div className="flex items-center gap-3 text-rose-600 font-bold text-sm"><AlertCircle className="w-6 h-6 shrink-0"/> <span className="leading-tight">{duplicateWarning}</span></div>
-                       {transferCandidate && (
-                         <Button variant="accent" onClick={handleAddItem} className="bg-rose-600 hover:bg-rose-700 h-14 rounded-xl text-[10px] font-black uppercase tracking-widest">Confirmar Transferência para este Local</Button>
-                       )}
-                     </div>
-                   )}
-                 </div>
+                    <div className="relative">
+                       <Input ref={nameRef} placeholder="Ex: Mesa de Escritório, Cadeira..." value={newItem.name} onChange={e => { setNewItem({...newItem, name: e.target.value}); if (duplicateWarning) { setDuplicateWarning(null); setTransferCandidate(null); } }} onKeyDown={e => handleKeyDown(e, 0)} error={duplicateWarning || undefined} autoFocus className="text-xl h-16 pl-6 pr-16" />
+                       
+                       {/* INPUT INVISÍVEL PARA A CÂMARA (VISÃO COMPUTACIONAL) */}
+                       <input type="file" accept="image/*" capture="environment" ref={visionInputRef} onChange={handleObjectRecognition} className="hidden" />
+                       
+                       <button type="button" onClick={() => visionInputRef.current?.click()} disabled={isVisionProcessing} className="absolute right-2 top-1/2 -translate-y-1/2 p-3 bg-amber-50 text-amber-600 hover:bg-amber-500 hover:text-white rounded-xl transition-all shadow-sm cursor-pointer" title="Auto-Descrever com Inteligência Artificial">
+                         {isVisionProcessing ? (<div className="w-5 h-5 border-2 border-amber-600 border-t-transparent rounded-full animate-spin"></div>) : (<Sparkles className="w-5 h-5" />)}
+                       </button>
+                    </div>
                  
                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-10">
+                    {/* CAMPO PATRIMÔNIO COM BOTÃO OCR */}
                     <div className="flex flex-col gap-4">
                       <div className="flex flex-col">
                        <label className="text-[10px] font-bold text-slate-900 uppercase tracking-widest ml-1">Etiq. Patrimônio</label>
-                       <span className="text-slate-400 text-[9px] ml-1 mb-2 font-medium">Número da plaqueta de tombo (se houver)</span>
+                       <span className="text-slate-400 text-[9px] ml-1 mb-2 font-medium">Número da plaqueta (ou escaneie)</span>
                       </div>
-                      <Input ref={patrimonyRef} placeholder="Nº de Registro" value={newItem.patrimonyNumber} onChange={e => setNewItem({...newItem, patrimonyNumber: e.target.value})} onKeyDown={e => handleKeyDown(e, 1)} className="text-lg h-16 px-6 font-mono tracking-widest" />
+                      <div className="relative">
+                        <Input 
+                          ref={patrimonyRef}
+                          placeholder="Nº de Registro" 
+                          value={newItem.patrimonyNumber}
+                          onChange={e => setNewItem({...newItem, patrimonyNumber: e.target.value})}
+                          onKeyDown={e => handleKeyDown(e, 1)}
+                          className="text-lg h-16 pl-6 pr-16 font-mono tracking-widest"
+                          disabled={isOcrProcessing}
+                        />
+                        <input 
+                          type="file" 
+                          accept="image/*" 
+                          capture="environment" 
+                          ref={ocrInputRef} 
+                          onChange={handlePatrimonyOCR} 
+                          className="hidden" 
+                        />
+                        <button 
+                          type="button"
+                          onClick={() => ocrInputRef.current?.click()}
+                          disabled={isOcrProcessing}
+                          className="absolute right-2 top-1/2 -translate-y-1/2 p-3 bg-indigo-50 text-indigo-600 hover:bg-indigo-600 hover:text-white rounded-xl transition-all shadow-sm cursor-pointer"
+                          title="Escanear Plaqueta com a Câmara (OCR)"
+                        >
+                          {isOcrProcessing ? (
+                            <div className="w-5 h-5 border-2 border-indigo-600 border-t-transparent rounded-full animate-spin"></div>
+                          ) : (
+                            <ScanText className="w-5 h-5" />
+                          )}
+                        </button>
+                      </div>
                     </div>
 
                     <div className="flex flex-col gap-4">
@@ -1335,7 +1455,6 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
                  {editingAssetId && (<div className="mt-8 border-t border-slate-100 pt-8"><AssetTimeline assetId={editingAssetId} /></div>)}
                </div>
 
-               {/* Footer Fixo */}
                <div className="absolute bottom-0 inset-x-0 p-8 pt-4 bg-white border-t border-slate-100 flex items-center gap-4 z-30">
                   <Button variant="secondary" onClick={() => { setIsAdding(false); setEditingAssetId(null); setDuplicateWarning(null); }} className="flex-1 h-16 rounded-2xl text-[10px] uppercase font-black tracking-widest">Cancelar</Button>
                   <Button ref={addButtonRef} variant={editingAssetId ? "accent" : "outline"} onClick={handleAddItem} onKeyDown={e => handleKeyDown(e, 5)} disabled={!newItem.name} className="flex-1 h-16 rounded-2xl text-[10px] uppercase font-black tracking-widest border-slate-200">{editingAssetId ? 'Salvar Alterações' : 'Salvar e Fechar'}</Button>
@@ -1345,7 +1464,7 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
           </div>
         )}
 
-         {/* Barra de Filtro Semafórico Visual - Zero Digitação */}
+         {/* Barra de Filtro Semafórico Visual */}
          <div className="flex flex-wrap items-center justify-between gap-5 bg-white border border-slate-100 p-5 rounded-[2rem] px-8 select-none shadow-sm mb-4">
            <div className="flex items-center gap-3">
              <div className="w-10 h-10 rounded-[1.25rem] bg-indigo-50 border border-indigo-100/40 flex items-center justify-center text-indigo-500"><Filter className="w-5 h-5" /></div>

@@ -31,7 +31,10 @@ import {
   GraduationCap,
   ChevronLeft,
   ChevronRight,
-  Cloud
+  Cloud,
+  TrendingUp,
+  Activity,
+  AlertTriangle
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { db, Inspection, Location } from '../lib/db';
@@ -97,7 +100,7 @@ export function Dashboard() {
          const inspSnap = await getDoc(inspRef);
          if (inspSnap.exists()) {
             const data = inspSnap.data() as Inspection;
-            await db.inspections.put({ id: inspSnap.id, ...data } as any);
+            await db.inspections.put({ ...data, id: inspSnap.id } as any);
             handleScannerOpen(inspSnap.id, data.locationId);
             return;
          }
@@ -118,10 +121,22 @@ export function Dashboard() {
   const activeInspectionsCount = useLiveQuery(() => db.inspections.where('status').equals('em_andamento').count());
   const concludedInspectionsCount = useLiveQuery(() => db.inspections.where('status').anyOf('concluida', 'finalizada').count());
   
-  const totalAssetsCount = useLiveQuery(async () => {
-    const ativos = await db.assets.filter(a => !a.deleted).toArray();
-    return ativos.reduce((acc, curr) => acc + (Number(curr.quantity) || 1), 0);
-  });
+  // 🚀 NOVA QUERY INTELIGENTE: Puxa o total e a saúde do acervo de uma vez só
+  const assetsStats = useLiveQuery(async () => {
+    const ativos = await db.assets.filter(a => !a.deleted && !a.isTrashed).toArray();
+    let bom = 0, regular = 0, ruim = 0, inservivel = 0, total = 0;
+    
+    ativos.forEach(a => {
+      const q = Number(a.quantity) || 1;
+      total += q;
+      if (a.condition === 'bom' || a.condition === 'novo') bom += q;
+      else if (a.condition === 'regular') regular += q;
+      else if (a.condition === 'ruim') ruim += q;
+      else if (a.condition === 'inservivel') inservivel += q;
+    });
+    
+    return { total, bom, regular, ruim, inservivel };
+  }, []) || { total: 0, bom: 0, regular: 0, ruim: 0, inservivel: 0 };
 
   const pendingHomologation = useLiveQuery(() => db.inspections.where('status').equals('concluida').toArray());
 
@@ -396,8 +411,15 @@ export function Dashboard() {
         ) : <div className="p-20 text-center font-bold text-slate-400 uppercase tracking-widest">Acesso restrito.</div>;
       case 'home':
       default:
+        
+        // CÁLCULOS PERCENTUAIS PARA O GRÁFICO
+        const percBom = assetsStats.total > 0 ? Math.round((assetsStats.bom / assetsStats.total) * 100) : 0;
+        const percRegular = assetsStats.total > 0 ? Math.round((assetsStats.regular / assetsStats.total) * 100) : 0;
+        const percRuim = assetsStats.total > 0 ? Math.round((assetsStats.ruim / assetsStats.total) * 100) : 0;
+        const percInservivel = assetsStats.total > 0 ? Math.round((assetsStats.inservivel / assetsStats.total) * 100) : 0;
+
         return (
-          <div className="flex flex-col gap-10">
+          <div className="flex flex-col gap-8">
             {quotaExceeded && (
               <div className="bg-amber-50 border border-amber-200 rounded-[2.5rem] p-6 flex flex-col md:flex-row items-center gap-6 shadow-xl shadow-amber-500/5">
                 <div className="w-16 h-16 bg-white rounded-3xl flex items-center justify-center shadow-lg shadow-amber-500/10 shrink-0">
@@ -427,92 +449,86 @@ export function Dashboard() {
               </div>
             )}
 
-            <div className="relative overflow-hidden rounded-[2.5rem] bg-white border border-slate-100 p-8 lg:p-12 text-slate-900 shadow-[0_20px_60px_-15px_rgba(0,0,0,0.03)] group">
-              <div className="relative z-10 flex flex-col lg:flex-row items-center justify-between gap-12">
-                <div className="flex flex-col gap-6 text-center lg:text-left max-w-2xl">
-                  <div className="inline-flex items-center gap-2 px-3 py-1.5 bg-slate-50 border border-slate-100 rounded-full w-fit mx-auto lg:mx-0">
-                    <Zap className="w-4 h-4 text-indigo-600" />
-                    <span className="text-[10px] font-bold uppercase tracking-widest text-slate-500">Manoel Viana • Sistema Oficial</span>
+            {/* 🚀 TOPO: HEADER EXECUTIVO COM AÇÕES RÁPIDAS */}
+            <div className="flex flex-col lg:flex-row lg:items-end justify-between gap-6 px-2">
+              <div className="flex flex-col gap-2">
+                <h2 className="text-3xl lg:text-4xl font-display font-extrabold tracking-tight text-slate-900">
+                  Visão Geral <span className="text-indigo-600">Patrimonial</span>
+                </h2>
+                <p className="text-slate-500 font-medium text-sm">Resumo da auditoria pública de Manoel Viana.</p>
+              </div>
+              <div className="flex items-center gap-3">
+                <Button variant="outline" icon={Search} onClick={() => setActiveTab('scanner')} className="h-12 px-6 text-[10px] uppercase tracking-widest bg-white rounded-xl shadow-sm border-slate-200">
+                  Escanear QR
+                </Button>
+                <Button variant="accent" icon={Plus} onClick={() => setActiveTab('locations')} className="h-12 px-6 text-[10px] uppercase tracking-widest rounded-xl shadow-lg shadow-indigo-600/20">
+                  Nova Vistoria
+                </Button>
+              </div>
+            </div>
+
+            {/* 🚀 MÉTRICAS VITAIS PARA A GESTÃO */}
+            <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+              <SummaryCard label="Total Patrimônios" value={assetsStats.total} icon={Database} onClick={() => setActiveTab('reports')} variant="accent" />
+              <SummaryCard label="Setores em Auditoria" value={activeInspectionsCount || 0} icon={Building2} onClick={() => setActiveTab('locations')} />
+              <SummaryCard label="Itens Inservíveis" value={assetsStats.inservivel} icon={AlertTriangle} onClick={() => setActiveTab('reports')} customColor="text-rose-500" />
+              <SummaryCard label="Dossiês Concluídos" value={concludedInspectionsCount || 0} icon={CheckCircle2} onClick={() => setActiveTab('inspections')} />
+            </div>
+
+            {/* 🚀 SEÇÃO MEIO: GRÁFICOS E ATIVIDADE RECENTE */}
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+              
+              {/* PAINEL DE SAÚDE DO ACERVO */}
+              <Card className="lg:col-span-1 flex flex-col gap-6 p-8 rounded-[2rem] bg-white border-slate-100/60 shadow-sm hover:shadow-lg transition-all duration-500">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-xl bg-indigo-50 flex items-center justify-center text-indigo-600">
+                    <Activity className="w-5 h-5" />
                   </div>
-                  <h2 className="text-4xl lg:text-6xl font-display font-extrabold tracking-tight leading-[0.9] text-slate-900">
-                    Sua Vistoria <br /> 
-                    <span className="text-indigo-600">360 Graus.</span>
-                  </h2>
-                  <p className="text-slate-500 text-lg font-medium max-w-lg">
-                    Software inteligente de auditoria patrimonial. Monitore, escaneie e homologue bens públicos com transparência total.
-                  </p>
-                  <div className="flex flex-wrap items-center justify-center lg:justify-start gap-4 mt-4">
-                    <Button variant="accent" icon={Plus} onClick={() => setActiveTab('locations')} className="px-10 h-16 text-xs uppercase tracking-widest">
-                      Nova Vistoria
-                    </Button>
-                    <Button variant="outline" icon={Search} onClick={() => setActiveTab('scanner')} className="px-10 h-16 text-xs uppercase tracking-widest bg-white">
-                      Escanear QR
-                    </Button>
-                    <Button variant="outline" icon={Database} onClick={async () => {
-                        if (window.confirm("Isso fará uma limpeza segura e baixará todos os dados da nuvem novamente. Deseja continuar?")) {
-                          try {
-                            await db.locations.clear(); await db.inspections.clear(); await db.assets.clear(); await db.notifications.clear();
-                            ['lastSyncTime_locations','lastSyncTime_inspections','lastSyncTime_assets','lastSyncTime_users','lastSyncTime_notifications'].forEach(k => localStorage.removeItem(k));
-                            window.location.reload();
-                          } catch (error) { alert("Erro ao limpar cache."); }
-                        }
-                      }} className="px-10 h-16 text-xs uppercase tracking-widest bg-white">
-                      Sincronização Forçada
-                    </Button>
+                  <div className="flex flex-col">
+                    <h3 className="font-extrabold text-slate-900 tracking-tight">Saúde do Acervo</h3>
+                    <span className="text-[9px] font-bold text-slate-400 uppercase tracking-widest mt-0.5">Indicadores de Conservação</span>
                   </div>
+                </div>
+
+                <div className="flex flex-col gap-5 mt-2">
+                  <ProgressRow label="Bons / Novos" value={assetsStats.bom} percentage={percBom} color="bg-emerald-500" />
+                  <ProgressRow label="Regulares" value={assetsStats.regular} percentage={percRegular} color="bg-amber-500" />
+                  <ProgressRow label="Críticos / Ruins" value={assetsStats.ruim} percentage={percRuim} color="bg-rose-400" />
+                  <ProgressRow label="Inservíveis (Descarte)" value={assetsStats.inservivel} percentage={percInservivel} color="bg-rose-600" />
+                </div>
+              </Card>
+
+              {/* LISTA DE VISTORIAS RECENTES */}
+              <div className="lg:col-span-2 flex flex-col gap-4">
+                <div className="flex items-center justify-between px-2">
+                  <div className="flex items-center gap-2">
+                    <TrendingUp className="w-5 h-5 text-slate-400" />
+                    <h3 className="font-extrabold text-slate-900 tracking-tight">Atividade Recente</h3>
+                  </div>
+                  <button onClick={() => setActiveTab('inspections')} className="text-[10px] font-black text-indigo-600 uppercase tracking-widest hover:text-indigo-800 transition-colors">
+                    Ver Todas &rarr;
+                  </button>
                 </div>
                 
-                <div className="hidden lg:flex flex-col gap-6 relative">
-                   <Card className="p-8 bg-slate-900 border-slate-800 rounded-[2rem] shadow-2xl flex flex-col items-center gap-3 transform rotate-2 hover:rotate-0 transition-all duration-500 cursor-pointer group/card" onClick={() => setActiveTab('notifications')}>
-                      <div className="w-16 h-16 bg-white/5 rounded-2xl flex items-center justify-center border border-white/10 mb-2 transition-transform group-hover/card:scale-110">
-                        <Bell className="w-8 h-8 text-indigo-400" />
+                <div className="flex flex-col gap-3">
+                  {inspections?.length === 0 ? (
+                    <Card className="flex items-center justify-center py-16 text-slate-400 border-dashed border-2 bg-slate-50 rounded-[2rem]">
+                      <div className="text-center">
+                        <ClipboardList className="w-12 h-12 mx-auto opacity-20 mb-3" />
+                        <p className="text-xs font-black uppercase tracking-widest text-slate-400">Nenhuma vistoria iniciada</p>
                       </div>
-                      <span className="text-4xl font-display font-black text-white leading-none">{unreadNotifications}</span>
-                      <span className="text-[10px] font-bold text-slate-500 uppercase tracking-widest text-center">Alertas Críticos<br/>Pendentes</span>
-                   </Card>
-                   <div className="absolute -top-16 -left-24 p-6 bg-indigo-600 rounded-[2rem] shadow-2xl flex flex-col items-center gap-1 transform -rotate-6 scale-90 border border-indigo-500">
-                      <ShieldCheck className="w-8 h-8 text-white" />
-                      <span className="text-[10px] font-bold text-indigo-200 uppercase tracking-widest mt-2">Vistorias</span>
-                      <span className="text-2xl font-display font-extrabold text-white leading-none">{concludedInspectionsCount || 0}</span>
-                   </div>
+                    </Card>
+                  ) : (
+                    inspections?.slice(0, 4).map(insp => (
+                      <RecentInspectionRow 
+                        key={insp.id} 
+                        inspection={insp} 
+                        locationName={locations?.find(l => l.id === insp.locationId)?.name || 'Localização Desconhecida'} 
+                        onClick={() => setSelectedInspectionId(insp.id)}
+                      />
+                    ))
+                  )}
                 </div>
-              </div>
-              <Building2 className="absolute -bottom-24 -right-16 w-80 h-80 text-slate-100 opacity-20 transform -rotate-12 pointer-events-none group-hover:scale-110 transition-transform duration-1000" />
-            </div>
-
-            <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-              <SummaryCard label="Localizações" value={locations?.length || 0} icon={Building2} onClick={() => setActiveTab('locations')} />
-              <SummaryCard label="Em Andamento" value={activeInspectionsCount || 0} icon={ClipboardList} variant="accent" onClick={() => setActiveTab('inspections')} />
-              <SummaryCard label="Concluídas" value={concludedInspectionsCount || 0} icon={CheckCircle2} onClick={() => setActiveTab('inspections')} />
-              <SummaryCard label="Total de Itens" value={totalAssetsCount || 0} icon={ShieldCheck} onClick={() => setActiveTab('reports')} />
-            </div>
-
-            <div className="flex flex-col gap-6">
-              <div className="flex items-center justify-between ml-1 leading-none">
-                <div className="flex flex-col">
-                  <h3 className="text-xs font-black text-slate-500 uppercase tracking-[0.2em]">Fluxo de Atividades</h3>
-                  <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mt-1">Vistorias recentes no sistema</span>
-                </div>
-                <button onClick={() => setActiveTab('inspections')} className="flex items-center gap-2 text-[10px] font-black text-indigo-600 border-2 border-indigo-600 px-4 py-2 rounded-xl hover:bg-indigo-600 hover:text-white transition-all">VER TODAS <ArrowRight className="w-3 h-3" /></button>
-              </div>
-              <div className="grid grid-cols-1 gap-3">
-                {inspections?.length === 0 ? (
-                  <Card className="flex items-center justify-center py-20 text-slate-400 border-dashed border-2 bg-slate-50 rounded-[3rem]">
-                    <div className="text-center">
-                      <ClipboardList className="w-16 h-16 mx-auto opacity-20 mb-4" />
-                      <p className="text-sm font-black uppercase tracking-widest text-slate-400">Nenhuma vistoria registrada</p>
-                    </div>
-                  </Card>
-                ) : (
-                  inspections?.map(insp => (
-                    <RecentInspectionRow 
-                      key={insp.id} 
-                      inspection={insp} 
-                      locationName={locations?.find(l => l.id === insp.locationId)?.name || '...'} 
-                      onClick={() => setSelectedInspectionId(insp.id)}
-                    />
-                  ))
-                )}
               </div>
             </div>
           </div>
@@ -691,14 +707,31 @@ export function Dashboard() {
 // COMPONENTES MENORES (UI ATUALIZADA)
 // ==========================================
 
-function SummaryCard({ label, value, icon: Icon, onClick, variant = 'default' }: { label: string, value: number | string, icon: any, onClick: () => void, variant?: 'default' | 'accent' }) {
+function ProgressRow({ label, value, percentage, color }: { label: string, value: number, percentage: number, color: string }) {
+  return (
+    <div className="flex flex-col gap-2">
+      <div className="flex justify-between items-end">
+        <span className="text-xs font-bold text-slate-700">{label}</span>
+        <div className="flex items-baseline gap-1">
+          <span className="text-sm font-black text-slate-900 leading-none">{value}</span>
+          <span className="text-[10px] font-bold text-slate-400">({percentage}%)</span>
+        </div>
+      </div>
+      <div className="h-2 w-full bg-slate-100 rounded-full overflow-hidden">
+        <div className={cn("h-full rounded-full transition-all duration-1000", color)} style={{ width: `${percentage}%` }} />
+      </div>
+    </div>
+  );
+}
+
+function SummaryCard({ label, value, icon: Icon, onClick, variant = 'default', customColor }: { label: string, value: number | string, icon: any, onClick: () => void, variant?: 'default' | 'accent', customColor?: string }) {
   return (
     <Card onClick={onClick} className={cn("group h-40 flex flex-col justify-between border-slate-100/60 px-6 py-6 cursor-pointer rounded-[2rem]", variant === 'accent' ? "bg-slate-900 border-transparent shadow-xl shadow-slate-900/10" : "bg-white shadow-sm hover:shadow-xl hover:shadow-indigo-500/5")}>
-      <div className={cn("w-12 h-12 rounded-[1rem] flex items-center justify-center transition-all duration-500", variant === 'accent' ? "bg-white/10" : "bg-indigo-50/50 group-hover:bg-indigo-600 text-indigo-500 group-hover:text-white")}>
-        <Icon className="w-6 h-6 transform group-hover:rotate-12 transition-transform" />
+      <div className={cn("w-12 h-12 rounded-[1rem] flex items-center justify-center transition-all duration-500", variant === 'accent' ? "bg-white/10" : "bg-indigo-50/50 group-hover:bg-indigo-600 text-indigo-500 group-hover:text-white", customColor && `text-${customColor.split('-')[1]}-500 bg-${customColor.split('-')[1]}-50 group-hover:bg-${customColor.split('-')[1]}-500`)}>
+        <Icon className={cn("w-6 h-6 transform group-hover:rotate-12 transition-transform", customColor && customColor)} />
       </div>
       <div className="flex flex-col">
-        <span className={cn("text-4xl font-display font-extrabold tracking-tight", variant === 'accent' ? "text-white" : "text-slate-900")}>{value}</span>
+        <span className={cn("text-4xl font-display font-extrabold tracking-tight", variant === 'accent' ? "text-white" : "text-slate-900", customColor && customColor)}>{value}</span>
         <span className={cn("text-[10px] uppercase font-bold tracking-widest mt-2", variant === 'accent' ? "text-slate-400" : "text-slate-400")}>{label}</span>
       </div>
     </Card>
@@ -710,7 +743,7 @@ function RecentInspectionRow({ inspection, locationName, onClick }: { inspection
   const isInProgress = inspection.status === 'em_andamento';
   
   const assetCount = useLiveQuery(async () => {
-    const itens = await db.assets.where('inspectionId').equals(inspection.id).toArray();
+    const itens = await db.assets.where('inspectionId').equals(inspection.id).filter(a => !a.deleted && !a.isTrashed).toArray();
     return itens.reduce((acc, curr) => acc + (Number(curr.quantity) || 1), 0);
   }, [inspection.id]);
 
