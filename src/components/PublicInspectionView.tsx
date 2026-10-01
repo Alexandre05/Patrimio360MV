@@ -1,11 +1,9 @@
 import React, { useState, useEffect } from 'react';
-import { db as firestore } from '../lib/firebase';
-import { doc, getDoc, collection, query, where, getDocs, orderBy, limit } from 'firebase/firestore';
+import { supabase } from '../lib/supabase'; // Nosso Supabase oficial
 import { Inspection, Location, Asset } from '../lib/db';
 import { formatDate } from '../lib/utils';
-import { ShieldCheck, MapPin, Search, Box, CheckCircle2, AlertTriangle, AlertCircle, XCircle, Maximize2, X, Calendar, Landmark, ExternalLink } from 'lucide-react';
+import { ShieldCheck, MapPin, Search, Box, CheckCircle2, AlertTriangle, AlertCircle, XCircle, Maximize2, X, Calendar, Landmark, Award, ShieldAlert, Sparkles, Layers } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
-
 import { useAuth } from '../lib/AuthContext';
 
 export function PublicInspectionView({ inspectionId: propId, locationId: propLocationId }: { inspectionId?: string; locationId?: string }) {
@@ -21,13 +19,11 @@ export function PublicInspectionView({ inspectionId: propId, locationId: propLoc
   useEffect(() => {
     const initializeAndFetch = async () => {
       try {
-        // 1. Aguarda a autenticação (Crachá de visitante ou usuário logado)
         const { auth } = await import('../lib/firebase');
         if (!auth.currentUser) {
           await signInAsGuest();
         }
 
-        // 2. Extrai os parâmetros do link
         let id = propId;
         let locId = propLocationId;
 
@@ -45,7 +41,6 @@ export function PublicInspectionView({ inspectionId: propId, locationId: propLoc
           }
         }
         
-        // 3. Somente DEPOIS de autenticado, faz a busca
         if (id) {
           await fetchDataByInspection(id);
         } else if (locId) {
@@ -56,11 +51,7 @@ export function PublicInspectionView({ inspectionId: propId, locationId: propLoc
         }
       } catch (err: any) {
         console.error("Erro na inicialização pública:", err);
-        if (err.code === 'auth/network-request-failed' || err.message?.includes('network-request-failed') || err.message?.includes('auth/')) {
-          setError("Não foi possível conectar com segurança aos servidores de autenticação do Firebase. Isso geralmente ocorre devido a restrições de segurança do navegador que bloqueiam cookies e armazenamento de terceiros dentro do modo de visualização (iframe) do AI Studio. Por favor, clique no botão abaixo para abrir o aplicativo em uma Nova Aba.");
-        } else {
-          setError(err.message || "Erro desconhecido ao carregar dados.");
-        }
+        setError(err.message || "Erro desconhecido ao carregar dados.");
         setLoading(false);
       }
     };
@@ -68,19 +59,8 @@ export function PublicInspectionView({ inspectionId: propId, locationId: propLoc
     initializeAndFetch();
   }, [propId, propLocationId]);
 
-  const getTimestampMs = (val: any) => {
-    if (!val) return 0;
-    if (typeof val === 'number') return val;
-    if (typeof val.toMillis === 'function') return val.toMillis();
-    if (val.seconds) return val.seconds * 1000;
-    return new Date(val).getTime() || 0;
-  };
-
   const getDisplayDate = (insp: any) => {
-    const finalDate = insp.finalizedAt || insp.updatedAt || insp.date;
-    if (finalDate && typeof finalDate.toMillis === 'function') return finalDate.toMillis();
-    if (finalDate && finalDate.seconds) return finalDate.seconds * 1000;
-    return finalDate;
+    return insp.finalizedAt || insp.updatedAt || insp.date;
   };
 
   const fetchDataByLocation = async (locId: string) => {
@@ -88,27 +68,28 @@ export function PublicInspectionView({ inspectionId: propId, locationId: propLoc
       setLoading(true);
       setError(null);
 
-      // Find latest finalized inspection for this location
-      // We must explicitly filter by status to match security rules for list operations
-      const inspQuery = query(
-        collection(firestore, 'inspections'),
-        where('locationId', '==', locId),
-        where('status', '==', 'finalizada'),
-        limit(5)
-      );
+      const { data: inspData, error: inspError } = await supabase
+        .from('inspections')
+        .select('*')
+        .eq('locationId', locId)
+        .eq('status', 'finalizada')
+        .order('finalizedAt', { ascending: false })
+        .limit(5);
 
-      const inspSnap = await getDocs(inspQuery);
-      
-      const finishedInspections = inspSnap.docs
-        .map(d => ({ id: d.id, ...d.data() } as Inspection))
-        .sort((a, b) => getTimestampMs(b.finalizedAt) - getTimestampMs(a.finalizedAt));
+      if (inspError) throw inspError;
 
-      if (finishedInspections.length === 0) {
-        // Find location info anyway to show a better error
-        const locRef = doc(firestore, 'locations', locId);
-        const locSnap = await getDoc(locRef);
-        if (locSnap.exists()) {
-          setLocation({ id: locSnap.id, ...locSnap.data() } as Location);
+      if (!inspData || inspData.length === 0) {
+        const { data: locData } = await supabase.from('locations').select('*').eq('id', locId).single();
+
+        if (locData) {
+          setLocation({
+            id: locData.id,
+            name: locData.name,
+            description: locData.description,
+            latitude: locData.latitude,
+            longitude: locData.longitude,
+            parentId: locData.parentId
+          });
           setError("Esta sala ainda não possui vistorias homologadas.");
         } else {
           setError("Localização não encontrada.");
@@ -117,17 +98,10 @@ export function PublicInspectionView({ inspectionId: propId, locationId: propLoc
         return;
       }
 
-      const latestInsp = finishedInspections[0];
+      const latestInsp = inspData[0];
       await fetchDataByInspection(latestInsp.id);
     } catch (err: any) {
-      console.error("fetchDataByLocation error:", err);
-      if (err.message && err.message.toLowerCase().includes('permission')) {
-        setError("Acesso negado. Esta vistoria pode não estar publicada.");
-      } else if (err.message && err.message.includes('index')) {
-        setError("Erro de configuração (índice ausente). O administrador precisa criar o índice no Firebase.");
-      } else {
-        setError("Falha ao buscar dados do local. Verifique sua conexão.");
-      }
+      setError("Falha ao buscar dados do local. Verifique sua conexão.");
       setLoading(false);
     }
   };
@@ -137,98 +111,108 @@ export function PublicInspectionView({ inspectionId: propId, locationId: propLoc
       setLoading(true);
       setError(null);
 
-      const inspRef = doc(firestore, 'inspections', id);
-      const inspSnap = await getDoc(inspRef);
+      const { data: inspData, error: inspError } = await supabase
+        .from('inspections')
+        .select('*')
+        .eq('id', id)
+        .single();
 
-      if (!inspSnap.exists()) {
+      if (inspError) {
         setError("Vistoria não encontrada.");
         setLoading(false);
         return;
       }
 
-      const inspData = inspSnap.data() as Inspection;
-      setInspection({ id: inspSnap.id, ...inspData });
+      setInspection({
+        id: inspData.id,
+        locationId: inspData.locationId,
+        date: inspData.date,
+        participants: inspData.participants,
+        status: inspData.status,
+        concludedBy: inspData.concludedBy,
+        concludedAt: inspData.concludedAt,
+        finalizedBy: inspData.finalizedBy,
+        finalizedAt: inspData.finalizedAt,
+        qrCodeData: inspData.qrCodeData
+      });
 
-      const locRef = doc(firestore, 'locations', inspData.locationId);
-      const locSnap = await getDoc(locRef);
-      if (locSnap.exists()) {
-        setLocation({ id: locSnap.id, ...locSnap.data() } as Location);
+      const { data: locData } = await supabase
+        .from('locations')
+        .select('*')
+        .eq('id', inspData.locationId)
+        .single();
+
+      if (locData) {
+        setLocation({
+          id: locData.id,
+          name: locData.name,
+          description: locData.description,
+          latitude: locData.latitude,
+          longitude: locData.longitude,
+          parentId: locData.parentId
+        });
       }
 
-      const assetsQuery = query(
-        collection(firestore, 'assets'), 
-        where('inspectionId', '==', inspSnap.id),
-        limit(3000)
-      );
-      const assetsSnap = await getDocs(assetsQuery);
-      const loadedAssets = assetsSnap.docs.map(doc => ({ id: doc.id, ...doc.data() } as Asset)).filter(a => !a.deleted);
+      const { data: assetsData } = await supabase
+        .from('assets')
+        .select('*')
+        .eq('inspectionId', id)
+        .eq('deleted', false)
+        .limit(3000);
+
+      const loadedAssets = (assetsData || []).map(a => ({
+        id: a.id,
+        inspectionId: a.inspectionId,
+        name: a.name,
+        patrimonyNumber: a.patrimonyNumber,
+        condition: a.condition,
+        photos: a.photos,
+        observations: a.observations,
+        createdBy: a.createdBy,
+        createdAt: a.createdAt,
+        hash: a.hash,
+        quantity: a.quantity
+      })) as Asset[];
       
       setAssets(loadedAssets.sort((a, b) => b.createdAt - a.createdAt));
       
     } catch (err: any) {
-      console.error("fetchDataByInspection error:", err);
-      const technicalInfo = err.code || err.message || "Erro desconhecido";
-      if (err.message && err.message.toLowerCase().includes('permission')) {
-        setError(`Acesso negado (${technicalInfo}). Verifique se a vistoria foi finalizada.`);
-      } else if (err.message && err.message.includes('index')) {
-        setError(`Erro de índice (${technicalInfo}). O administrador precisa criar o índice no Firebase.`);
-      } else {
-        setError(`Erro ao carregar dados (${technicalInfo}).`);
-      }
+      setError(`Erro ao carregar dados: ${err.message || "Erro desconhecido"}.`);
     } finally {
       setLoading(false);
     }
   };
 
-  const conditionColors: Record<string, string> = {
-    'novo': 'bg-emerald-50 text-emerald-700 border-emerald-200',
-    'bom': 'bg-emerald-50 text-emerald-700 border-emerald-200',
-    'regular': 'bg-amber-50 text-amber-700 border-amber-200',
-    'ruim': 'bg-rose-50 text-rose-700 border-rose-200',
-    'inservivel': 'bg-rose-50 text-rose-700 border-rose-200'
-  };
-
-  const getConditionIcon = (condition: string) => {
-    switch (condition) {
-       case 'novo': return <CheckCircle2 className="w-4 h-4" />;
-       case 'bom': return <CheckCircle2 className="w-4 h-4" />;
-       case 'regular': return <AlertTriangle className="w-4 h-4" />;
-       case 'ruim': return <AlertCircle className="w-4 h-4" />;
-       case 'inservivel': return <XCircle className="w-4 h-4" />;
-       default: return <CheckCircle2 className="w-4 h-4" />;
-    }
+  const conditionBadges: Record<string, { label: string, className: string, icon: any }> = {
+    'novo': { label: 'Novo / Excelente', className: 'bg-emerald-50 text-emerald-700 border-emerald-200', icon: CheckCircle2 },
+    'bom': { label: 'Bom Estado', className: 'bg-emerald-50 text-emerald-700 border-emerald-200', icon: CheckCircle2 },
+    'regular': { label: 'Estado Regular', className: 'bg-amber-50 text-amber-700 border-amber-200', icon: AlertTriangle },
+    'ruim': { label: 'Requer Manutenção', className: 'bg-rose-50 text-rose-700 border-rose-200', icon: AlertCircle },
+    'inservivel': { label: 'Inservível / Descarte', className: 'bg-slate-100 text-slate-700 border-slate-300', icon: XCircle }
   };
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-slate-50 flex items-center justify-center p-6">
-        <div className="flex flex-col items-center gap-4 animate-pulse">
-           <Search className="w-12 h-12 text-blue-600 animate-spin" />
-           <p className="text-blue-800 font-medium tracking-tight">Buscando informações oficiais...</p>
+      <div className="min-h-screen bg-slate-950 flex items-center justify-center p-6 text-white">
+        <div className="flex flex-col items-center gap-5">
+           <div className="w-16 h-16 rounded-3xl bg-indigo-600/20 border border-indigo-500/30 flex items-center justify-center animate-pulse">
+              <Sparkles className="w-8 h-8 text-indigo-400 animate-spin" />
+           </div>
+           <p className="text-slate-400 font-display font-semibold tracking-wider text-sm uppercase">Carregando Dossiê Oficial...</p>
         </div>
       </div>
     );
   }
 
   if (error || !inspection) {
-    const isNetworkOrIframeError = error?.includes("autenticação") || error?.includes("CONEXÃO") || error?.includes("auth/") || error?.includes("network-request-failed");
     return (
       <div className="min-h-screen bg-slate-50 flex items-center justify-center p-6 text-center">
-        <div className="bg-white p-8 rounded-2xl shadow-sm max-w-md w-full border border-rose-200">
-           <div className="w-16 h-16 bg-rose-50 text-rose-600 rounded-full flex items-center justify-center mx-auto mb-4">
-              <AlertTriangle className="w-8 h-8" />
+        <div className="bg-white p-10 rounded-[2.5rem] shadow-xl max-w-md w-full border border-slate-100 flex flex-col items-center">
+           <div className="w-20 h-20 bg-rose-50 text-rose-600 rounded-3xl flex items-center justify-center mb-6 shadow-inner border border-rose-100">
+              <ShieldAlert className="w-10 h-10" />
            </div>
-           <h2 className="text-2xl font-bold text-slate-800 mb-2">Atenção</h2>
-           <p className="text-slate-600 text-sm leading-relaxed mb-6 font-medium">{error || "Registro não localizado no sistema."}</p>
-           {isNetworkOrIframeError && (
-             <button
-               onClick={() => window.open(window.location.href, '_blank')}
-               className="w-full flex items-center justify-center gap-2 px-4 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl font-semibold shadow-sm transition-colors text-sm"
-             >
-               <ExternalLink className="w-4 h-4" />
-               Abrir em Nova Aba
-             </button>
-           )}
+           <h2 className="text-2xl font-display font-black text-slate-900 mb-2">Registro Indisponível</h2>
+           <p className="text-slate-500 text-sm leading-relaxed mb-6 font-medium">{error || "O local solicitado não foi encontrado no servidor."}</p>
         </div>
       </div>
     );
@@ -237,16 +221,13 @@ export function PublicInspectionView({ inspectionId: propId, locationId: propLoc
   if (inspection.status !== 'finalizada') {
     return (
       <div className="min-h-screen bg-slate-50 flex flex-col items-center justify-center p-8 text-center font-sans">
-        <div className="w-20 h-20 bg-amber-50 text-amber-600 rounded-2xl flex items-center justify-center mb-6 shadow-sm border border-amber-200">
+        <div className="w-20 h-20 bg-amber-50 text-amber-600 rounded-3xl flex items-center justify-center mb-6 shadow-sm border border-amber-100">
           <AlertCircle className="w-10 h-10" />
         </div>
-        <h1 className="text-2xl font-bold text-slate-900 mb-2 tracking-tight">Análise em Andamento</h1>
-        <p className="text-slate-600 max-w-sm leading-relaxed font-medium">
-          Este registro ainda está sob análise da administração pública e aguarda homologação oficial para publicação na transparência.
+        <h1 className="text-2xl font-display font-black text-slate-900 mb-3 tracking-tight">Homologação Pendente</h1>
+        <p className="text-slate-500 max-w-sm leading-relaxed font-medium text-sm">
+          Este ambiente encontra-se em auditoria interna e aguarda protocolagem oficial para publicação no Portal da Transparência.
         </p>
-        <div className="mt-8 pt-8 border-t border-slate-200">
-           <p className="text-xs font-semibold text-slate-400 uppercase tracking-widest">Portal da Transparência</p>
-        </div>
       </div>
     );
   }
@@ -264,20 +245,20 @@ export function PublicInspectionView({ inspectionId: propId, locationId: propLoc
   );
 
   return (
-    <div className="min-h-screen bg-slate-50 font-sans pb-20">
+    <div className="min-h-screen bg-slate-50/70 font-sans pb-24">
       <AnimatePresence>
         {selectedImage && (
           <motion.div 
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
-            className="fixed inset-0 z-[100] bg-black/95 flex items-center justify-center p-4 backdrop-blur-sm"
+            className="fixed inset-0 z-[100] bg-black/95 flex items-center justify-center p-4 backdrop-blur-md"
             onClick={() => setSelectedImage(null)}
           >
             <motion.button 
               initial={{ scale: 0.5, opacity: 0 }}
               animate={{ scale: 1, opacity: 1 }}
-              className="absolute top-6 right-6 w-12 h-12 bg-white/10 hover:bg-white/20 text-white rounded-full flex items-center justify-center backdrop-blur-md transition-colors duration-200"
+              className="absolute top-6 right-6 w-12 h-12 bg-white/10 hover:bg-white/20 text-white rounded-full flex items-center justify-center backdrop-blur-md transition-colors duration-200 shadow-2xl"
               onClick={() => setSelectedImage(null)}
             >
               <X className="w-6 h-6" />
@@ -287,170 +268,189 @@ export function PublicInspectionView({ inspectionId: propId, locationId: propLoc
               animate={{ scale: 1, opacity: 1 }}
               transition={{ type: 'spring', damping: 25, stiffness: 300 }}
               src={selectedImage} 
-              alt="Imagem ampliada" 
-              className="max-w-full max-h-[90vh] rounded-xl shadow-2xl"
+              alt="Evidência ampliada" 
+              className="max-w-full max-h-[95vh] rounded-2xl shadow-2xl border border-white/10 object-contain"
               onClick={(e) => e.stopPropagation()}
             />
           </motion.div>
         )}
       </AnimatePresence>
 
-      {/* Header Banner - Ultra Modern GovTech Style */}
-      <div className="bg-[#050B14] text-white pt-12 pb-24 px-6 relative overflow-hidden">
-        {/* Deep, majestic top glow */}
-        <div className="absolute top-0 left-1/2 -translate-x-1/2 w-full max-w-3xl h-[400px] opacity-40 pointer-events-none">
-           <div className="absolute inset-0 bg-gradient-to-b from-blue-500/30 to-transparent blur-3xl"></div>
-           <div className="absolute top-0 left-1/4 w-1/2 h-[200px] bg-blue-400/20 blur-[100px]"></div>
+      {/* Header Institucional de Luxo */}
+      <div className="bg-gradient-to-br from-slate-950 via-slate-900 to-indigo-950 text-white pt-12 pb-28 px-6 relative overflow-hidden shadow-2xl">
+        <div className="absolute top-0 left-1/2 -translate-x-1/2 w-full max-w-4xl h-[350px] opacity-30 pointer-events-none">
+           <div className="absolute inset-0 bg-gradient-to-b from-indigo-500/30 to-transparent blur-3xl"></div>
         </div>
         
-        {/* Premium Grid Pattern */}
-        <div className="absolute inset-0 opacity-[0.05]" style={{ backgroundImage: 'radial-gradient(circle at 2px 2px, white 1px, transparent 0)', backgroundSize: '24px 24px' }}></div>
+        <div className="absolute inset-0 opacity-[0.03]" style={{ backgroundImage: 'radial-gradient(circle at 2px 2px, white 1px, transparent 0)', backgroundSize: '24px 24px' }}></div>
         
-        <div className="relative z-10 max-w-2xl mx-auto flex flex-col items-center text-center">
-           <div className="w-16 h-16 bg-white/5 backdrop-blur-xl border border-white/10 rounded-[1.25rem] flex items-center justify-center mb-6 shadow-2xl relative group">
-             <div className="absolute inset-0 bg-gradient-to-tr from-blue-500/20 to-emerald-500/20 rounded-[1.25rem] opacity-0 group-hover:opacity-100 transition-opacity duration-500"></div>
-             <Landmark className="w-8 h-8 text-blue-100" strokeWidth={1.5} />
+        <div className="relative z-10 max-w-3xl mx-auto flex flex-col items-center text-center">
+           <div className="w-20 h-20 bg-white/10 backdrop-blur-2xl border border-white/20 rounded-[2rem] flex items-center justify-center mb-6 shadow-2xl relative group">
+              <div className="absolute inset-0 bg-gradient-to-tr from-blue-500/30 to-emerald-500/30 rounded-[2rem] opacity-70"></div>
+              <Landmark className="w-9 h-9 text-white relative z-10" strokeWidth={1.75} />
            </div>
-           <h1 className="text-3xl md:text-4xl font-display font-semibold tracking-tight mb-3 text-transparent bg-clip-text bg-gradient-to-b from-white to-white/70">Consulta de Patrimônio</h1>
-           <p className="text-blue-200/80 font-medium mb-8 tracking-wide text-sm md:text-base">Portal da Transparência • Edição Oficial</p>
+
+           <div className="inline-flex items-center gap-2 px-4 py-1.5 bg-emerald-500/10 border border-emerald-500/30 rounded-full mb-4 text-emerald-400 text-[10px] font-black uppercase tracking-[0.2em] shadow-lg">
+              <ShieldCheck className="w-4 h-4" />
+              <span>Selo Oficial de Transparência</span>
+           </div>
+
+           <h1 className="text-3xl md:text-5xl font-display font-extrabold tracking-tight mb-3 text-white">Auditoria Patrimonial</h1>
+           <p className="text-slate-400 font-medium mb-8 tracking-wide text-xs md:text-sm uppercase tracking-[0.2em]">Prefeitura Municipal de Manoel Viana • RS</p>
            
-           <div className="bg-white/5 backdrop-blur-md border border-white/10 rounded-2xl p-1 w-full md:w-auto overflow-hidden relative">
-             <div className="absolute inset-0 bg-gradient-to-r from-blue-500/10 via-transparent to-emerald-500/10 opacity-50"></div>
-             <div className="bg-slate-900/40 rounded-xl px-6 py-4 relative z-10">
-               <div className="flex flex-col md:flex-row items-center gap-4 md:gap-6 text-sm">
-                 <div className="flex items-center gap-2 text-blue-100/90">
-                   <Calendar className="w-4 h-4 opacity-70" />
-                   <span className="font-medium">Data-Base: {formatDate(getDisplayDate(inspection))}</span>
-                 </div>
-                 <div className="hidden md:block w-px h-5 bg-white/10"></div>
-                 <div className="flex items-center gap-2 text-emerald-400 font-semibold drop-shadow-[0_0_15px_rgba(52,211,153,0.3)]">
-                   <CheckCircle2 className="w-4 h-4" />
-                   <span>Homologado Oficialmente</span>
-                 </div>
+           <div className="bg-white/5 backdrop-blur-xl border border-white/10 rounded-3xl p-2 w-full max-w-xl shadow-2xl">
+             <div className="bg-slate-900/60 rounded-2xl px-6 py-4 flex flex-col md:flex-row items-center justify-around gap-4 text-xs font-semibold">
+               <div className="flex items-center gap-2.5 text-slate-300">
+                 <Calendar className="w-4 h-4 text-indigo-400" />
+                 <span>Homologado em: {formatDate(getDisplayDate(inspection))}</span>
                </div>
-               <div className="mt-3 pt-3 border-t border-white/5">
-                  <p className="text-[11px] text-white/40 font-mono tracking-widest uppercase">Protocolo: {inspection.id}</p>
+               <div className="hidden md:block w-px h-5 bg-white/10"></div>
+               <div className="text-slate-400 font-mono text-[10px] tracking-widest truncate">
+                 ID: {inspection.id.substring(0, 18)}...
                </div>
              </div>
            </div>
         </div>
       </div>
 
-      {/* Content wrapper */}
-      <div className="max-w-2xl mx-auto px-4 -mt-10 relative z-20 flex flex-col gap-6">
-        
-        {/* Info Card */}
-        <div className="bg-white rounded-2xl p-6 shadow-sm border border-slate-200">
-           <div className="flex flex-col md:flex-row items-start md:items-center gap-4">
-              <div className="w-12 h-12 bg-slate-100 text-slate-600 rounded-xl flex items-center justify-center shrink-0 border border-slate-200">
-                <MapPin className="w-6 h-6" />
+      {/* Conteúdo Principal com Elevação */}
+      <div className="max-w-4xl mx-auto px-4 -mt-14 relative z-20 flex flex-col gap-8">
+        {/* Card do Local Inspecionado */}
+        <div className="bg-white rounded-[2.5rem] p-8 shadow-[0_20px_50px_rgba(0,0,0,0.06)] border border-slate-100 flex flex-col md:flex-row items-start md:items-center justify-between gap-6">
+           <div className="flex items-center gap-5">
+              <div className="w-16 h-16 bg-indigo-50 text-indigo-600 rounded-2xl flex items-center justify-center shrink-0 border border-indigo-100/50 shadow-inner">
+                <MapPin className="w-8 h-8" />
               </div>
-              <div className="flex-1">
-                <p className="text-xs font-semibold text-slate-500 uppercase tracking-widest mb-1">Local Inspecionado</p>
-                <h2 className="text-xl font-bold text-slate-800 leading-tight">{location?.name || 'Local Desconhecido'}</h2>
-                {location?.description && <p className="text-sm text-slate-500 mt-1">{location.description}</p>}
+              <div className="flex flex-col gap-1">
+                <span className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em]">Repartição / Setor Auditado</span>
+                <h2 className="text-2xl lg:text-3xl font-display font-black text-slate-900 leading-tight">{location?.name || 'Local Desconhecido'}</h2>
+                {location?.description && <p className="text-sm font-medium text-slate-500 mt-0.5">{location.description}</p>}
               </div>
-              <div className="bg-blue-50 text-blue-700 px-4 py-2 rounded-xl border border-blue-100 flex flex-col items-center">
-                 <span className="text-xs font-semibold uppercase">Itens</span>
-                 <span className="text-2xl font-bold leading-none">{stats.total}</span>
-              </div>
+           </div>
+           
+           <div className="bg-slate-900 text-white px-8 py-5 rounded-3xl shadow-xl shadow-slate-900/10 flex flex-col items-center shrink-0 w-full md:w-auto">
+              <span className="text-[10px] font-black uppercase tracking-widest text-indigo-300">Total Físico</span>
+              <span className="text-4xl font-display font-black mt-0.5 leading-none">{stats.total}</span>
+              <span className="text-[9px] font-bold text-slate-400 uppercase tracking-wider mt-1">Bens Tombados</span>
            </div>
         </div>
 
-        {/* Status Highlights */}
-        <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
-          <div className="bg-white p-4 rounded-2xl border border-emerald-200 shadow-sm flex flex-col">
-            <span className="text-3xl font-bold text-emerald-600 mb-1">{stats.bons}</span>
-            <span className="text-xs font-bold text-emerald-800 uppercase">Conservado/Novo</span>
+        {/* Estatísticas e Condição do Acervo */}
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <div className="bg-white p-6 rounded-[2rem] border border-emerald-100 shadow-sm flex items-center gap-5">
+             <div className="w-14 h-14 bg-emerald-50 text-emerald-600 rounded-2xl flex items-center justify-center shrink-0 border border-emerald-100"><CheckCircle2 className="w-7 h-7" /></div>
+             <div className="flex flex-col">
+                <span className="text-3xl font-display font-black text-slate-900 leading-none mb-1">{stats.bons}</span>
+                <span className="text-[10px] font-black text-emerald-700 uppercase tracking-widest">Bens Conservados</span>
+             </div>
           </div>
-          <div className="bg-white p-4 rounded-2xl border border-amber-200 shadow-sm flex flex-col">
-            <span className="text-3xl font-bold text-amber-600 mb-1">{stats.regular}</span>
-            <span className="text-xs font-bold text-amber-800 uppercase">Estado Regular</span>
+          
+          <div className="bg-white p-6 rounded-[2rem] border border-amber-100 shadow-sm flex items-center gap-5">
+             <div className="w-14 h-14 bg-amber-50 text-amber-600 rounded-2xl flex items-center justify-center shrink-0 border border-amber-100"><AlertTriangle className="w-7 h-7" /></div>
+             <div className="flex flex-col">
+                <span className="text-3xl font-display font-black text-slate-900 leading-none mb-1">{stats.regular}</span>
+                <span className="text-[10px] font-black text-amber-700 uppercase tracking-widest">Estado Regular</span>
+             </div>
           </div>
-          <div className="bg-white p-4 rounded-2xl border border-rose-200 shadow-sm flex flex-col md:col-span-1 col-span-2">
-            <span className="text-3xl font-bold text-rose-600 mb-1">{stats.ruins}</span>
-            <span className="text-xs font-bold text-rose-800 uppercase">Requer Atenção</span>
+
+          <div className="bg-white p-6 rounded-[2rem] border border-rose-100 shadow-sm flex items-center gap-5">
+             <div className="w-14 h-14 bg-rose-50 text-rose-600 rounded-2xl flex items-center justify-center shrink-0 border border-rose-100"><AlertCircle className="w-7 h-7" /></div>
+             <div className="flex flex-col">
+                <span className="text-3xl font-display font-black text-slate-900 leading-none mb-1">{stats.ruins}</span>
+                <span className="text-[10px] font-black text-rose-700 uppercase tracking-widest">Requer Manutenção</span>
+             </div>
           </div>
         </div>
 
-        {/* Assets List */}
-        <div className="mt-2">
-          <div className="relative mb-6">
-            <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-400" />
+        {/* Barra de Pesquisa Moderna */}
+        <div className="flex flex-col gap-6">
+          <div className="relative group">
+            <Search className="absolute left-6 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-400 group-focus-within:text-indigo-600 transition-colors" />
             <input 
               type="text" 
-              placeholder="Pesquisar itens por nome ou código..." 
+              placeholder="Pesquisar itens por nome, descrição ou número de tombo..." 
               value={searchTerm}
               onChange={e => setSearchTerm(e.target.value)}
-              className="w-full pl-12 pr-4 py-4 bg-white border border-slate-200 rounded-2xl text-sm shadow-sm focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 focus:outline-none placeholder:text-slate-400 transition-all duration-200"
+              className="w-full pl-16 pr-6 py-5 bg-white border border-slate-200/80 rounded-[2rem] text-sm font-semibold shadow-sm focus:ring-4 focus:ring-indigo-500/10 focus:border-indigo-600 focus:outline-none placeholder:text-slate-400 transition-all duration-300"
             />
           </div>
 
-          <div className="flex flex-col gap-4">
-            {filteredAssets.map((asset) => (
-              <div key={asset.id} className="bg-white/80 backdrop-blur-xl rounded-2xl shadow-[0_8px_30px_rgb(0,0,0,0.04)] border border-slate-200/60 overflow-hidden flex flex-col sm:flex-row hover:shadow-[0_20px_40px_rgb(0,0,0,0.08)] hover:-translate-y-1 transition-all duration-300 group">
-                 
-                 {/* Optional Photo Side */}
-                 {asset.photos && asset.photos.length > 0 && (
-                   <div 
-                     className="w-full sm:w-48 h-48 sm:h-auto shrink-0 relative bg-slate-100 cursor-zoom-in group/photo"
-                     onClick={() => setSelectedImage(asset.photos[0])}
-                   >
-                     <img src={asset.photos[0]} alt={asset.name} className="w-full h-full object-cover transition-transform duration-300 group-hover/photo:scale-105" loading="lazy" />
-                     <div className="absolute inset-0 bg-black/10 transition-opacity flex items-center justify-center opacity-0 group-hover/photo:opacity-100">
-                        <div className="bg-white/90 p-2 rounded-full shadow-sm text-slate-700">
-                           <Maximize2 className="w-5 h-5" />
+          {/* Listagem de Itens */}
+          <div className="grid grid-cols-1 gap-4">
+            {filteredAssets.map((asset) => {
+              const conditionInfo = conditionBadges[asset.condition] || conditionBadges['bom'];
+              const ConditionIcon = conditionInfo.icon;
+
+              return (
+                <div key={asset.id} className="bg-white rounded-[2rem] shadow-[0_10px_30px_rgba(0,0,0,0.03)] border border-slate-100 overflow-hidden flex flex-col md:flex-row hover:shadow-xl hover:border-slate-200 transition-all duration-300 group">
+                   
+                   {/* Fotos do Patrimônio */}
+                   {asset.photos && asset.photos.length > 0 && (
+                     <div 
+                       className="w-full md:w-56 h-56 md:h-auto shrink-0 relative bg-slate-100 cursor-zoom-in group/photo overflow-hidden"
+                       onClick={() => setSelectedImage(asset.photos[0])}
+                     >
+                        <img src={asset.photos[0]} alt={asset.name} className="w-full h-full object-cover transition-transform duration-500 group-hover/photo:scale-110" loading="lazy" />
+                        <div className="absolute inset-0 bg-slate-900/20 transition-opacity flex items-center justify-center opacity-0 group-hover/photo:opacity-100 backdrop-blur-[2px]">
+                           <div className="bg-white/90 p-3 rounded-2xl shadow-xl text-slate-800 transform scale-90 group-hover/photo:scale-100 transition-transform">
+                              <Maximize2 className="w-5 h-5" />
+                           </div>
                         </div>
+                        {asset.photos.length > 1 && (
+                          <div className="absolute bottom-3 right-3 bg-slate-900/80 backdrop-blur-md text-white text-[10px] font-black uppercase tracking-widest px-3 py-1.5 rounded-xl shadow-lg">
+                            +{asset.photos.length - 1} foto{asset.photos.length > 2 ? 's' : ''}
+                          </div>
+                        )}
                      </div>
-                     {asset.photos.length > 1 && (
-                       <div className="absolute bottom-2 right-2 bg-black/60 backdrop-blur-sm text-white text-[10px] font-bold px-2 py-1 rounded-lg">
-                         +{asset.photos.length - 1} foto{asset.photos.length > 2 ? 's' : ''}
-                       </div>
-                     )}
-                   </div>
-                 )}
+                   )}
 
-                 {/* Content Side */}
-                 <div className="p-5 flex-1 flex flex-col justify-center">
-                    <div className="flex flex-wrap items-start justify-between gap-3 mb-2">
-                       <h4 className="font-bold text-slate-800 text-lg leading-tight flex-1">{asset.name}</h4>
-                       <div className={`px-2.5 py-1 rounded-lg border flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wide shrink-0 ${conditionColors[asset.condition] || 'bg-slate-50 text-slate-700 border-slate-200'}`}>
-                         {getConditionIcon(asset.condition)}
-                         {asset.condition}
-                       </div>
-                    </div>
-
-                    <div className="flex flex-wrap items-center gap-2 mb-3">
-                       {asset.patrimonyNumber && (
-                         <div className="inline-flex items-center px-2.5 py-1 bg-slate-50 text-slate-600 rounded-lg text-[11px] font-mono font-semibold border border-slate-200">
-                            Nº {asset.patrimonyNumber}
+                   {/* Informações do Item */}
+                   <div className="p-8 flex-1 flex flex-col justify-between gap-4">
+                      <div className="flex flex-col gap-2">
+                         <div className="flex flex-wrap items-start justify-between gap-4">
+                            <h4 className="font-display font-extrabold text-slate-900 text-xl tracking-tight leading-tight flex-1">{asset.name}</h4>
+                            <div className={`px-3.5 py-1.5 rounded-xl border flex items-center gap-2 text-[10px] font-black uppercase tracking-widest shrink-0 ${conditionInfo.className} shadow-sm`}>
+                               <ConditionIcon className="w-4 h-4" />
+                               {conditionInfo.label}
+                            </div>
                          </div>
-                       )}
-                       <div className="inline-flex items-center px-3 py-1 bg-indigo-50 text-indigo-700 rounded-lg text-[11px] font-black border border-indigo-200 shadow-sm">
-                          {asset.quantity || 1} unid.
-                       </div>
-                    </div>
 
-                    {asset.observations && (
-                      <div className="mt-2 text-sm text-slate-600 bg-slate-50 p-3 rounded-xl border border-slate-100">
-                        {asset.observations}
+                         <div className="flex flex-wrap items-center gap-3 mt-1">
+                            {asset.patrimonyNumber && (
+                              <div className="inline-flex items-center gap-2 px-3 py-1.5 bg-slate-50 text-slate-700 rounded-xl text-xs font-mono font-black border border-slate-200 shadow-sm">
+                                 <span className="text-[9px] text-slate-400 uppercase tracking-widest">Tombo:</span>
+                                 {asset.patrimonyNumber}
+                              </div>
+                            )}
+                            <div className="inline-flex items-center gap-2 px-3 py-1.5 bg-indigo-50 text-indigo-700 rounded-xl text-xs font-black border border-indigo-100 shadow-sm">
+                               <Layers className="w-3.5 h-3.5 text-indigo-500" />
+                               <span>{asset.quantity || 1} unidade(s)</span>
+                            </div>
+                         </div>
                       </div>
-                    )}
-                 </div>
-              </div>
-            ))}
+
+                      {asset.observations && (
+                        <div className="text-xs font-medium text-slate-600 bg-slate-50 p-4 rounded-2xl border border-slate-100 leading-relaxed">
+                          <span className="font-bold uppercase tracking-widest text-[9px] text-slate-400 block mb-1">Observações Técnicas do Auditor:</span>
+                          "{asset.observations}"
+                        </div>
+                      )}
+                   </div>
+                </div>
+              );
+            })}
 
             {filteredAssets.length === 0 && assets.length > 0 && (
-              <div className="text-center py-12 px-6 bg-white rounded-2xl border border-slate-200 text-slate-500 shadow-sm">
-                <Search className="w-12 h-12 mx-auto mb-4 text-slate-300" />
-                <p className="font-medium">Nenhum item localizado com esta busca.</p>
+              <div className="text-center py-16 px-6 bg-white rounded-[2rem] border border-slate-100 text-slate-400 shadow-sm">
+                <Search className="w-12 h-12 mx-auto mb-3 opacity-30" />
+                <p className="font-bold text-xs uppercase tracking-widest">Nenhum item localizado com esta busca</p>
               </div>
             )}
 
             {assets.length === 0 && (
-              <div className="text-center py-12 px-6 bg-white rounded-2xl border border-slate-200 text-slate-500 shadow-sm">
-                <Box className="w-12 h-12 mx-auto mb-4 text-slate-300" />
-                <p className="font-medium">Nenhum item registrado neste local.</p>
+              <div className="text-center py-16 px-6 bg-white rounded-[2rem] border border-slate-100 text-slate-400 shadow-sm">
+                <Box className="w-12 h-12 mx-auto mb-3 opacity-30" />
+                <p className="font-bold text-xs uppercase tracking-widest">Nenhum item registrado neste local</p>
               </div>
             )}
           </div>

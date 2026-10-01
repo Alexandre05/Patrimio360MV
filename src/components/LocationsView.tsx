@@ -6,9 +6,9 @@ import { useLiveQuery } from 'dexie-react-hooks';
 import { cn, formatDate } from '../lib/utils';
 import { useAuth } from '../lib/AuthContext';
 import { syncLocation, syncInspection, pushLocalChanges, forceFullSyncRecovery, hardResetAndRescue } from '../lib/syncService';
-import { db as firestore, auth } from '../lib/firebase';
+import { auth } from '../lib/firebase';
+import { supabase } from '../lib/supabase';
 import { QRCodePrintCard } from './QRCodePrintCard';
-import { doc, deleteDoc } from 'firebase/firestore';
 import { MapContainer, TileLayer, Marker, Popup } from 'react-leaflet';
 import L from 'leaflet';
 import { recreateFisioRoom } from '../lib/seed';
@@ -27,9 +27,24 @@ export function LocationsView({ onSelectInspection }: { onSelectInspection: (id:
   const isManager = isAdmin || user?.role === 'responsavel';
   const isCommittee = isManager || user?.role === 'vistoriador';
 
-  const locations = useLiveQuery(() => db.locations.filter(l => !l.deleted).toArray());
-  const inspections = useLiveQuery(() => db.inspections.filter(i => !i.deleted).toArray());
-  const assets = useLiveQuery(() => db.assets.filter(a => !a.deleted).toArray());
+  // ====== 🛡️ CASCATA DE SEGURANÇA (Filtro por Acesso) ======
+  const rawLocations = useLiveQuery(() => db.locations.filter(l => !l.deleted).toArray());
+  const rawInspections = useLiveQuery(() => db.inspections.filter(i => !i.deleted).toArray());
+  const rawAssets = useLiveQuery(() => db.assets.filter(a => !a.deleted).toArray());
+
+  // Regra de Ouro: Vistoriadores e Administradores veem tudo. Responsável vê apenas o seu setor.
+  const hasGlobalAccess = user?.role === 'administrador' || user?.role === 'vistoriador' || user?.role === 'prefeito' || !user?.locationId;
+
+  const locations = rawLocations?.filter(l => {
+    if (hasGlobalAccess) return true;
+    return l.id === user.locationId || l.parentId === user.locationId;
+  }) || [];
+
+  const locationIds = locations.map(l => l.id);
+  const inspections = rawInspections?.filter(i => hasGlobalAccess ? true : locationIds.includes(i.locationId)) || [];
+  const inspectionIds = inspections.map(i => i.id);
+  const assets = rawAssets?.filter(a => hasGlobalAccess ? true : inspectionIds.includes(a.inspectionId)) || [];
+  // ============================================================
   
   const [showTrashBin, setShowTrashBin] = useState(false);
   const [trashTab, setTrashTab] = useState<'locations' | 'inspections' | 'assets'>('locations');
@@ -77,17 +92,12 @@ export function LocationsView({ onSelectInspection }: { onSelectInspection: (id:
 
   const getDepartmentStats = (parentId: string) => {
     const children = locations?.filter(l => l.parentId === parentId) || [];
-    const directChildrenIds = children.map(c => c.id);
-    
-    // Recursive or multi-level? The current system seems to favor one level deep based on drill-down, 
-    // but let's just use direct children for stats for now.
     
     let totalAssets = 0;
     let emAndamento = 0;
     let concluidas = 0;
     let finalizadas = 0;
 
-    // Get stats for parent itself
     const parentStatus = getLatestStatusCount(parentId);
     if (parentStatus) {
       totalAssets += parentStatus.assetCount;
@@ -96,7 +106,6 @@ export function LocationsView({ onSelectInspection }: { onSelectInspection: (id:
       else if (parentStatus.status === 'finalizada') finalizadas++;
     }
 
-    // Get stats for children
     children.forEach(c => {
       const s = getLatestStatusCount(c.id);
       if (s) {
@@ -119,16 +128,16 @@ export function LocationsView({ onSelectInspection }: { onSelectInspection: (id:
 
   const allFilteredLocations = locations?.filter(loc => {
     const matchesSearch = loc.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                         loc.description.toLowerCase().includes(searchTerm.toLowerCase());
+                          loc.description.toLowerCase().includes(searchTerm.toLowerCase());
     
     if (searchTerm) return matchesSearch;
     
-    // NAVEGAÇÃO POR NÍVEIS (DRILL-DOWN)
     if (!activeParentId) {
-      // Se estamos na raiz, mostramos APENAS as Secretarias (Pais)
+      if (!hasGlobalAccess) {
+        return loc.id === user?.locationId;
+      }
       return !loc.parentId;
     } else {
-      // Se estamos dentro de um local, mostramos APENAS os filhos diretos dele
       return loc.parentId === activeParentId;
     }
   });
@@ -138,7 +147,6 @@ export function LocationsView({ onSelectInspection }: { onSelectInspection: (id:
     : allFilteredLocations?.slice(0, displayLimit);
 
   const handleStartInspection = async (locationId: string) => {
-    // 1. Procurar vistoria pendente (qualquer uma que não esteja finalizada)
     const existing = await db.inspections
       .where({ locationId })
       .filter(i => i.status !== 'finalizada')
@@ -160,20 +168,17 @@ export function LocationsView({ onSelectInspection }: { onSelectInspection: (id:
            }
            await db.inspections.update(existing.id, { deleted: true, needsSync: 1, updatedAt: now });
            pushLocalChanges();
-           console.log("Vistoria pendente marcada para exclusão");
         } else {
            return;
         }
       }
     }
 
-    // 2. Clone assets from the last "finalizada" inspection for this location
     const history = await db.inspections.where('locationId').equals(locationId).toArray();
     const lastFinalized = history
       .filter(i => i.status === 'finalizada')
       .sort((a, b) => b.date - a.date)[0];
 
-    // 3. Criar nova única v2
     const id = generateId();
     await db.inspections.add({
       id,
@@ -185,20 +190,18 @@ export function LocationsView({ onSelectInspection }: { onSelectInspection: (id:
     });
     try { await syncInspection(id); } catch(e) { console.error(e) }
 
-    // 4. Herança de Patrimônio: Inject assets into the new inspection
     if (lastFinalized) {
       const previousAssets = await db.assets.where('inspectionId').equals(lastFinalized.id).toArray();
       if (previousAssets.length > 0) {
         const clonedAssets = previousAssets.map(asset => ({
-          ...asset, // Copy general properties
+          ...asset, 
           id: generateId(),
-          inspectionId: id, // Point to the new inspection
+          inspectionId: id, 
           createdBy: user?.userId || 'sistema',
           createdAt: Date.now(),
           needsSync: 1
         }));
         await db.assets.bulkAdd(clonedAssets);
-        // Trigger background sync for these new assets
         pushLocalChanges();
       }
     }
@@ -215,38 +218,32 @@ export function LocationsView({ onSelectInspection }: { onSelectInspection: (id:
     try {
       const targetName = newLoc.name.trim().toLowerCase();
 
-      // 1. Verificação local (Dexie) - Instantânea, suporta offline e cobre totalmente case-insensitive + trim
       const localDuplicate = await db.locations
         .filter(l => !l.deleted && l.id !== editingLocationId && l.name.trim().toLowerCase() === targetName)
         .first();
 
       if (localDuplicate) {
         alert(`Já existe um ambiente ou secretaria cadastrada com o nome "${newLoc.name.trim()}".`);
+        setIsSubmitting(false);
         return;
       }
 
-      // 2. Consulta ao Firestore - Robustez online caso outro usuário tenha cadastrado concorrentemente
       try {
-        const { collection, getDocs } = await import('firebase/firestore');
-        const querySnapshot = await getDocs(collection(firestore, 'locations'));
-        
-        let fireduplicate = false;
-        querySnapshot.forEach((doc) => {
-          const data = doc.data();
-          if (doc.id !== editingLocationId && !data.deleted) {
-            const name = data.name || '';
-            if (name.trim().toLowerCase() === targetName) {
-              fireduplicate = true;
-            }
-          }
-        });
+        const { data: cloudLocations } = await supabase
+          .from('locations')
+          .select('id, name, deleted')
+          .eq('deleted', false);
 
-        if (fireduplicate) {
-          alert(`Atenção: Já existe um ambiente cadastrado na nuvem com o nome "${newLoc.name.trim()}".`);
-          return;
+        if (cloudLocations) {
+          const cloudDuplicate = cloudLocations.some(l => l.id !== editingLocationId && (l.name || '').trim().toLowerCase() === targetName);
+          if (cloudDuplicate) {
+            alert(`Atenção: Já existe um ambiente cadastrado na nuvem com o nome "${newLoc.name.trim()}".`);
+            setIsSubmitting(false);
+            return;
+          }
         }
       } catch (e) {
-        console.warn("Não foi possível consultar o Firestore no momento (modo offline). A validação prosseguirá com o banco local:", e);
+        console.warn("Validação na nuvem ignorada (modo offline):", e);
       }
 
       const lat = newLoc.latitude ? parseFloat(newLoc.latitude) : undefined;
@@ -284,11 +281,21 @@ export function LocationsView({ onSelectInspection }: { onSelectInspection: (id:
     }
   };
 
-  const handleDeleteLocation = async (locId: string, locName: string) => {
-    // 1. Encontrar todas as vistorias deste local (reais, ignorando deletadas)
+const handleDeleteLocation = async (locId: string) => {
+    // 🛡️ NOVA TRAVA: Verifica se este local é "Pai" de outros ambientes
+    const hasChildren = await db.locations.filter(l => !l.deleted && l.parentId === locId).count();
+    if (hasChildren > 0) {
+      setBlockingError({
+        id: locId,
+        message: `Proteção de Sistema: Este local é "Pai" de ${hasChildren} subunidade(s). Desvincule os filhos primeiro.`
+      });
+      setTimeout(() => setBlockingError(null), 4000);
+      setDeleteConfirmId(null);
+      return;
+    }
+
     const inspectionIds = (await db.inspections.where('locationId').equals(locId).filter(i => !i.deleted).toArray()).map(i => i.id);
     
-    // 2. Verificar se existe algum item
     let assetCount = 0;
     if (inspectionIds.length > 0) {
       assetCount = await db.assets.where('inspectionId').anyOf(inspectionIds).filter(a => !a.deleted).count();
@@ -305,14 +312,12 @@ export function LocationsView({ onSelectInspection }: { onSelectInspection: (id:
     }
 
     const now = Date.now();
-    // Soft delete vistorias vazias
     if (inspectionIds.length > 0) {
       for (const invId of inspectionIds) {
         await db.inspections.update(invId, { deleted: true, needsSync: 1, updatedAt: now });
       }
     }
     
-    // Soft delete local
     await db.locations.update(locId, { deleted: true, needsSync: 1, updatedAt: now });
     
     setDeleteConfirmId(null);
@@ -423,25 +428,22 @@ export function LocationsView({ onSelectInspection }: { onSelectInspection: (id:
     try {
       await db.assets.update(assetId, { deleted: false, needsSync: 1, updatedAt: Date.now() });
       
-      let hierarchyRestored = false;
       const asset = await db.assets.get(assetId);
       if (asset) {
         const insp = await db.inspections.get(asset.inspectionId);
         if (insp) {
           if (insp.deleted) {
             await db.inspections.update(insp.id, { deleted: false, needsSync: 1, updatedAt: Date.now() });
-            hierarchyRestored = true;
           }
           const loc = await db.locations.get(insp.locationId);
           if (loc && loc.deleted) {
             await db.locations.update(loc.id, { deleted: false, needsSync: 1, updatedAt: Date.now() });
-            hierarchyRestored = true;
           }
         }
       }
       
       pushLocalChanges();
-      return { success: true, hierarchyRestored };
+      return { success: true, hierarchyRestored: true };
     } catch (err) {
       console.error("Erro ao restaurar item de patrimônio:", err);
       return { success: false, error: err };
@@ -451,7 +453,7 @@ export function LocationsView({ onSelectInspection }: { onSelectInspection: (id:
   const handleRecoverFisioRoomDirect = async () => {
     try {
       await recreateFisioRoom();
-      alert("🩺 Excelente! A Sala de Fisioterapia e todos os seus 6 itens patrimoniais (incluindo divãs, aparelhos de ultrassom e TENS, espaldar, etc.) foram restabelecidos com sucesso no banco de dados e sincronizados.");
+      alert("🩺 Excelente! A Sala de Fisioterapia e todos os seus 6 itens patrimoniais foram restabelecidos com sucesso no banco de dados e sincronizados.");
       pushLocalChanges();
     } catch (err: any) {
       console.error(err);
@@ -493,7 +495,7 @@ export function LocationsView({ onSelectInspection }: { onSelectInspection: (id:
              <QRCodePrintCard id={showQRCodeFor.id} name={showQRCodeFor.name} type="local" />
              <button 
                onClick={() => setShowQRCodeFor(null)} 
-               className="absolute -top-4 -right-4 w-10 h-10 bg-white rounded-full flex items-center justify-center shadow-lg text-slate-400 hover:text-slate-900 transition-colors border border-slate-100"
+               className="absolute -top-4 -right-4 w-10 h-10 bg-white rounded-full flex items-center justify-center shadow-lg text-slate-400 hover:text-slate-900 transition-colors border border-slate-100 cursor-pointer"
              >
                <X className="w-5 h-5" />
              </button>
@@ -517,7 +519,7 @@ export function LocationsView({ onSelectInspection }: { onSelectInspection: (id:
                       </span>
                    </div>
                 </div>
-                <button onClick={() => setShowHistoryFor(null)} className="p-3 hover:bg-white/10 rounded-2xl transition-colors">
+                <button onClick={() => setShowHistoryFor(null)} className="p-3 hover:bg-white/10 rounded-2xl transition-colors cursor-pointer border-none bg-transparent text-white">
                    <X className="w-7 h-7" />
                 </button>
              </div>
@@ -558,37 +560,37 @@ export function LocationsView({ onSelectInspection }: { onSelectInspection: (id:
                         </div>
                      </div>
                      <div className="flex items-center gap-4">
-                       {isManager && (assets || []).filter(a => a.inspectionId === insp.id).length === 0 && (
-                         <div className="flex items-center">
-                           {deleteInspectionConfirmId === insp.id ? (
-                              <div className="flex items-center gap-2 animate-in slide-in-from-right-4 duration-300">
-                                 <button 
-                                   onClick={(e) => handleDeleteInspection(e, insp.id)}
-                                   className="bg-rose-600 text-white text-[10px] font-black px-4 py-2 rounded-xl shadow-lg shadow-rose-600/20 uppercase tracking-widest"
-                                 >
-                                   Sim
-                                 </button>
-                                 <button 
-                                   onClick={(e) => { e.stopPropagation(); setDeleteInspectionConfirmId(null); }}
-                                   className="bg-slate-200 text-slate-600 text-[10px] font-black px-4 py-2 rounded-xl"
-                                 >
-                                   Não
-                                 </button>
-                              </div>
-                           ) : (
-                             <button 
-                               onClick={(e) => { e.stopPropagation(); setDeleteInspectionConfirmId(insp.id); }}
-                               className="p-3 text-slate-300 hover:text-rose-600 hover:bg-rose-50 rounded-2xl transition-all"
-                               title="Excluir Vistoria Vazia"
-                             >
-                               <Trash2 className="w-5 h-5" />
-                             </button>
-                           )}
-                         </div>
-                       )}
-                       <div className="p-3 bg-slate-50 rounded-2xl group-hover:bg-indigo-600 group-hover:text-white transition-all shadow-sm">
-                          <ArrowRight className="w-5 h-5 group-hover:translate-x-1 transition-transform" />
-                       </div>
+                        {isManager && (assets || []).filter(a => a.inspectionId === insp.id).length === 0 && (
+                          <div className="flex items-center">
+                            {deleteInspectionConfirmId === insp.id ? (
+                               <div className="flex items-center gap-2 animate-in slide-in-from-right-4 duration-300">
+                                  <button 
+                                    onClick={(e) => handleDeleteInspection(e, insp.id)}
+                                    className="bg-rose-600 text-white text-[10px] font-black px-4 py-2 rounded-xl shadow-lg shadow-rose-600/20 uppercase tracking-widest cursor-pointer border-none"
+                                  >
+                                    Sim
+                                  </button>
+                                  <button 
+                                    onClick={(e) => { e.stopPropagation(); setDeleteInspectionConfirmId(null); }}
+                                    className="bg-slate-200 text-slate-600 text-[10px] font-black px-4 py-2 rounded-xl cursor-pointer border-none"
+                                  >
+                                    Não
+                                  </button>
+                               </div>
+                            ) : (
+                               <button 
+                                 onClick={(e) => { e.stopPropagation(); setDeleteInspectionConfirmId(insp.id); }}
+                                 className="p-3 text-slate-300 hover:text-rose-600 hover:bg-rose-50 rounded-2xl transition-all cursor-pointer border-none bg-transparent"
+                                 title="Excluir Vistoria Vazia"
+                               >
+                                 <Trash2 className="w-5 h-5" />
+                               </button>
+                            )}
+                          </div>
+                        )}
+                        <div className="p-3 bg-slate-50 rounded-2xl group-hover:bg-indigo-600 group-hover:text-white transition-all shadow-sm">
+                           <ArrowRight className="w-5 h-5 group-hover:translate-x-1 transition-transform" />
+                        </div>
                      </div>
                    </div>
                 ))}
@@ -607,7 +609,7 @@ export function LocationsView({ onSelectInspection }: { onSelectInspection: (id:
                 {isManager && (
                   <button 
                     onClick={() => handleDeleteAllEmptyInspections(showHistoryFor)}
-                    className="text-[10px] font-black text-slate-400 hover:text-rose-600 uppercase tracking-widest px-6 py-3 bg-slate-50 hover:bg-rose-50 rounded-2xl transition-all border border-transparent hover:border-rose-100"
+                    className="text-[10px] font-black text-slate-400 hover:text-rose-600 uppercase tracking-widest px-6 py-3 bg-slate-50 hover:bg-rose-50 rounded-2xl transition-all border border-transparent hover:border-rose-100 cursor-pointer"
                   >
                     Excluir Auditorias Vazias
                   </button>
@@ -632,7 +634,7 @@ export function LocationsView({ onSelectInspection }: { onSelectInspection: (id:
                    <div className="flex flex-col">
                       <h3 className="font-display font-extrabold text-2xl tracking-tight leading-none text-white">Lixeira de Segurança</h3>
                       <span className="text-[10px] font-black text-emerald-400 uppercase tracking-[0.2em] mt-3">
-                         Restauração de Ambientes, Auditorias e Patrimônios Deletados
+                          Restauração de Ambientes, Auditorias e Patrimônios Deletados
                       </span>
                    </div>
                 </div>
@@ -644,42 +646,40 @@ export function LocationsView({ onSelectInspection }: { onSelectInspection: (id:
              {/* Smart Action Notification for Physiotherapy Suite */}
              {(() => {
                 const hasFisio = deletedLocations?.some(l => l.name.toLowerCase().includes('fisio')) || 
-                                 deletedAssets?.some(a => a.name.toLowerCase().includes('fisio')) ||
-                                 deletedInspections?.some(i => i.id.toLowerCase().includes('fisio'));
+                                   deletedAssets?.some(a => a.name.toLowerCase().includes('fisio')) ||
+                                   deletedInspections?.some(i => i.id.toLowerCase().includes('fisio'));
                 if (!hasFisio) return null;
                 return (
                   <div className="px-8 mt-6 shrink-0">
                      <div className="p-5 bg-amber-500/10 border border-amber-500/20 rounded-[2rem] flex flex-col md:flex-row items-start md:items-center justify-between gap-5 animate-in slide-in-from-top-4 duration-300">
-                       <div className="flex items-start gap-4">
-                         <div className="p-3 bg-amber-500 text-white rounded-2xl shadow-lg shadow-amber-500/10">
-                           <AlertCircle className="w-6 h-6 animate-pulse" />
-                         </div>
-                         <div>
-                           <h4 className="font-display font-extrabold text-amber-950 uppercase tracking-widest text-xs">Itens da Sala Fisioterapia Encontrados</h4>
-                           <p className="text-amber-800 text-[11px] font-bold mt-1 max-w-xl">
-                             Detectamos registros da "Sala Fisio" na lixeira! Clique para recuperar toda a sala, vistorias e seus múltiplos bens patrimoniais associados de uma só vez.
-                           </p>
-                         </div>
-                       </div>
-                       <button
-                         onClick={async () => {
-                           let restoredLocs = 0;
-                           const fisioLocs = deletedLocations?.filter(l => l.name.toLowerCase().includes('fisio')) || [];
-                           for (const l of fisioLocs) {
-                             await handleRestoreLocation(l.id);
-                             restoredLocs++;
-                           }
-                           const fisioAssets = deletedAssets?.filter(a => a.name.toLowerCase().includes('fisio')) || [];
-                           for (const a of fisioAssets) {
-                             await handleRestoreAsset(a.id);
-                           }
-                           alert("Fisioterapia e itens vinculados restaurados com sucesso!");
-                           pushLocalChanges();
-                         }}
-                         className="px-6 py-3 bg-amber-500 hover:bg-amber-600 active:scale-95 text-white text-[10px] font-black uppercase tracking-widest rounded-xl transition-all shadow-md shrink-0 border-none cursor-pointer"
-                       >
-                         Restaurar Tudo do Físio
-                       </button>
+                        <div className="flex items-start gap-4">
+                          <div className="p-3 bg-amber-500 text-white rounded-2xl shadow-lg shadow-amber-500/10">
+                            <AlertCircle className="w-6 h-6 animate-pulse" />
+                          </div>
+                          <div>
+                            <h4 className="font-display font-extrabold text-amber-950 uppercase tracking-widest text-xs">Itens da Sala Fisioterapia Encontrados</h4>
+                            <p className="text-amber-800 text-[11px] font-bold mt-1 max-w-xl">
+                              Detectamos registros da "Sala Fisio" na lixeira! Clique para recuperar toda a sala, vistorias e seus múltiplos bens patrimoniais associados de uma só vez.
+                            </p>
+                          </div>
+                        </div>
+                        <button
+                          onClick={async () => {
+                            const fisioLocs = deletedLocations?.filter(l => l.name.toLowerCase().includes('fisio')) || [];
+                            for (const l of fisioLocs) {
+                              await handleRestoreLocation(l.id);
+                            }
+                            const fisioAssets = deletedAssets?.filter(a => a.name.toLowerCase().includes('fisio')) || [];
+                            for (const a of fisioAssets) {
+                              await handleRestoreAsset(a.id);
+                            }
+                            alert("Fisioterapia e itens vinculados restaurados com sucesso!");
+                            pushLocalChanges();
+                          }}
+                          className="px-6 py-3 bg-amber-500 hover:bg-amber-600 active:scale-95 text-white text-[10px] font-black uppercase tracking-widest rounded-xl transition-all shadow-md shrink-0 border-none cursor-pointer"
+                        >
+                          Restaurar Tudo do Físio
+                        </button>
                      </div>
                   </div>
                 );
@@ -691,9 +691,9 @@ export function LocationsView({ onSelectInspection }: { onSelectInspection: (id:
                   type="button"
                   onClick={() => setTrashTab('locations')}
                   className={cn(
-                    "px-5 py-3 rounded-2xl text-[10px] font-black uppercase tracking-wider transition-all cursor-pointer",
+                    "px-5 py-3 rounded-2xl text-[10px] font-black uppercase tracking-wider transition-all cursor-pointer border-none",
                     trashTab === 'locations' 
-                      ? "bg-emerald-950 text-white shadow-lg shadow-emerald-950/20 border-none"
+                      ? "bg-emerald-950 text-white shadow-lg shadow-emerald-950/20" 
                       : "bg-slate-50 text-slate-500 hover:bg-slate-100 border border-slate-200"
                   )}
                 >
@@ -703,9 +703,9 @@ export function LocationsView({ onSelectInspection }: { onSelectInspection: (id:
                   type="button"
                   onClick={() => setTrashTab('inspections')}
                   className={cn(
-                    "px-5 py-3 rounded-2xl text-[10px] font-black uppercase tracking-wider transition-all cursor-pointer",
+                    "px-5 py-3 rounded-2xl text-[10px] font-black uppercase tracking-wider transition-all cursor-pointer border-none",
                     trashTab === 'inspections' 
-                      ? "bg-emerald-950 text-white shadow-lg shadow-emerald-950/20 border-none"
+                      ? "bg-emerald-950 text-white shadow-lg shadow-emerald-950/20" 
                       : "bg-slate-50 text-slate-500 hover:bg-slate-100 border border-slate-200"
                   )}
                 >
@@ -715,9 +715,9 @@ export function LocationsView({ onSelectInspection }: { onSelectInspection: (id:
                   type="button"
                   onClick={() => setTrashTab('assets')}
                   className={cn(
-                    "px-5 py-3 rounded-2xl text-[10px] font-black uppercase tracking-wider transition-all cursor-pointer",
+                    "px-5 py-3 rounded-2xl text-[10px] font-black uppercase tracking-wider transition-all cursor-pointer border-none",
                     trashTab === 'assets' 
-                      ? "bg-emerald-950 text-white shadow-lg shadow-emerald-950/20 border-none"
+                      ? "bg-emerald-950 text-white shadow-lg shadow-emerald-950/20" 
                       : "bg-slate-50 text-slate-500 hover:bg-slate-100 border border-slate-200"
                   )}
                 >
@@ -736,8 +736,8 @@ export function LocationsView({ onSelectInspection }: { onSelectInspection: (id:
                             <Building2 className="w-6 h-6" />
                           </div>
                           <div>
-                            <h4 className="font-display font-bold text-slate-900 text-lg">{loc.name}</h4>
-                            <p className="text-slate-400 text-xs mt-1">{loc.description || 'Sem descrição cadastrada'}</p>
+                            <h4 className="font-display font-bold text-slate-900 text-lg line-clamp-2" title={loc.name}>{loc.name}</h4>
+                            <p className="text-slate-400 text-xs mt-1 line-clamp-2" title={loc.description || ''}>{loc.description || 'Sem descrição cadastrada'}</p>
                             <span className="inline-block mt-2 text-[8px] font-black uppercase tracking-widest bg-slate-100 text-slate-500 px-2 py-1 rounded-md">ID: {loc.id}</span>
                           </div>
                         </div>
@@ -775,7 +775,7 @@ export function LocationsView({ onSelectInspection }: { onSelectInspection: (id:
                             </div>
                             <div>
                               <h4 className="font-display font-bold text-slate-900 text-base font-sans">Vistoria realizada em {formatDate(insp.date)}</h4>
-                              <p className="text-slate-400 text-xs mt-1">Local correspondente: <strong className="text-slate-700">{locName}</strong></p>
+                              <p className="text-slate-400 text-xs mt-1 line-clamp-2" title={locName}>Local correspondente: <strong className="text-slate-700">{locName}</strong></p>
                               <p className="text-slate-400 text-xs mt-0.5">Participantes: {insp.participants?.join(', ') || 'Nenhum'}</p>
                             </div>
                           </div>
@@ -812,7 +812,7 @@ export function LocationsView({ onSelectInspection }: { onSelectInspection: (id:
                           </div>
                           <div>
                             <div className="flex items-center gap-2 flex-wrap">
-                              <h4 className="font-display font-bold text-slate-900 text-base">{asset.name}</h4>
+                              <h4 className="font-display font-bold text-slate-900 text-base line-clamp-2" title={asset.name}>{asset.name}</h4>
                               <span className={cn(
                                 "text-[8px] font-black uppercase tracking-widest px-2.5 py-1 rounded-full",
                                 asset.condition === 'novo' && "bg-emerald-50 text-emerald-600 border border-emerald-100",
@@ -824,7 +824,7 @@ export function LocationsView({ onSelectInspection }: { onSelectInspection: (id:
                               </span>
                             </div>
                             <p className="text-slate-400 text-xs mt-1">Nº Patrimônio: <strong className="text-slate-700">{asset.patrimonyNumber}</strong></p>
-                            {asset.observations && <p className="text-slate-400 text-xs mt-1 italic text-slate-500">Obs: "{asset.observations}"</p>}
+                            {asset.observations && <p className="text-slate-400 text-xs mt-1 italic text-slate-500 line-clamp-2" title={asset.observations}>Obs: "{asset.observations}"</p>}
                           </div>
                         </div>
                         <button
@@ -832,7 +832,7 @@ export function LocationsView({ onSelectInspection }: { onSelectInspection: (id:
                           onClick={async () => {
                             const res = await handleRestoreAsset(asset.id);
                             if (res.success) {
-                              alert(`Item de patrimônio "${asset.name}" restaurado! ${res.hierarchyRestored ? 'Toda a estrutura superior correspondente foi reativada!' : ''}`);
+                              alert(`Item de patrimônio "${asset.name}" restaurado! Toda a estrutura superior correspondente foi reativada.`);
                             } else {
                               alert("Erro ao restaurar.");
                             }
@@ -877,7 +877,7 @@ export function LocationsView({ onSelectInspection }: { onSelectInspection: (id:
             <button 
               onClick={() => setActiveParentId(null)}
               className={cn(
-                "flex items-center gap-2 text-[10px] font-black uppercase tracking-widest transition-all px-4 py-2 rounded-xl border shadow-sm",
+                "flex items-center gap-2 text-[10px] font-black uppercase tracking-widest transition-all px-4 py-2 rounded-xl border shadow-sm cursor-pointer",
                 activeParentId 
                   ? "bg-slate-900 text-white border-slate-900 hover:bg-slate-800" 
                   : "bg-indigo-50 text-indigo-600 border-indigo-100 cursor-default"
@@ -888,8 +888,8 @@ export function LocationsView({ onSelectInspection }: { onSelectInspection: (id:
             {activeParentId && (
               <div className="flex items-center gap-3 animate-in slide-in-from-left-4 duration-300">
                 <ArrowRight className="w-3 h-3 text-slate-300" />
-                <span className="bg-indigo-50 text-indigo-700 text-[10px] font-black uppercase tracking-widest px-4 py-2 rounded-xl border border-indigo-200 shadow-sm flex items-center gap-2">
-                  <Building2 className="w-4 h-4" /> {activeParentLocation?.name}
+                <span className="bg-indigo-50 text-indigo-700 text-[10px] font-black uppercase tracking-widest px-4 py-2 rounded-xl border border-indigo-200 shadow-sm flex items-center gap-2 line-clamp-1 max-w-xs" title={activeParentLocation?.name}>
+                  <Building2 className="w-4 h-4 shrink-0" /> {activeParentLocation?.name}
                 </span>
               </div>
             )}
@@ -902,14 +902,14 @@ export function LocationsView({ onSelectInspection }: { onSelectInspection: (id:
             </div>
           ) : (
             <Card className="bg-indigo-600 text-white p-6 md:p-8 rounded-[2.5rem] border-none shadow-2xl shadow-indigo-600/20 flex flex-col md:flex-row md:items-center justify-between gap-6 animate-in zoom-in-95 duration-500">
-              <div className="flex flex-col gap-2">
-                <div className="flex items-center gap-3">
-                  <div className="w-10 h-10 bg-white/20 rounded-xl flex items-center justify-center">
+              <div className="flex flex-col gap-2 min-w-0 flex-1 pr-4">
+                <div className="flex items-start gap-3">
+                  <div className="w-10 h-10 bg-white/20 rounded-xl flex items-center justify-center shrink-0">
                     <Building2 className="w-6 h-6 text-white" />
                   </div>
-                  <h2 className="text-2xl font-display font-extrabold tracking-tight">{activeParentLocation?.name}</h2>
+                  <h2 title={activeParentLocation?.name} className="text-2xl font-display font-extrabold tracking-tight line-clamp-2 md:line-clamp-none">{activeParentLocation?.name}</h2>
                 </div>
-                <p className="text-indigo-100/60 text-[10px] font-black uppercase tracking-widest ml-13">{activeParentLocation?.description || 'Repartição Pública Principal'}</p>
+                <p title={activeParentLocation?.description} className="text-indigo-100/60 text-[10px] font-black uppercase tracking-widest ml-13 line-clamp-2">{activeParentLocation?.description || 'Repartição Pública Principal'}</p>
               </div>
               
               <div className="flex items-center gap-4 shrink-0">
@@ -919,8 +919,8 @@ export function LocationsView({ onSelectInspection }: { onSelectInspection: (id:
                      {getDepartmentStats(activeParentId).totalAssets} Itens Totais
                    </div>
                 </div>
-                <div className="bg-amber-400 text-amber-900 px-6 py-4 rounded-2xl flex items-center gap-2 shadow-lg animate-in fade-in duration-500">
-                  <AlertCircle className="w-5 h-5" />
+                <div className="bg-amber-400 text-amber-900 px-6 py-4 rounded-2xl flex items-center gap-2 shadow-lg animate-in fade-in duration-500 hidden sm:flex">
+                  <AlertCircle className="w-5 h-5 shrink-0" />
                   <span className="text-[9px] font-black uppercase tracking-widest">Abra as salas abaixo para auditar</span>
                 </div>
               </div>
@@ -928,21 +928,21 @@ export function LocationsView({ onSelectInspection }: { onSelectInspection: (id:
           )}
 
            {isAdmin && !activeParentId && (
-            <div className="flex flex-wrap items-center gap-3 mt-2 bg-indigo-50/40 p-5 rounded-3rem border border-indigo-100/50">
+            <div className="flex flex-wrap items-center gap-3 mt-2 bg-indigo-50/40 p-5 rounded-[3rem] border border-indigo-100/50">
                <div className="w-full mb-1 flex items-center justify-between">
                   <span className="text-[10px] font-black uppercase tracking-[0.2em] text-indigo-900/60 block">Painel de Recuperação e Automação</span>
                   <span className="text-[9px] font-bold text-indigo-500 bg-white border border-indigo-100 px-2 py-0.5 rounded-full">Exclusivo: Ti e Administração</span>
                </div>
               <button 
                 onClick={() => forceFullSyncRecovery()}
-                className="flex items-center gap-2 px-5 py-3 bg-slate-800 text-white rounded-2xl hover:bg-slate-900 transition-all font-black text-[10px] uppercase tracking-widest shadow-lg shadow-slate-900/10"
+                className="flex items-center gap-2 px-5 py-3 bg-slate-800 text-white rounded-2xl hover:bg-slate-900 transition-all font-black text-[10px] uppercase tracking-widest shadow-lg shadow-slate-900/10 cursor-pointer border-none"
               >
                 <Database className="w-4 h-4 text-sky-400" />
                 Forçar Sincronização
               </button>
               <button 
                 onClick={() => hardResetAndRescue()}
-                className="flex items-center gap-2 px-5 py-3 bg-orange-500 text-white rounded-2xl hover:bg-orange-600 transition-all font-black text-[10px] uppercase tracking-widest shadow-lg shadow-orange-500/10"
+                className="flex items-center gap-2 px-5 py-3 bg-orange-500 text-white rounded-2xl hover:bg-orange-600 transition-all font-black text-[10px] uppercase tracking-widest shadow-lg shadow-orange-500/10 cursor-pointer border-none"
               >
                 <AlertCircle className="w-4 h-4" />
                 Sincronização Profunda
@@ -950,7 +950,7 @@ export function LocationsView({ onSelectInspection }: { onSelectInspection: (id:
               
               <button 
                 onClick={handleRecoverFisioRoomDirect}
-                className="flex items-center gap-2 px-5 py-3 bg-indigo-600 text-white rounded-2xl hover:bg-indigo-700 transition-all font-black text-[10px] uppercase tracking-widest shadow-lg shadow-indigo-600/20"
+                className="flex items-center gap-2 px-5 py-3 bg-indigo-600 text-white rounded-2xl hover:bg-indigo-700 transition-all font-black text-[10px] uppercase tracking-widest shadow-lg shadow-indigo-600/20 cursor-pointer border-none"
               >
                 <Building2 className="w-4 h-4 text-emerald-300" />
                 Restaurar Sala Fisio
@@ -958,7 +958,7 @@ export function LocationsView({ onSelectInspection }: { onSelectInspection: (id:
 
               <button 
                 onClick={() => setShowTrashBin(true)}
-                className="flex items-center gap-2 px-5 py-3 bg-emerald-600 text-white rounded-2xl hover:bg-emerald-700 transition-all font-black text-[10px] uppercase tracking-widest shadow-lg shadow-emerald-600/20"
+                className="flex items-center gap-2 px-5 py-3 bg-emerald-600 text-white rounded-2xl hover:bg-emerald-700 transition-all font-black text-[10px] uppercase tracking-widest shadow-lg shadow-emerald-600/20 cursor-pointer border-none"
               >
                 <Trash2 className="w-4 h-4" />
                 Lixeira de Segurança ({(deletedLocations?.length || 0) + (deletedInspections?.length || 0) + (deletedAssets?.length || 0)})
@@ -967,12 +967,12 @@ export function LocationsView({ onSelectInspection }: { onSelectInspection: (id:
           )}
         </div>
         
-        <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-4">
+        <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-4 shrink-0">
            <div className="bg-white p-1.5 rounded-2xl border border-slate-100 shadow-sm flex items-center self-center sm:self-auto">
               <button 
                 onClick={() => setViewMode('list')} 
                 className={cn(
-                  "px-6 py-2.5 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all",
+                  "px-6 py-2.5 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all cursor-pointer border-none",
                   viewMode === 'list' ? "bg-slate-900 text-white shadow-lg" : "bg-transparent text-slate-400 hover:text-slate-900"
                 )}
               >
@@ -981,7 +981,7 @@ export function LocationsView({ onSelectInspection }: { onSelectInspection: (id:
               <button 
                 onClick={() => setViewMode('map')} 
                 className={cn(
-                  "px-6 py-2.5 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all",
+                  "px-6 py-2.5 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all cursor-pointer border-none",
                   viewMode === 'map' ? "bg-slate-900 text-white shadow-lg" : "bg-transparent text-slate-400 hover:text-slate-900"
                 )}
               >
@@ -989,7 +989,7 @@ export function LocationsView({ onSelectInspection }: { onSelectInspection: (id:
               </button>
            </div>
 
-           <div className="relative group">
+           <div className="relative group flex-1 sm:flex-none">
               <Search className="absolute left-5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400 group-focus-within:text-indigo-600 transition-colors" />
               <input 
                 type="text" 
@@ -1000,7 +1000,7 @@ export function LocationsView({ onSelectInspection }: { onSelectInspection: (id:
               />
            </div>
            {!isAdding && isCommittee && (
-             <Button variant="accent" icon={Plus} onClick={handleAddLocation} className="rounded-2xl h-14 px-8 font-black uppercase tracking-widest text-[9px] shadow-xl shadow-indigo-600/20">
+             <Button variant="accent" icon={Plus} onClick={handleAddLocation} className="rounded-2xl h-14 px-8 font-black uppercase tracking-widest text-[9px] shadow-xl shadow-indigo-600/20 shrink-0">
                CADASTRAR UNIDADE
              </Button>
            )}
@@ -1022,16 +1022,16 @@ export function LocationsView({ onSelectInspection }: { onSelectInspection: (id:
                     <Popup className="custom-popup">
                       <div className="flex flex-col gap-3 p-4 min-w-[240px]">
                          <div className="flex flex-col gap-1">
-                            <h3 className="font-display font-bold text-slate-900 text-lg leading-tight uppercase tracking-tight">{loc.name}</h3>
-                            <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">{loc.description}</p>
+                            <h3 title={loc.name} className="font-display font-bold text-slate-900 text-lg leading-tight uppercase tracking-tight line-clamp-2">{loc.name}</h3>
+                            <p title={loc.description} className="text-[10px] font-black text-slate-400 uppercase tracking-widest line-clamp-2">{loc.description}</p>
                          </div>
                          <Button 
                            size="sm"
                            variant={isParent ? "secondary" : "primary"}
                            onClick={() => {
                              if (isParent) {
-                               setViewMode('list'); // Volta para a lista
-                               setActiveParentId(loc.id); // Entra na pasta
+                               setViewMode('list'); 
+                               setActiveParentId(loc.id); 
                              } else {
                                handleStartInspection(loc.id);
                              }
@@ -1058,7 +1058,7 @@ export function LocationsView({ onSelectInspection }: { onSelectInspection: (id:
                   <h3 className="font-display font-extrabold text-2xl text-slate-900 tracking-tight">{editingLocationId ? 'Editar Ambiente' : 'Novo Ambiente'}</h3>
                   <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mt-1">Identificação da unidade</p>
                </div>
-               <button onClick={() => { setIsAdding(false); setEditingLocationId(null); setNewLoc({ name: '', description: '', latitude: '', longitude: '', parentId: '' }); }} className="p-3 hover:bg-slate-50 rounded-2xl transition-colors text-slate-400 border border-transparent hover:border-slate-100">
+               <button onClick={() => { setIsAdding(false); setEditingLocationId(null); setNewLoc({ name: '', description: '', latitude: '', longitude: '', parentId: '' }); }} className="p-3 hover:bg-slate-50 rounded-2xl transition-colors text-slate-400 border border-transparent hover:border-slate-100 cursor-pointer bg-transparent">
                   <X className="w-6 h-6" />
                </button>
             </div>
@@ -1116,7 +1116,6 @@ export function LocationsView({ onSelectInspection }: { onSelectInspection: (id:
                 ? "bg-indigo-50/40 border-2 border-indigo-200 hover:border-indigo-400 hover:shadow-indigo-900/10" 
                 : "bg-white border-2 border-slate-100 hover:border-indigo-300 hover:shadow-slate-900/10"
             )}>
-              {/* Parent badge indicator */}
               {hasChildren && (
                 <div className="absolute top-0 right-0">
                   <div className="bg-indigo-600 text-white text-[9px] font-black uppercase tracking-[0.2em] px-6 py-2 rounded-bl-3xl shadow-lg">
@@ -1127,18 +1126,17 @@ export function LocationsView({ onSelectInspection }: { onSelectInspection: (id:
 
               <div className="flex items-start justify-between mt-2">
                 <div className={cn(
-                  "w-20 h-16 rounded-[1.5rem] flex items-center justify-center transition-all duration-700 border shadow-sm",
+                  "w-20 h-16 rounded-[1.5rem] flex items-center justify-center transition-all duration-700 border shadow-sm shrink-0",
                   isParent
                     ? "bg-indigo-600 text-white border-indigo-500 shadow-indigo-200"
                     : "bg-slate-50 text-slate-400 border-slate-100 group-hover:bg-indigo-50 group-hover:text-indigo-600 group-hover:border-indigo-100 group-hover:shadow-indigo-600/10"
                 )}>
                   {isParent ? <Building2 className="w-8 h-8" /> : <MapPin className="w-7 h-7" />}
                 </div>
-                <div className="flex flex-col items-end gap-3">
-                  {/* Para Salas (Filhos): Mostra o status normal */}
+                <div className="flex flex-col items-end gap-3 flex-1 pl-4 min-w-0">
                   {!isParent && status && (
                     <div className={cn(
-                      "text-[9px] font-black uppercase tracking-[0.15em] px-4 py-1.5 rounded-full border shadow-sm transition-all",
+                      "text-[9px] font-black uppercase tracking-[0.15em] px-4 py-1.5 rounded-full border shadow-sm transition-all text-center",
                       status === 'em_andamento' ? "bg-indigo-50 text-indigo-600 border-indigo-100 ring-4 ring-indigo-500/5" :
                       status === 'concluida' ? "bg-amber-50 text-amber-600 border-amber-100 ring-4 ring-amber-500/5" :
                       "bg-emerald-50 text-emerald-600 border-emerald-100 ring-4 ring-emerald-500/5"
@@ -1147,37 +1145,35 @@ export function LocationsView({ onSelectInspection }: { onSelectInspection: (id:
                     </div>
                   )}
 
-                  {/* Para Departamentos (Pais): Mostra o progresso consolidado de todas as salas */}
                   {isParent && deptStats?.hasAny && (
-                    <div className="flex flex-col items-end gap-1.5">
-                      <span className="text-[8px] font-black text-slate-400 uppercase tracking-widest">Resumo Consolidado</span>
+                    <div className="flex flex-col items-end gap-1.5 w-full">
+                      <span className="text-[8px] font-black text-slate-400 uppercase tracking-widest text-right">Resumo Consolidado</span>
                       <div className="flex flex-wrap items-center justify-end gap-2">
-                        {deptStats.emAndamento > 0 && <span className="text-[9px] px-2 py-1 rounded-lg bg-indigo-50 text-indigo-600 border border-indigo-100 font-bold shadow-sm">{deptStats.emAndamento} Em Aberto</span>}
-                        {deptStats.concluidas > 0 && <span className="text-[9px] px-2 py-1 rounded-lg bg-amber-50 text-amber-600 border border-amber-100 font-bold shadow-sm">{deptStats.concluidas} Concluídas</span>}
-                        {deptStats.finalizadas > 0 && <span className="text-[9px] px-2 py-1 rounded-lg bg-emerald-50 text-emerald-600 border border-emerald-100 font-bold shadow-sm">{deptStats.finalizadas} Homologadas</span>}
+                        {deptStats.emAndamento > 0 && <span className="text-[9px] px-2 py-1 rounded-lg bg-indigo-50 text-indigo-600 border border-indigo-100 font-bold shadow-sm whitespace-nowrap">{deptStats.emAndamento} Em Aberto</span>}
+                        {deptStats.concluidas > 0 && <span className="text-[9px] px-2 py-1 rounded-lg bg-amber-50 text-amber-600 border border-amber-100 font-bold shadow-sm whitespace-nowrap">{deptStats.concluidas} Concluídas</span>}
+                        {deptStats.finalizadas > 0 && <span className="text-[9px] px-2 py-1 rounded-lg bg-emerald-50 text-emerald-600 border border-emerald-100 font-bold shadow-sm whitespace-nowrap">{deptStats.finalizadas} Homologadas</span>}
                       </div>
                     </div>
                   )}
 
-                  {/* Se o Pai tiver salas mas nenhuma vistoria iniciada */}
                   {isParent && !deptStats?.hasAny && deptStats && deptStats.childrenCount >= 0 && (
-                    <div className="text-[9px] px-3 py-1.5 rounded-full border border-slate-200 bg-slate-50 text-slate-400 font-black uppercase tracking-widest shadow-sm">
+                    <div className="text-[9px] px-3 py-1.5 rounded-full border border-slate-200 bg-slate-50 text-slate-400 font-black uppercase tracking-widest shadow-sm whitespace-nowrap">
                       {deptStats.childrenCount} Ambientes Internos
                     </div>
                   )}
                   {isCommittee && (
-                    <div className="flex flex-col items-end gap-1">
+                    <div className="flex flex-col items-end gap-1 shrink-0">
                       {deleteConfirmId === loc.id ? (
                         <div className="flex items-center gap-2 animate-in slide-in-from-right-4 duration-300">
                           <button 
-                            onClick={(e) => { e.stopPropagation(); handleDeleteLocation(loc.id, loc.name); }}
-                            className="bg-rose-600 text-white text-[9px] font-black px-4 py-2 rounded-xl shadow-lg shadow-rose-600/20 uppercase tracking-widest"
+                            onClick={(e) => { e.stopPropagation(); handleDeleteLocation(loc.id); }}
+                            className="bg-rose-600 text-white text-[9px] font-black px-4 py-2 rounded-xl shadow-lg shadow-rose-600/20 uppercase tracking-widest cursor-pointer border-none"
                           >
                             Excluir
                           </button>
                           <button 
                             onClick={(e) => { e.stopPropagation(); setDeleteConfirmId(null); }}
-                            className="bg-slate-100 text-slate-400 text-[9px] font-black px-4 py-2 rounded-xl"
+                            className="bg-slate-100 text-slate-400 text-[9px] font-black px-4 py-2 rounded-xl cursor-pointer border-none"
                           >
                             Manter
                           </button>
@@ -1185,7 +1181,7 @@ export function LocationsView({ onSelectInspection }: { onSelectInspection: (id:
                       ) : blockingError?.id === loc.id ? (
                         <div className="flex items-center gap-2 bg-rose-50 border border-rose-100 px-4 py-2 rounded-xl animate-in shake duration-500 shadow-sm">
                            <AlertCircle className="w-3 h-3 text-rose-500" />
-                           <span className="text-[9px] font-black text-rose-600 uppercase tracking-widest">Local com Itens</span>
+                           <span className="text-[9px] font-black text-rose-600 uppercase tracking-widest whitespace-nowrap">Local com Itens</span>
                         </div>
                       ) : (
                         <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-all duration-300">
@@ -1194,7 +1190,7 @@ export function LocationsView({ onSelectInspection }: { onSelectInspection: (id:
                               e.stopPropagation();
                               handleEditLocation(loc);
                             }}
-                            className="p-3 text-slate-300 hover:text-indigo-600 hover:bg-slate-50 rounded-2xl transition-all"
+                            className="p-3 text-slate-300 hover:text-indigo-600 hover:bg-slate-50 rounded-2xl transition-all cursor-pointer border-none bg-transparent"
                           >
                             <Edit2 className="w-5 h-5" />
                           </button>
@@ -1203,7 +1199,7 @@ export function LocationsView({ onSelectInspection }: { onSelectInspection: (id:
                               e.stopPropagation();
                               setDeleteConfirmId(loc.id);
                             }}
-                            className="p-3 text-slate-300 hover:text-rose-500 hover:bg-rose-50 rounded-2xl transition-all"
+                            className="p-3 text-slate-300 hover:text-rose-500 hover:bg-rose-50 rounded-2xl transition-all cursor-pointer border-none bg-transparent"
                           >
                             <Trash2 className="w-5 h-5" />
                           </button>
@@ -1214,27 +1210,27 @@ export function LocationsView({ onSelectInspection }: { onSelectInspection: (id:
                 </div>
               </div>
               
-              <div className="flex flex-col gap-2">
-                <div className="flex items-center gap-2">
-                  <h4 className="text-2xl font-display font-extrabold text-slate-900 tracking-tight leading-tight group-hover:text-indigo-600 transition-colors uppercase line-clamp-1">{loc.name}</h4>
+              <div className="flex flex-col gap-2 min-w-0">
+                <div className="flex items-center gap-2 min-w-0">
+                  <h4 title={loc.name} className="text-2xl font-display font-extrabold text-slate-900 tracking-tight leading-tight group-hover:text-indigo-600 transition-colors uppercase line-clamp-2">{loc.name}</h4>
                 </div>
                 {loc.parentId && (
-                  <div className="flex items-center gap-2">
-                    <span className="text-[9px] font-black text-indigo-400 uppercase tracking-widest bg-indigo-50/50 px-3 py-1 rounded-full border border-indigo-100/50">
+                  <div className="flex items-center gap-2 min-w-0 mt-1">
+                    <span title={`Vinculado a: ${locations?.find(l => l.id === loc.parentId)?.name || '...'}`} className="text-[9px] font-black text-indigo-400 uppercase tracking-widest bg-indigo-50/50 px-3 py-1 rounded-full border border-indigo-100/50 truncate max-w-full inline-block">
                       Vinculado a: {locations?.find(l => l.id === loc.parentId)?.name || '...'}
                     </span>
                   </div>
                 )}
-                <p className="text-sm font-medium text-slate-400 uppercase tracking-widest line-clamp-1">{loc.description}</p>
+                <p title={loc.description} className="text-sm font-medium text-slate-400 uppercase tracking-widest line-clamp-2 mt-1">{loc.description}</p>
               </div>
 
-              <div className="pt-2 flex flex-col gap-4">
+              <div className="pt-2 flex flex-col gap-4 mt-auto">
                 {isParent ? (
                   <Button 
                     variant="accent" 
                     size="sm" 
                     onClick={() => setActiveParentId(loc.id)}
-                    className="w-full h-16 rounded-2xl text-[10px] font-black uppercase tracking-[0.2em] shadow-xl shadow-indigo-600/20 transition-all duration-700 flex items-center justify-center gap-3"
+                    className="w-full h-16 rounded-2xl text-[10px] font-black uppercase tracking-[0.2em] shadow-xl shadow-indigo-600/20 transition-all duration-700 flex items-center justify-center gap-3 cursor-pointer"
                   >
                     ABRIR REPARTIÇÃO <ArrowRight className="w-5 h-5 translate-x-1" />
                   </Button>
@@ -1243,18 +1239,16 @@ export function LocationsView({ onSelectInspection }: { onSelectInspection: (id:
                     variant="accent" 
                     size="sm" 
                     onClick={() => handleStartInspection(loc.id)}
-                    className="w-full h-16 rounded-2xl text-[10px] font-black uppercase tracking-[0.2em] shadow-xl shadow-indigo-600/20 transition-all duration-700 flex items-center justify-center gap-3"
+                    className="w-full h-16 rounded-2xl text-[10px] font-black uppercase tracking-[0.2em] shadow-xl shadow-indigo-600/20 transition-all duration-700 flex items-center justify-center gap-3 cursor-pointer"
                   >
                     {status === 'em_andamento' ? 'CONTINUAR AUDITORIA' : status === 'concluida' ? 'REVISAR DOSSIÊ' : 'AUDITAR ESTE LOCAL'} <ArrowRight className="w-5 h-5 translate-x-2 transition-transform" />
                   </Button>
                 )}
 
-                {/* Auditoria do Departamento agora no Header Card */}
-                
                 <div className="flex flex-col gap-2">
                   <button 
                     onClick={() => setShowHistoryFor(loc.id)}
-                    className="flex items-center justify-center gap-3 text-[9px] font-black text-slate-400 hover:text-slate-900 uppercase tracking-widest py-3 transition-all hover:bg-slate-50 rounded-xl"
+                    className="flex items-center justify-center gap-3 text-[9px] font-black text-slate-400 hover:text-slate-900 uppercase tracking-widest py-3 transition-all hover:bg-slate-50 rounded-xl cursor-pointer border-none bg-transparent"
                   >
                      <History className="w-4 h-4" /> Histórico de Dossiês
                   </button>
@@ -1262,7 +1256,7 @@ export function LocationsView({ onSelectInspection }: { onSelectInspection: (id:
                   {isAdmin && (
                     <button 
                       onClick={() => setShowQRCodeFor({ id: loc.id, name: loc.name })}
-                      className="flex items-center justify-center gap-3 text-[9px] font-black text-indigo-600 hover:text-indigo-800 uppercase tracking-widest py-3 bg-indigo-50 hover:bg-indigo-100 rounded-xl transition-all border border-indigo-100 ring-4 ring-indigo-500/0 hover:ring-indigo-500/5"
+                      className="flex items-center justify-center gap-3 text-[9px] font-black text-indigo-600 hover:text-indigo-800 uppercase tracking-widest py-3 bg-indigo-50 hover:bg-indigo-100 rounded-xl transition-all border border-indigo-100 ring-4 ring-indigo-500/0 hover:ring-indigo-500/5 cursor-pointer"
                     >
                       <Search className="w-4 h-4" /> Etiquetagem de Ambiente
                     </button>
@@ -1277,7 +1271,7 @@ export function LocationsView({ onSelectInspection }: { onSelectInspection: (id:
            <div className="col-span-full pt-4">
               <button 
                 onClick={() => setDisplayLimit(prev => prev + 20)}
-                className="w-full py-6 bg-slate-50 hover:bg-slate-100 text-slate-500 font-bold uppercase tracking-[0.2em] text-[10px] rounded-[3rem] border-2 border-dashed border-slate-200 transition-all flex flex-col items-center gap-2"
+                className="w-full py-6 bg-slate-50 hover:bg-slate-100 text-slate-500 font-bold uppercase tracking-[0.2em] text-[10px] rounded-[3rem] border-2 border-dashed border-slate-200 transition-all flex flex-col items-center gap-2 cursor-pointer"
               >
                 Carregar mais ambientes
                 <span className="text-[10px] opacity-40 font-black">({locations?.length} totais)</span>

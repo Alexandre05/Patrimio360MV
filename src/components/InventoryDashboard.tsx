@@ -7,13 +7,37 @@ import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Legend 
 } from 'recharts';
 import { ShieldCheck, AlertCircle, CheckCircle2, TrendingUp, Building2, ClipboardList } from 'lucide-react';
+import { useAuth } from '../lib/AuthContext'; // IMPORTANTE: Adicionado para puxar o utilizador
 
 export function InventoryDashboard() {
-  const assets = useLiveQuery(() => db.assets.filter(a => !a.deleted).toArray());
-  const locations = useLiveQuery(() => db.locations.filter(l => !l.deleted).toArray());
-  const inspections = useLiveQuery(() => db.inspections.filter(i => !i.deleted).toArray());
+  const { user } = useAuth(); // Identificando quem está a aceder
 
-  if (!assets || !locations) return null;
+  // Puxa os dados brutos
+  const rawAssets = useLiveQuery(() => db.assets.filter(a => !a.deleted).toArray());
+  const rawLocations = useLiveQuery(() => db.locations.filter(l => !l.deleted).toArray());
+  const rawInspections = useLiveQuery(() => db.inspections.filter(i => !i.deleted).toArray());
+
+  if (!rawAssets || !rawLocations || !rawInspections) return null;
+
+  // ====== 🛡️ CASCATA DE SEGURANÇA (Filtro por Acesso) ======
+  // Regra de Ouro: Vistoriadores e Administradores veem tudo. Responsável vê apenas o seu setor.
+  const hasGlobalAccess = user?.role === 'administrador' || user?.role === 'vistoriador' || user?.role === 'prefeito' || !user?.locationId;
+
+  // 1. CASCATA: Filtra as localizações permitidas para o utilizador atual
+  const locations = rawLocations?.filter(l => {
+    if (hasGlobalAccess) return true;
+    return l.id === user.locationId || l.parentId === user.locationId;
+  }) || [];
+
+  const locationIds = locations.map(l => l.id);
+
+  // 2. CASCATA: Filtra as vistorias para mostrar APENAS as dos locais permitidos
+  const inspections = rawInspections?.filter(i => hasGlobalAccess ? true : locationIds.includes(i.locationId)) || [];
+  const inspectionIds = inspections.map(i => i.id);
+
+  // 3. CASCATA: Filtra os itens de patrimônio baseando-se apenas nas vistorias permitidas
+  const assets = rawAssets?.filter(a => hasGlobalAccess ? true : inspectionIds.includes(a.inspectionId)) || [];
+  // ============================================================
 
   // 1. Data per condition
   const conditionData = [

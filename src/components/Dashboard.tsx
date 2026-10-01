@@ -37,16 +37,16 @@ import { motion } from 'motion/react';
 import { db, Inspection, Location } from '../lib/db';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { formatDate } from '../lib/utils';
-import { InspectionView } from './InspectionView';
 import { LocationsView } from './LocationsView';
+import { InspectionView } from './InspectionView';
 import { ReportsView } from './ReportsView';
 import { UsersView } from './UsersView';
 import { NotificationsView } from './NotificationsView';
 import { checkAndGenerateNotifications } from '../lib/NotificationService';
 import { cn } from '../lib/utils';
 import { setupSync, pushLocalChanges, forceFullSyncRecovery } from '../lib/syncService';
-import { db as firestore, auth } from '../lib/firebase';
-import { doc, deleteDoc, getDoc } from 'firebase/firestore';
+import { auth } from '../lib/firebase';
+import { supabase } from '../lib/supabase';
 import { ScannerView } from './ScannerView';
 import { InventoryDashboard } from './InventoryDashboard';
 import { TrainingView } from './TrainingView';
@@ -93,20 +93,16 @@ export function Dashboard() {
             return;
          }
 
-         const inspRef = doc(firestore, 'inspections', scanned);
-         const inspSnap = await getDoc(inspRef);
-         if (inspSnap.exists()) {
-            const data = inspSnap.data() as Inspection;
-            await db.inspections.put({ id: inspSnap.id, ...data } as any);
-            handleScannerOpen(inspSnap.id, data.locationId);
+         const { data: cloudInsp } = await supabase.from('inspections').select('*').eq('id', scanned).single();
+         if (cloudInsp) {
+            await db.inspections.put(cloudInsp as any);
+            handleScannerOpen(cloudInsp.id, cloudInsp.locationId);
             return;
          }
 
-         // If it's a location ID
-         const locRef = doc(firestore, 'locations', scanned);
-         const locSnap = await getDoc(locRef);
-         if (locSnap.exists()) {
-            handleScannerOpen('NEW', locSnap.id);
+         const { data: cloudLoc } = await supabase.from('locations').select('*').eq('id', scanned).single();
+         if (cloudLoc) {
+            handleScannerOpen('NEW', cloudLoc.id);
             return;
          }
       }
@@ -114,12 +110,31 @@ export function Dashboard() {
     processScanned();
   }, []);
 
-  const inspections = useLiveQuery(() => db.inspections.orderBy('date').reverse().limit(10).toArray());
-  const locations = useLiveQuery(() => db.locations.filter(l => !l.deleted).toArray());
-  const activeInspectionsCount = useLiveQuery(() => db.inspections.where('status').equals('em_andamento').count());
-  const concludedInspectionsCount = useLiveQuery(() => db.inspections.where('status').anyOf('concluida', 'finalizada').count());
-  const totalAssetsCount = useLiveQuery(() => db.assets.count());
-  const unreadNotifications = useLiveQuery(() => user ? db.notifications.where('targetUserId').equals(user.userId).and(n => !n.read).count() : 0, [user]);
+  const rawLocations = useLiveQuery(() => db.locations.filter(l => !l.deleted).toArray());
+  const rawInspections = useLiveQuery(() => db.inspections.filter(i => !i.deleted).toArray());
+  const rawAssets = useLiveQuery(() => db.assets.filter(a => !a.deleted).toArray());
+
+  const hasGlobalAccess = user?.role === 'administrador' || user?.role === 'vistoriador' || user?.role === 'prefeito' || !user?.locationId;
+
+  const locations = rawLocations?.filter(l => {
+    if (hasGlobalAccess) return true;
+    return l.id === user.locationId || l.parentId === user.locationId;
+  }) || [];
+  
+  const locationIds = locations.map(l => l.id);
+
+  const allAllowedInspections = rawInspections?.filter(i => hasGlobalAccess ? true : locationIds.includes(i.locationId)) || [];
+  const allowedInspectionIds = allAllowedInspections.map(i => i.id);
+
+  const assets = rawAssets?.filter(a => hasGlobalAccess ? true : allowedInspectionIds.includes(a.inspectionId)) || [];
+
+  const allInspectionsSorted = [...allAllowedInspections].sort((a, b) => b.date - a.date);
+  const recentInspections = allInspectionsSorted.slice(0, 10);
+  const activeInspectionsCount = allAllowedInspections.filter(i => i.status === 'em_andamento').length;
+  const concludedInspectionsCount = allAllowedInspections.filter(i => i.status === 'concluida' || i.status === 'finalizada').length;
+  const totalAssetsCount = assets.reduce((acc, a) => acc + (a.quantity || 1), 0);
+
+  const unreadNotifications = useLiveQuery(() => user ? db.notifications.where('targetUserId').equals(user.userId).and(n => !n.read).count() : 0, [user]) || 0;
   const unsyncedCount = useLiveQuery(() => 
     db.assets.filter(a => 
       a.needsSync === 1 || 
@@ -127,8 +142,9 @@ export function Dashboard() {
       (a.photos && a.photos.some(p => typeof p === 'string' && p.startsWith('data:image')))
     ).count()
   ) || 0;
+  
   const [syncing, setSyncing] = useState(false);
-  const isAdmin = user?.role === 'administrador' || user?.role === 'prefeito' || user?.email === 'henri199@gmail.com' || auth.currentUser?.email === 'henri199@gmail.com';
+  const isAdmin = user?.role === 'administrador' || user?.role === 'prefeito' || user?.email === 'alexandremenna05@gmail.com' || auth.currentUser?.email === 'alexandremenna05@gmail.com';
   const isManager = isAdmin || user?.role === 'responsavel';
 
   const [quotaExceeded, setQuotaExceeded] = useState(false);
@@ -169,7 +185,6 @@ export function Dashboard() {
   });
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
 
-  // Persistence and auto-collapse
   useEffect(() => {
     localStorage.setItem('sidebar_collapsed', JSON.stringify(isSidebarCollapsed));
   }, [isSidebarCollapsed]);
@@ -207,7 +222,6 @@ export function Dashboard() {
 
     setIsResetting(true);
     try {
-      // 1. Limpar banco local Dexie
       await Promise.all([
         db.assets.clear(),
         db.inspections.clear(),
@@ -215,41 +229,17 @@ export function Dashboard() {
         db.notifications.clear()
       ]);
 
-      // 2. Limpar do Firestore se estiver conectado
       if (isOnline) {
         try {
-          const { getDocs, collection, deleteDoc, doc } = await import('firebase/firestore');
-          
-          // Limpa Bens (assets)
-          const assetsSnap = await getDocs(collection(firestore, 'assets'));
-          for (const d of assetsSnap.docs) {
-            await deleteDoc(doc(firestore, 'assets', d.id));
-          }
-
-          // Limpa Vistorias (inspections)
-          const inspectionsSnap = await getDocs(collection(firestore, 'inspections'));
-          for (const d of inspectionsSnap.docs) {
-            await deleteDoc(doc(firestore, 'inspections', d.id));
-          }
-
-          // Limpa Ambientes/Locais (locations)
-          const locationsSnap = await getDocs(collection(firestore, 'locations'));
-          for (const d of locationsSnap.docs) {
-            await deleteDoc(doc(firestore, 'locations', d.id));
-          }
-
-          // Limpa Alertas (notifications)
-          const notificationsSnap = await getDocs(collection(firestore, 'notifications'));
-          for (const d of notificationsSnap.docs) {
-            await deleteDoc(doc(firestore, 'notifications', d.id));
-          }
-
-        } catch (firestoreErr) {
-          console.error("Erro ao limpar dados remotos do Firestore:", firestoreErr);
+          await supabase.from('assets').delete().neq('id', '0');
+          await supabase.from('inspections').delete().neq('id', '0');
+          await supabase.from('locations').delete().neq('id', '0');
+          await supabase.from('notifications').delete().neq('id', '0');
+        } catch (supabaseErr) {
+          console.error("Erro ao limpar dados remotos do Supabase:", supabaseErr);
         }
       }
 
-      // 3. Limpa os marcadores de tempo do Delta Sync no localStorage para não sincronizar lixo
       const keys = [
         'lastSyncTime_locations',
         'lastSyncTime_inspections',
@@ -259,10 +249,10 @@ export function Dashboard() {
       ];
       keys.forEach(key => localStorage.removeItem(key));
       
-      alert("✅ SUCESSO: O banco de dados (locais, vistorias, bens e alertas) local e na nuvem foi zerado com sucesso para fins de testes.");
+      alert("✅ SUCESSO: O banco de dados local e na nuvem foi zerado com sucesso para fins de testes.");
       
       setTimeout(() => {
-        window.location.href = '/'; // Recarregar a aplicação na Home
+        window.location.href = '/'; 
       }, 500);
     } catch (err) {
       console.error("Erro ao zerar sistema:", err);
@@ -318,8 +308,6 @@ export function Dashboard() {
         const confirm = window.confirm("Deseja importar estes dados? Os dados atuais em conflito podem ser substituídos.");
         if (!confirm) return;
 
-        // Limpar bancos para importação limpa (opcional, aqui vamos mesclar)
-        // Usando bulkPut para mesclar
         await Promise.all([
           db.users.bulkPut(data.users || []),
           db.locations.bulkPut(data.locations || []),
@@ -365,7 +353,6 @@ export function Dashboard() {
       case 'home':
         return (
           <div className="flex flex-col gap-10 animate-in fade-in slide-in-from-bottom-4 duration-700">
-            {/* 🚨 Alerta de Cota Excedida */}
             {quotaExceeded && (
               <div className="bg-amber-50 border border-amber-200 rounded-[2.5rem] p-6 flex flex-col md:flex-row items-center gap-6 animate-in slide-in-from-top-4 duration-500 shadow-xl shadow-amber-500/5">
                 <div className="w-16 h-16 bg-white rounded-3xl flex items-center justify-center shadow-lg shadow-amber-500/10 shrink-0">
@@ -374,13 +361,12 @@ export function Dashboard() {
                 <div className="flex flex-col gap-1 text-center md:text-left">
                   <span className="text-lg font-black text-amber-900 tracking-tight uppercase leading-none">Limite de Sincronização Atingido</span>
                   <span className="text-xs font-bold text-amber-600/70 leading-relaxed">
-                    O Google Cloud atingiu o limite gratuito de hoje. <strong>Suas vistorias continuam sendo salvas normalmente neste dispositivo</strong> e serão enviadas para a nuvem automaticamente assim que a cota for reiniciada (geralmente à meia-noite).
+                    O Google Cloud atingiu o limite gratuito de hoje. <strong>Suas vistorias continuam sendo salvas normalmente neste dispositivo</strong> e serão enviadas para a nuvem automaticamente assim que a cota for reiniciada.
                   </span>
                 </div>
               </div>
             )}
-             {/* 🏰 Hero Moderno */}
-            <div className="relative overflow-hidden rounded-[2.5rem] bg-white border border-slate-100 p-8 lg:p-12 text-slate-900 shadow-[0_20px_60px_-15px_rgba(0,0,0,0.03)] group">
+             <div className="relative overflow-hidden rounded-[2.5rem] bg-white border border-slate-100 p-8 lg:p-12 text-slate-900 shadow-[0_20px_60px_-15px_rgba(0,0,0,0.03)] group">
               <div className="relative z-10 flex flex-col lg:flex-row items-center justify-between gap-12">
                 <div className="flex flex-col gap-6 text-center lg:text-left max-w-2xl">
                   <div className="inline-flex items-center gap-2 px-3 py-1.5 bg-slate-50 border border-slate-100 rounded-full w-fit mx-auto lg:mx-0">
@@ -407,11 +393,7 @@ export function Dashboard() {
                       onClick={async () => {
                         if (window.confirm("Isso irá limpar apenas os dados locais (vistorias e locais) e baixar tudo da nuvem novamente. Seu login será mantido. Deseja continuar?")) {
                           try {
-                            // Pega o nome de todas as tabelas do Dexie no app e limpa uma por uma.
-                            // Isso garante que o banco do Firebase Auth NÃO seja tocado.
                             await Promise.all(db.tables.map(table => table.clear()));
-                            
-                            // Recarrega a página para puxar os dados do zero
                             window.location.reload();
                           } catch (error) {
                             console.error("Erro ao limpar tabelas:", error);
@@ -430,7 +412,6 @@ export function Dashboard() {
                           const confirmCleanup = window.confirm("Isso irá remover vistorias sem itens e locais sem vistorias. Deseja prosseguir?");
                           if (!confirmCleanup) return;
 
-                          // Tenta sincronizar antes de limpar
                           try { await pushLocalChanges(); } catch (e) {}
 
                           const allInspections = await db.inspections.toArray();
@@ -443,16 +424,21 @@ export function Dashboard() {
                              const c = await db.assets.where('inspectionId').equals(i.id).count();
                              if (c === 0) {
                                 await db.inspections.delete(i.id);
-                                try { await deleteDoc(doc(firestore, 'inspections', i.id)); } catch(e){}
+                                try { await supabase.from('inspections').delete().eq('id', i.id); } catch(e){}
                                 clearedInps++;
                              }
                           }
 
                           for (const l of allLocations) {
                             const c = await db.inspections.where('locationId').equals(l.id).count();
-                            if (c === 0) {
+                            
+                            // 🛡️ A NOSSA TRAVA INTELIGENTE: Verifica se é secretaria pai de alguém
+                            const isParent = allLocations.some(child => child.parentId === l.id);
+                            
+                            // Só apaga se tiver 0 vistorias E NÃO for pai de ninguém
+                            if (c === 0 && !isParent) {
                               await db.locations.delete(l.id);
-                              try { await deleteDoc(doc(firestore, 'locations', l.id)); } catch(e){}
+                              try { await supabase.from('locations').delete().eq('id', l.id); } catch(e){}
                               clearedLocs++;
                             }
                           }
@@ -462,7 +448,7 @@ export function Dashboard() {
                             const insp = await db.inspections.get(a.inspectionId);
                             if (!insp) {
                               await db.assets.delete(a.id);
-                              try { await deleteDoc(doc(firestore, 'assets', a.id)); } catch(e){}
+                              try { await supabase.from('assets').delete().eq('id', a.id); } catch(e){}
                               clearedAssets++;
                             }
                           }
@@ -506,7 +492,6 @@ export function Dashboard() {
               <Building2 className="absolute -bottom-24 -right-16 w-80 h-80 text-slate-100 opacity-20 transform -rotate-12 pointer-events-none group-hover:scale-110 transition-transform duration-1000" />
             </div>
 
-            {/* 📊 2. Cards de Resumo */}
             <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
               <SummaryCard 
                 label="Localizações" 
@@ -535,7 +520,6 @@ export function Dashboard() {
               />
             </div>
 
-            {/* 📋 4. Lista de Vistorias Recentes */}
             <div className="flex flex-col gap-6">
               <div className="flex items-center justify-between ml-1 leading-none">
                 <div className="flex flex-col">
@@ -545,7 +529,7 @@ export function Dashboard() {
                 <button onClick={() => setActiveTab('inspections')} className="flex items-center gap-2 text-[10px] font-black text-primary border-2 border-primary px-4 py-2 rounded-xl hover:bg-primary hover:text-white transition-all">VER TODAS <ArrowRight className="w-3 h-3" /></button>
               </div>
               <div className="grid grid-cols-1 gap-3">
-                {inspections?.length === 0 ? (
+                {recentInspections?.length === 0 ? (
                   <Card className="flex items-center justify-center py-20 text-text-muted border-dashed border-2 border-border bg-bg/50 rounded-[3rem]">
                     <div className="text-center">
                       <ClipboardList className="w-16 h-16 mx-auto opacity-20 mb-4" />
@@ -554,7 +538,7 @@ export function Dashboard() {
                     </div>
                   </Card>
                 ) : (
-                  inspections?.map(insp => (
+                  recentInspections?.map(insp => (
                     <RecentInspectionRow 
                       key={insp.id} 
                       inspection={insp} 
@@ -566,7 +550,6 @@ export function Dashboard() {
               </div>
             </div>
 
-            {/* 📡 5. Status Offline/Sync (Removed as per user request to avoid persistent messages) */}
             {!isOnline && (
               <div className="bg-rose-50 border border-rose-100 rounded-[2.5rem] p-6 flex flex-col md:flex-row items-center gap-6 animate-in zoom-in-95 duration-500 shadow-xl shadow-rose-500/5">
                 <div className="w-20 h-20 bg-white rounded-3xl flex items-center justify-center shadow-lg shadow-rose-500/10 shrink-0">
@@ -583,15 +566,14 @@ export function Dashboard() {
       case 'locations':
         return <LocationsView onSelectInspection={(id) => setSelectedInspectionId(id)} />;
       case 'inspections':
-        // Reuse similar structure or pass setTab
         return (
           <div className="flex flex-col gap-6 animate-in fade-in duration-500">
              <div className="flex items-center justify-between">
                 <h2 className="text-2xl font-black text-slate-900 tracking-tight">Todas as Vistorias</h2>
                 <Button size="sm" icon={Plus} onClick={() => setActiveTab('locations')}>Nova</Button>
-              </div>
-              <div className="grid grid-cols-1 gap-3">
-                {inspections?.map(insp => (
+             </div>
+             <div className="grid grid-cols-1 gap-3">
+                {allInspectionsSorted?.map(insp => (
                     <RecentInspectionRow 
                       key={insp.id} 
                       inspection={insp} 
@@ -599,7 +581,7 @@ export function Dashboard() {
                       onClick={() => setSelectedInspectionId(insp.id)}
                     />
                   ))}
-              </div>
+             </div>
           </div>
         );
       case 'reports':
@@ -625,7 +607,6 @@ export function Dashboard() {
               <div className="h-px bg-slate-100 w-full" />
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                {/* Card Zerar Banco */}
                 <div className="border border-rose-100 bg-rose-50/20 p-6 rounded-[2rem] flex flex-col justify-between gap-6">
                   <div className="flex flex-col gap-2">
                     <span className="text-xs font-black text-rose-600 uppercase tracking-widest">Zona de Perigo</span>
@@ -644,7 +625,6 @@ export function Dashboard() {
                   </Button>
                 </div>
 
-                {/* Card Backup */}
                 <div className="border border-indigo-100/30 bg-slate-50/40 p-6 rounded-[2rem] flex flex-col justify-between gap-6">
                   <div className="flex flex-col gap-2">
                     <span className="text-xs font-black text-indigo-600 uppercase tracking-widest">Preservação de Dados</span>
@@ -685,7 +665,6 @@ export function Dashboard() {
 
   return (
     <div className="flex flex-col lg:flex-row min-h-screen bg-bg">
-      {/* 📱 Mobile Header */}
       <div className="lg:hidden flex items-center justify-between p-4 bg-card border-b border-border sticky top-0 z-50">
         <div className="flex items-center gap-3">
            <button 
@@ -719,7 +698,6 @@ export function Dashboard() {
         </div>
       </div>
 
-      {/* 🎭 Mobile Overlay */}
       {isMobileMenuOpen && (
         <div 
           className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[60] lg:hidden animate-in fade-in duration-300"
@@ -727,7 +705,6 @@ export function Dashboard() {
         />
       )}
 
-      {/* 🖥️ Integrated Responsive Sidebar */}
       <aside className={cn(
         "fixed lg:sticky inset-y-0 left-0 flex flex-col bg-white border-r border-slate-100 transition-all duration-500 ease-in-out z-[70] h-screen top-0",
         isMobileMenuOpen ? "translate-x-0 w-80 px-8" : "-translate-x-full lg:translate-x-0",
@@ -795,9 +772,9 @@ export function Dashboard() {
           )}
         </nav>
 
-        <div className="mt-auto pt-8 border-t border-slate-100 pb-8">
+        <div className="mt-auto pt-4 border-t border-slate-100 pb-4 shrink-0">
           {!isSidebarCollapsed ? (
-            <div className="p-4 bg-slate-50 rounded-2xl flex items-center gap-3 border border-slate-100 mb-4 transition-all hover:bg-slate-100 cursor-default animate-in slide-in-from-bottom-2">
+            <div className="p-4 bg-slate-50 rounded-2xl flex items-center gap-3 border border-slate-100 mb-2 transition-all hover:bg-slate-100 cursor-default">
                <div className="w-10 h-10 bg-white rounded-xl flex items-center justify-center shadow-sm text-indigo-600 font-bold text-sm border border-slate-200 shrink-0">
                   {user?.name.charAt(0)}
                </div>
@@ -807,7 +784,7 @@ export function Dashboard() {
                </div>
             </div>
           ) : (
-            <div className="w-12 h-12 mx-auto bg-slate-50 rounded-xl flex items-center justify-center mb-4 border border-slate-100 text-indigo-600 font-bold text-sm">
+            <div className="w-12 h-12 mx-auto bg-slate-50 rounded-xl flex items-center justify-center mb-2 border border-slate-100 text-indigo-600 font-bold text-sm">
                {user?.name.charAt(0)}
             </div>
           )}
@@ -822,12 +799,21 @@ export function Dashboard() {
             <LogOut className="w-5 h-5 shrink-0" />
             {!isSidebarCollapsed && "Sair"}
           </button>
+
+          {!isSidebarCollapsed && (
+            <div className="mt-4 flex flex-col items-center justify-center text-center animate-in fade-in duration-1000 opacity-50 hover:opacity-100 transition-opacity cursor-default">
+              <span className="text-[7px] font-black uppercase tracking-[0.3em] text-slate-400">
+                Software Desenvolvido por
+              </span>
+              <span className="text-[10px] font-black uppercase tracking-[0.2em] text-indigo-500 mt-0.5">
+                Alexandre Barreto Menna
+              </span>
+            </div>
+          )}
         </div>
       </aside>
 
-      {/* 🚀 Main Content */}
       <main className="flex-1 flex flex-col min-w-0">
-        {/* 🗺️ Universal Header with Breadcrumbs */}
         <header className={cn(
           "flex items-center justify-between px-6 lg:px-10 py-6 lg:py-7 bg-bg/80 backdrop-blur-xl sticky top-0 z-30 transition-all",
           selectedInspectionId ? "pb-4" : ""
@@ -917,7 +903,6 @@ export function Dashboard() {
         </section>
       </main>
 
-      {/* 🤳 Mobile Bottom Tab Bar */}
       <nav className="fixed bottom-0 left-0 right-0 lg:hidden bg-card/90 backdrop-blur-xl border-t border-border flex items-center justify-around p-4 pb-6 z-50">
         <MobileNavItem active={activeTab === 'home' && !selectedInspectionId} icon={LayoutGrid} onClick={() => handleTabChange('home')} />
         <MobileNavItem active={activeTab === 'training'} icon={GraduationCap} onClick={() => handleTabChange('training')} />
@@ -943,8 +928,6 @@ export function Dashboard() {
     </div>
   );
 }
-
-// 🧩 Componentes Auxiliares Locais
 
 function SummaryCard({ label, value, icon: Icon, onClick, variant = 'default' }: { label: string, value: number | string, icon: any, onClick: () => void, variant?: 'default' | 'accent' }) {
   return (
@@ -977,43 +960,24 @@ function SummaryCard({ label, value, icon: Icon, onClick, variant = 'default' }:
   );
 }
 
-function QuickActionButton({ icon: Icon, label, onClick, primary = false }: { icon: any, label: string, onClick: () => void, primary?: boolean }) {
-  return (
-    <button 
-      onClick={onClick}
-      className={cn(
-        "flex flex-col items-center justify-center gap-4 h-40 rounded-[2.5rem] border-2 transition-all group active:scale-95 shadow-sm",
-        primary 
-          ? "bg-primary border-primary text-white hover:bg-primary-light" 
-          : "bg-card border-bg hover:border-border text-text-muted hover:text-primary"
-      )}
-    >
-      <div className={cn(
-        "w-14 h-14 rounded-2xl flex items-center justify-center transition-all shadow-sm",
-        primary ? "bg-white/10 text-white" : "bg-bg text-text-muted group-hover:bg-primary group-hover:text-white"
-      )}>
-        <Icon className="w-7 h-7" />
-      </div>
-      <span className="text-[11px] font-black uppercase tracking-widest leading-none">{label}</span>
-    </button>
-  );
-}
-
 function RecentInspectionRow({ inspection, locationName, onClick }: { inspection: Inspection, locationName: string, onClick: () => void, key?: string | number }) {
   const isFinalized = inspection.status === 'finalizada';
   const isInProgress = inspection.status === 'em_andamento';
   
   const assetCount = useLiveQuery(
-    () => db.assets.where('inspectionId').equals(inspection.id).count(),
+    async () => {
+      const inspectionAssets = await db.assets.where('inspectionId').equals(inspection.id).toArray();
+      return inspectionAssets.reduce((total, asset) => total + (asset.quantity || 1), 0);
+    },
     [inspection.id]
   );
 
   return (
     <Card 
       onClick={onClick}
-      className="flex items-center justify-between p-4 lg:p-6 group hover:border-slate-300 transition-all border-slate-100"
+      className="flex items-center justify-between p-4 lg:p-6 group hover:border-slate-300 transition-all border-slate-100 cursor-pointer"
     >
-      <div className="flex items-center gap-6 min-w-0">
+      <div className="flex items-center gap-4 lg:gap-6 min-w-0 pr-4 flex-1">
         <div className={cn(
           "w-14 h-14 rounded-2xl flex items-center justify-center shrink-0 border transition-all duration-500",
           isFinalized ? "bg-emerald-50 border-emerald-100 text-emerald-600" : 
@@ -1022,20 +986,25 @@ function RecentInspectionRow({ inspection, locationName, onClick }: { inspection
         )}>
           {isFinalized ? <CheckCircle2 className="w-7 h-7" /> : <ClipboardList className="w-7 h-7" />}
         </div>
-        <div className="flex flex-col min-w-0">
-          <div className="flex items-center gap-2 mb-1">
-            <h4 className="text-sm font-bold text-slate-900 truncate tracking-tight">{locationName}</h4>
+        <div className="flex flex-col min-w-0 flex-1">
+          <div className="flex items-start gap-2 mb-1.5">
+            <h4 
+              title={locationName}
+              className="text-sm font-bold text-slate-900 line-clamp-2 tracking-tight leading-snug"
+            >
+              {locationName}
+            </h4>
             {isInProgress && (assetCount === 0) && (
-              <span className="bg-amber-100 text-amber-700 text-[8px] font-bold uppercase px-2 py-0.5 rounded-lg tracking-widest">Sem itens</span>
+              <span className="bg-amber-100 text-amber-700 text-[8px] font-bold uppercase px-2 py-0.5 rounded-lg tracking-widest shrink-0 mt-0.5">Sem itens</span>
             )}
           </div>
-          <div className="flex items-center gap-3 text-[10px] font-bold">
+          <div className="flex flex-wrap items-center gap-3 text-[10px] font-bold">
             <span className="uppercase text-slate-400 tracking-wider font-mono">{formatDate(inspection.date).split(',')[0]}</span>
             <div className="w-1 h-1 rounded-full bg-slate-200"></div>
-            <span className="text-slate-400">{assetCount || 0} itens</span>
+            <span className="text-slate-400 shrink-0">{assetCount || 0} itens físicos</span>
             <div className="w-1 h-1 rounded-full bg-slate-200"></div>
             <span className={cn(
-              "uppercase tracking-[0.1em]",
+              "uppercase tracking-[0.1em] shrink-0",
               isFinalized ? "text-emerald-600" : isInProgress ? "text-indigo-600" : "text-slate-600"
             )}>
               {inspection.status.replace('_', ' ')}
@@ -1048,13 +1017,16 @@ function RecentInspectionRow({ inspection, locationName, onClick }: { inspection
         size="sm" 
         variant={isInProgress ? "accent" : "secondary"}
         icon={isInProgress ? PlayCircle : Eye}
-        onClick={onClick}
-        className="hidden sm:flex h-11 px-8 uppercase tracking-widest"
+        onClick={(e) => {
+          e.stopPropagation(); 
+          onClick();
+        }}
+        className="hidden sm:flex h-11 px-8 uppercase tracking-widest shrink-0"
       >
         {isInProgress ? "Continuar" : "Visualizar"}
       </Button>
 
-      <ArrowRight className="w-5 h-5 text-slate-300 sm:hidden group-hover:text-slate-900 transition-transform group-hover:translate-x-1" />
+      <ArrowRight className="w-5 h-5 text-slate-300 sm:hidden group-hover:text-slate-900 transition-transform group-hover:translate-x-1 shrink-0" />
     </Card>
   );
 }

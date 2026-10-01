@@ -1,30 +1,35 @@
-import { ref, uploadString, getDownloadURL, deleteObject } from 'firebase/storage';
-import { storage } from './firebase';
+import { supabase } from './supabase';
 
 /**
- * Uploads a base64 image to Firebase Storage.
- * @param base64 String containing the image data
- * @param path The storage path (e.g., 'assets/asset-id/photo-1.jpg')
- * @returns The download URL
+ * Faz o upload de uma foto em base64 para o Supabase Storage
  */
-export async function uploadAssetPhoto(base64: string, path: string): Promise<string> {
-  const storageRef = ref(storage, path);
-  
-  // uploadString handles data_url format automatically
-  await uploadString(storageRef, base64, 'data_url');
-  
-  const downloadURL = await getDownloadURL(storageRef);
-  return downloadURL;
-}
-
-/**
- * Deletes a file from Firebase Storage given its URL or path.
- */
-export async function deleteAssetPhoto(url: string): Promise<void> {
+export async function uploadAssetPhoto(base64Image: string, path: string): Promise<string> {
   try {
-    const storageRef = ref(storage, url);
-    await deleteObject(storageRef);
-  } catch (err) {
-    console.warn("Storage delete failed (might be already deleted):", err);
+    // 1. O navegador converte a foto de texto (base64) para arquivo real (Blob)
+    const response = await fetch(base64Image);
+    const blob = await response.blob();
+
+    // 2. Faz o envio direto para o cofre 'assets' do Supabase
+    const { data, error } = await supabase.storage
+      .from('assets')
+      .upload(path, blob, {
+        contentType: blob.type,
+        upsert: true // Se já existir uma foto com o mesmo nome, ele substitui
+      });
+
+    if (error) {
+      console.error('[Storage] Erro ao enviar foto para o Supabase:', error.message);
+      throw error;
+    }
+
+    // 3. Pega o link público permanente da foto para salvar no banco
+    const { data: { publicUrl } } = supabase.storage
+      .from('assets')
+      .getPublicUrl(path);
+
+    return publicUrl;
+  } catch (error) {
+    console.error('[Storage] Falha crítica no processamento da imagem:', error);
+    throw error;
   }
 }

@@ -1,7 +1,7 @@
 import React, { createContext, useContext, useEffect, useState } from 'react';
 import { v4 as uuidv4 } from 'uuid';
 import { User, db as localDb } from './db';
-import { auth, db as firestore, googleProvider } from './firebase';
+import { auth, googleProvider } from './firebase';
 import { 
   onAuthStateChanged, 
   signInWithPopup, 
@@ -10,7 +10,6 @@ import {
   signOut as firebaseSignOut,
   signInAnonymously
 } from 'firebase/auth';
-import { doc, getDoc, setDoc, collection, query, limit, getDocs, where } from 'firebase/firestore';
 
 interface AuthContextType {
   user: User | null;
@@ -32,13 +31,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
       if (firebaseUser) {
-        // If it is an anonymous user (guest citizen)
         if (firebaseUser.isAnonymous) {
           setUser({
             userId: firebaseUser.uid,
             name: 'Cidadão (Consulta)',
             email: 'public@patri-mv.gov.br',
-            role: 'vistoriador', // Using low level role just to satisfy internal types if needed, rules will handle actual access
+            role: 'vistoriador',
             status: 'ativo',
             cargo: 'Visitante'
           });
@@ -46,159 +44,57 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           return;
         }
 
-        const userEmail = firebaseUser.email;
+        const userEmail = firebaseUser.email?.toLowerCase().trim();
 
-        // 1. O "Master Admin" (Acesso Incondicional)
-        if (userEmail === 'henri199@gmail.com') {
-          try {
-            let userDoc = await getDoc(doc(firestore, 'users', firebaseUser.uid));
-            let userData: User;
-            
-            if (userDoc.exists()) {
-              userData = userDoc.data() as User;
-              if (userData.role !== 'administrador' || userData.email !== userEmail) {
-                userData = {
-                  ...userData,
-                  role: 'administrador',
-                  email: userEmail
-                };
-                await setDoc(doc(firestore, 'users', firebaseUser.uid), userData);
-              }
-            } else {
-              userData = {
-                userId: firebaseUser.uid,
-                name: firebaseUser.displayName || 'Master Admin',
-                email: userEmail,
-                role: 'administrador',
-                status: 'ativo',
-                cargo: 'Administrador Master'
-              };
-              await setDoc(doc(firestore, 'users', firebaseUser.uid), userData);
-            }
-            
-            // Salvar no Dexie
-            await localDb.users.put(userData);
-            
-            setUser(userData);
-            localStorage.setItem('current_user', JSON.stringify(userData));
-          } catch (e) {
-            console.error("Erro ao configurar Master Admin:", e);
-          }
+        // 1. O "Master Admin" (Reconhecimento Imediato via Código - Sem bloqueio do Firestore)
+        if (userEmail === 'alexandremenna05@gmail.com') {
+          const userData: User = {
+            userId: firebaseUser.uid,
+            name: firebaseUser.displayName || 'Alexandre Barreto Menna',
+            email: userEmail,
+            role: 'administrador',
+            status: 'ativo',
+            cargo: 'Administrador Master'
+          };
+          
+          await localDb.users.put(userData);
+          setUser(userData);
+          localStorage.setItem('current_user', JSON.stringify(userData));
           setLoading(false);
           return;
         }
 
-        // 2. A "Lista de Convidados" (Comissão de Vistoria)
+        // 2. Utilizadores comuns cadastrados localmente no Dexie
         if (userEmail) {
           try {
-            // Verificar se o documento existe direto pelo UID
-            let userDoc = await getDoc(doc(firestore, 'users', firebaseUser.uid));
-            if (userDoc.exists()) {
-              const userData = userDoc.data() as User;
-              if (userData.email === userEmail) {
-                await localDb.users.put(userData);
-                setUser(userData);
-                localStorage.setItem('current_user', JSON.stringify(userData));
-                setLoading(false);
-                return;
-              }
-            }
-
-            // Senão, tentar buscar pelo e-mail
-            const q = query(collection(firestore, 'users'), where('email', '==', userEmail), limit(1));
-            const querySnapshot = await getDocs(q);
-            if (!querySnapshot.empty) {
-              const oldDoc = querySnapshot.docs[0];
-              const userData = oldDoc.data() as User;
-              
-              // Migrar documento para o novo UID do Google Auth
-              const newUserData = { ...userData, userId: firebaseUser.uid };
-              await setDoc(doc(firestore, 'users', firebaseUser.uid), newUserData);
-              
-              try {
-                const { deleteDoc } = await import('firebase/firestore');
-                if (oldDoc.id !== firebaseUser.uid) {
-                  await deleteDoc(doc(firestore, 'users', oldDoc.id));
-                }
-              } catch (e) {}
-
-              await localDb.users.put(newUserData);
-              setUser(newUserData);
-              localStorage.setItem('current_user', JSON.stringify(newUserData));
+            const localUser = await localDb.users.where('email').equals(userEmail).first();
+            if (localUser) {
+              setUser(localUser);
+              localStorage.setItem('current_user', JSON.stringify(localUser));
               setLoading(false);
               return;
             }
           } catch (e) {
-            console.error("Erro ao verificar lista de convidados:", e);
+            console.error("Erro ao verificar utilizador local:", e);
           }
         }
 
-        // Se chegarmos aqui e não for o primeiro usuário instalando o sistema, é um estranho!
-        // 3. O "Bloqueio de Estranhos" (Acesso Negado)
-        if (!isFirstUser) {
-          console.warn("Acesso negado: Usuário estranho bloqueado na portaria.");
-          try {
-            await firebaseSignOut(auth);
-          } catch (e) {}
-          setUser(null);
-          localStorage.removeItem('current_user');
-        } else {
-          // No caso de primeiro usuário criando conta
-          setLoading(false);
-          return;
-        }
+        // Se não for master nem estiver cadastrado, encerra a sessão por segurança
+        try {
+          await firebaseSignOut(auth);
+        } catch (e) {}
+        setUser(null);
+        localStorage.removeItem('current_user');
       } else {
         setUser(null);
         localStorage.removeItem('current_user');
       }
       setLoading(false);
-      checkFirstUser();
+      setIsFirstUser(false);
     });
 
     return () => unsubscribe();
-  }, [isFirstUser]);
-
-  const checkFirstUser = async () => {
-    if (auth.currentUser) {
-      setIsFirstUser(false);
-      return;
-    }
-    
-    const cachedNotFirst = localStorage.getItem('not_first_user');
-    if (cachedNotFirst === 'true') {
-      setIsFirstUser(false);
-      return;
-    }
-
-    try {
-      // Check for sentinel document (allowed public read in rules)
-      const configDoc = await getDoc(doc(firestore, 'users', '_config'));
-      
-      if (configDoc.exists()) {
-        setIsFirstUser(false);
-        localStorage.setItem('not_first_user', 'true');
-        return;
-      }
-
-      // If sentinel is missing, we check if the collection is truly empty
-      // Note: This might fail if rules are strict, which is fine
-      const q = query(collection(firestore, 'users'), limit(1));
-      const querySnapshot = await getDocs(q);
-      
-      const isEmpty = querySnapshot.empty;
-      setIsFirstUser(isEmpty);
-      
-      if (!isEmpty) {
-        localStorage.setItem('not_first_user', 'true');
-      }
-    } catch (e: any) {
-      // If we get a permission error, it means the rules are already active
-      // usually implying that the system is already set up and secured.
-      console.log("CheckFirstUser: Access restricted, assuming not first setup.");
-      setIsFirstUser(false);
-      localStorage.setItem('not_first_user', 'true');
-    }
-  };
+  }, []);
 
   const signInAsGuest = async () => {
     try {
@@ -220,99 +116,35 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         firebaseUser = result.user;
       }
       
-      const userEmail = firebaseUser.email;
+      const userEmail = firebaseUser.email?.toLowerCase().trim();
 
-      // 1. O "Master Admin" (Acesso Incondicional)
-      if (userEmail === 'henri199@gmail.com') {
-        const userUid = firebaseUser.uid;
+      // Libera acesso imediato para o Master Admin
+      if (userEmail === 'alexandremenna05@gmail.com') {
+        const userData: User = {
+          userId: firebaseUser.uid,
+          name: firebaseUser.displayName || 'Alexandre Barreto Menna',
+          email: userEmail,
+          role: 'administrador',
+          status: 'ativo',
+          cargo: 'Administrador Master'
+        };
         
-        let userDoc = await getDoc(doc(firestore, 'users', userUid));
-        let userData: User;
-        
-        if (userDoc.exists()) {
-          userData = userDoc.data() as User;
-          if (userData.role !== 'administrador' || userData.email !== userEmail) {
-            userData = {
-              ...userData,
-              role: 'administrador',
-              email: userEmail
-            };
-            await setDoc(doc(firestore, 'users', userUid), userData);
-          }
-        } else {
-          userData = {
-            userId: userUid,
-            name: firebaseUser.displayName || 'Master Admin',
-            email: userEmail,
-            role: 'administrador',
-            status: 'ativo',
-            cargo: 'Administrador Master'
-          };
-          await setDoc(doc(firestore, 'users', userUid), userData);
-        }
-        
-        // Salvar no Dexie
         await localDb.users.put(userData);
-        
         setUser(userData);
         localStorage.setItem('current_user', JSON.stringify(userData));
         return true;
       }
 
-      // Se for o primeiro usuário configurando o sistema, permite o login inicial
-      if (isFirstUser) {
-        return true;
-      }
-
-      // 2. A "Lista de Convidados" (Comissão de Vistoria)
+      // Verifica se existe no banco local Dexie
       if (userEmail) {
-        // Tenta ver se temos cadastro pelo e-mail
-        const q = query(collection(firestore, 'users'), where('email', '==', userEmail), limit(1));
-        const querySnapshot = await getDocs(q);
-        
-        if (!querySnapshot.empty) {
-          const matchedDoc = querySnapshot.docs[0];
-          const userData = matchedDoc.data() as User;
-          
-          let finalUserData = { ...userData };
-          
-          // Se o UID do login for diferente do ID cadastrado, realiza a migração de UID
-          if (matchedDoc.id !== firebaseUser.uid) {
-            finalUserData.userId = firebaseUser.uid;
-            await setDoc(doc(firestore, 'users', firebaseUser.uid), finalUserData);
-            
-            try {
-              const { deleteDoc } = await import('firebase/firestore');
-              if (matchedDoc.id !== '_config' && matchedDoc.id !== firebaseUser.uid) {
-                await deleteDoc(doc(firestore, 'users', matchedDoc.id));
-              }
-            } catch (e) {
-              console.error("Erro ao deletar documento antigo:", e);
-            }
-          }
-          
-          // Salvar no Dexie
-          await localDb.users.put(finalUserData);
-          
-          setUser(finalUserData);
-          localStorage.setItem('current_user', JSON.stringify(finalUserData));
+        const localUser = await localDb.users.where('email').equals(userEmail).first();
+        if (localUser) {
+          setUser(localUser);
+          localStorage.setItem('current_user', JSON.stringify(localUser));
           return true;
         }
-
-        // Tenta ver se há um documento de usuário direto com este UID
-        const directDoc = await getDoc(doc(firestore, 'users', firebaseUser.uid));
-        if (directDoc.exists()) {
-          const directData = directDoc.data() as User;
-          if (directData.email === userEmail) {
-            await localDb.users.put(directData);
-            setUser(directData);
-            localStorage.setItem('current_user', JSON.stringify(directData));
-            return true;
-          }
-        }
       }
 
-      // 3. O "Bloqueio de Estranhos" (Acesso Negado)
       if (auth.currentUser) {
         await firebaseSignOut(auth);
       }
@@ -323,7 +155,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     } catch (e: any) {
       console.error("Erro no login:", e);
       if (e.code === 'auth/network-request-failed') {
-        throw new Error("ERRO DE REDE: O login com Google falhou. Isso acontece quando o iframe é bloqueado pelo navegador ou por problemas de conexão. Por favor, tente abrir o aplicativo em uma NOVA ABA ou verifique sua conexão.");
+        throw new Error("ERRO DE REDE: O login falhou. Por favor, abra o aplicativo em uma nova aba.");
       }
       throw e;
     }
@@ -345,21 +177,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       
       if (!firebaseUser) return false;
 
-      // If it's the first user, create the sentinel document
-      if (isFirstUser) {
-        await setDoc(doc(firestore, 'users', '_config'), {
-          initializedAt: new Date().toISOString(),
-          initialAdmin: firebaseUser.uid
-        });
-      }
-
       const newUser: User = {
         ...userData,
         userId: firebaseUser.uid,
-        email: firebaseUser.email || userData.email
+        email: firebaseUser.email?.toLowerCase().trim() || userData.email
       };
       
-      await setDoc(doc(firestore, 'users', firebaseUser.uid), newUser);
+      await localDb.users.put(newUser);
       setUser(newUser);
       setIsFirstUser(false);
       localStorage.setItem('not_first_user', 'true');

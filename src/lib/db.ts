@@ -17,6 +17,9 @@ export interface User {
   updatedAt?: number;
   deleted?: boolean;
   needsSync?: number;
+  locationId?: string | null;
+  isTrashed?: boolean;
+  
 }
 
 export interface Notification {

@@ -1,399 +1,303 @@
-import React, { useRef, useState } from 'react';
-import SignatureCanvas from 'react-signature-canvas';
-import { jsPDF } from 'jspdf';
-import autoTable from 'jspdf-autotable';
-import { 
-  X, 
-  User, 
-  Signature, 
-  Trash2, 
-  CheckCircle, 
-  FileText, 
-  AlertCircle,
-  ShieldCheck,
-  Clock,
-  MapPin,
-  ClipboardList,
-  Zap,
-  History
-} from 'lucide-react';
-import { Card, Button, Input, Alert } from './UI';
-import { db as firestore, handleFirestoreError } from '../lib/firebase';
-import { doc, setDoc } from 'firebase/firestore';
-import { Asset, Location, Inspection } from '../lib/db';
-import { formatDate, cn } from '../lib/utils';
+import React, { useState, useRef, useEffect } from 'react';
+import { Card, Button, Input } from './UI';
+import { ShieldCheck, Signature, X, CheckCircle2, AlertCircle } from 'lucide-react';
+import { db, Inspection, Location, Asset, generateId } from '../lib/db';
 import { useAuth } from '../lib/AuthContext';
-import { useToast } from '../lib/ToastContext';
+import { auth } from '../lib/firebase';
+import { supabase } from '../lib/supabase';
+import { useOnlineStatus } from '../lib/hooks';
 
-interface SectorInspectionSignOffModalProps {
+interface Props {
   isOpen: boolean;
   onClose: () => void;
-  location: Location;
   inspection: Inspection;
+  location: Location;
   assets: Asset[];
   onComplete: () => void;
 }
 
-export function SectorInspectionSignOffModal({ 
-  isOpen, 
-  onClose, 
-  location, 
-  inspection, 
-  assets,
-  onComplete 
-}: SectorInspectionSignOffModalProps) {
+export function SectorInspectionSignOffModal({ isOpen, onClose, inspection, location, assets, onComplete }: Props) {
   const { user } = useAuth();
-  const { toast } = useToast();
-  const sigPad = useRef<SignatureCanvas>(null);
+  const isOnline = useOnlineStatus();
   const [responsibleName, setResponsibleName] = useState('');
-  const [isSaving, setIsSaving] = useState(false);
+  const [isDrawing, setIsDrawing] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [isCanvasEmpty, setIsCanvasEmpty] = useState(true);
+  
+  const canvasRef = useRef<HTMLCanvasElement>(null);
 
-  // Resize canvas when modal opens
-  React.useEffect(() => {
+  useEffect(() => {
+    // If the modal opens, reset state
     if (isOpen) {
-      const timer = setTimeout(() => {
-        if (sigPad.current) {
-          const canvas = sigPad.current.getCanvas();
-          if (canvas) {
-            // Force adjustment of canvas coordinates to visual size
-            const ratio = Math.max(window.devicePixelRatio || 1, 1);
-            canvas.width = canvas.offsetWidth * ratio;
-            canvas.height = canvas.offsetHeight * ratio;
-            canvas.getContext('2d')?.scale(ratio, ratio);
-            sigPad.current.clear();
-          }
-        }
-      }, 350); // Wait for modal animation
-      return () => clearTimeout(timer);
+      setResponsibleName('');
+      setError(null);
+      clearSignature();
     }
   }, [isOpen]);
 
-  if (!isOpen) return null;
-
   const clearSignature = () => {
-    sigPad.current?.clear();
-    setIsCanvasEmpty(true);
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
   };
 
-  const generatePDF = (signatureDataUrl: string, signedAt: number) => {
-    const doc = new jsPDF();
-    const pageWidth = doc.internal.pageSize.getWidth();
-    
-    // Header
-    doc.setFillColor(248, 250, 252);
-    doc.rect(0, 0, pageWidth, 40, 'F');
-    
-    doc.setFontSize(16);
-    doc.setTextColor(15, 23, 42); // slate-900
-    doc.setFont('helvetica', 'bold');
-    doc.text('TERMO DE RESPONSABILIDADE, GUARDA E CONSERVAÇÃO', pageWidth / 2, 20, { align: 'center' });
-    
-    doc.setFontSize(10);
-    doc.setFont('helvetica', 'normal');
-    doc.text('PÓS-VISTORIA PATRIMONIAL', pageWidth / 2, 28, { align: 'center' });
+  const startDrawing = (e: React.MouseEvent<HTMLCanvasElement> | React.TouchEvent<HTMLCanvasElement>) => {
+    e.preventDefault();
+    setIsDrawing(true);
+    draw(e);
+  };
 
-    // Body text (Objective and Generic as requested)
-    doc.setFontSize(11);
-    doc.setTextColor(51, 65, 85); // slate-700
-    const bodyContent = `Eu, ${responsibleName}, na qualidade de servidor responsável pelo setor ${location.name}, atesto que acompanhei a vistoria patrimonial realizada nesta unidade. Confirmo a conferência dos bens listados abaixo, assumindo integral responsabilidade por sua guarda, conservação e preservação nas condições físicas registradas no momento da inspeção.`;
+  const stopDrawing = () => {
+    setIsDrawing(false);
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    if (ctx) ctx.beginPath(); // Reset path
+  };
+
+  const draw = (e: React.MouseEvent<HTMLCanvasElement> | React.TouchEvent<HTMLCanvasElement>) => {
+    if (!isDrawing) return;
+    e.preventDefault();
+
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+
+    const rect = canvas.getBoundingClientRect();
     
-    const splitText = doc.splitTextToSize(bodyContent, pageWidth - 40);
-    doc.text(splitText, 20, 55);
-
-    // Asset Table
-    const tableData = assets.map(a => [
-      a.patrimonyNumber || 'N/A',
-      a.name,
-      a.condition.toUpperCase(),
-      a.observations || '-'
-    ]);
-
-    autoTable(doc, {
-      head: [['PATRIMÔNIO', 'DESCRIÇÃO DO BEM', 'ESTADO', 'OBSERVAÇÕES']],
-      body: tableData,
-      startY: 85,
-      styles: { fontSize: 8 },
-      headStyles: { fillColor: [79, 70, 229] }, // indigo-600
-    });
-
-    // Signature and Footer
-    const finalY = (doc as any).lastAutoTable.finalY + 20;
-    
-    if (finalY + 80 > doc.internal.pageSize.getHeight()) {
-      doc.addPage();
+    // Suporte para touch e mouse
+    let clientX, clientY;
+    if ('touches' in e) {
+      clientX = e.touches[0].clientX;
+      clientY = e.touches[0].clientY;
+    } else {
+      clientX = (e as React.MouseEvent).clientX;
+      clientY = (e as React.MouseEvent).clientY;
     }
 
-    doc.setFontSize(10);
-    doc.text('ASSINATURA DO RESPONSÁVEL PELO SETOR:', 20, finalY);
-    doc.addImage(signatureDataUrl, 'PNG', 40, finalY + 5, 80, 30);
-    
-    doc.setDrawColor(203, 213, 225); // slate-300
-    doc.line(40, finalY + 35, 120, finalY + 35);
-    doc.text(responsibleName.toUpperCase(), 80, finalY + 40, { align: 'center' });
-    
-    // Timestamp dynamic in footer
-    doc.setFontSize(8);
-    doc.setTextColor(148, 163, 184); // slate-400
-    const dateStr = formatDate(signedAt);
-    doc.text(`Documento gerado eletronicamente em: ${dateStr}`, pageWidth / 2, doc.internal.pageSize.getHeight() - 10, { align: 'center' });
-    doc.text(`ID da Vistoria: ${inspection.id} | Localização: ${location.name}`, pageWidth / 2, doc.internal.pageSize.getHeight() - 15, { align: 'center' });
+    const x = clientX - rect.left;
+    const y = clientY - rect.top;
 
-    doc.save(`Termo_Responsabilidade_${location.name.replace(/\s+/g, '_')}_${inspection.id.slice(0, 8)}.pdf`);
+    ctx.lineWidth = 3;
+    ctx.lineCap = 'round';
+    ctx.strokeStyle = '#0f172a'; // slate-900
+
+    ctx.lineTo(x, y);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(x, y);
   };
 
-  const handleSave = () => {
+  const isCanvasBlank = (canvas: HTMLCanvasElement) => {
+    const context = canvas.getContext('2d');
+    if (!context) return true;
+    
+    const pixelBuffer = new Uint32Array(
+      context.getImageData(0, 0, canvas.width, canvas.height).data.buffer
+    );
+    
+    return !pixelBuffer.some(color => color !== 0);
+  };
+
+  const handleSubmit = async () => {
     if (!responsibleName.trim()) {
-      setError('Por favor, informe o nome do servidor responsável.');
+      setError("Por favor, informe o nome completo do responsável.");
       return;
     }
 
-    if (isCanvasEmpty || sigPad.current?.isEmpty()) {
-      setError('A assinatura é obrigatória para encerrar a vistoria.');
+    const canvas = canvasRef.current;
+    if (!canvas || isCanvasBlank(canvas)) {
+      setError("A assinatura digital é obrigatória.");
       return;
     }
 
-    setIsSaving(true);
+    setIsSubmitting(true);
     setError(null);
 
     try {
-      // Capture heavy data first while UI is still active
-      const signatureBase64 = sigPad.current?.getCanvas().toDataURL('image/png') || '';
-      const docId = `concluid_` + inspection.id;
-      const now = Date.now();
+      const signatureBase64 = canvas.toDataURL('image/png');
+      const totalItens = assets.reduce((acc, a) => acc + (a.quantity || 1), 0);
 
-      const sectorData = {
-        id: docId,
-        locationName: location.name,
-        inspectionId: inspection.id,
-        assetIds: assets.map(a => a.id),
-        responsibleName: responsibleName.trim(),
-        signatureBase64,
-        signedAt: now,
-        signedByUser: user?.userId || 'unknown'
-      };
+      // Save to Supabase if online
+      if (isOnline && auth.currentUser) {
+        // PASSO 0: Garantir que o Local (Location) exista no Supabase
+        await supabase
+          .from('locations')
+          .upsert({
+            id: location.id,
+            name: location.name,
+            description: location.description || '',
+            updatedAt: location.updatedAt || Date.now()
+          }, { onConflict: 'id' });
 
-      // 1. Fire and forget Firestore (background sync handles it)
-      // Removed await to prevent infinite loading on slow/offline connections
-      setDoc(doc(firestore, 'sector_inspections', docId), sectorData)
-        .catch(err => {
-          console.error("Background sync error:", err);
-        });
+        // PASSO 1: Garantir que a vistoria pai exista no Supabase
+        const { error: inspectionError } = await supabase
+          .from('inspections')
+          .upsert({
+            id: inspection.id,
+            locationId: inspection.locationId || location.id,
+            date: inspection.date || Date.now(),
+            status: inspection.status || 'concluida',
+            participants: inspection.participants || [],
+            deleted: inspection.deleted || false,
+            updatedAt: inspection.updatedAt || Date.now()
+          }, { onConflict: 'id' });
 
-      // 2. Unblock UI immediately (Non-blocking flow)
-      toast('Vistoria encerrada com sucesso!', 'success', 'Finalizado');
-      onComplete();
-
-      // 3. Defer PDF generation (Heavy JS task) to avoid freezing main thread
-      setTimeout(() => {
-        try {
-          generatePDF(signatureBase64, now);
-        } catch (pdfErr) {
-          console.error("Background PDF generation failed:", pdfErr);
-        } finally {
-          setIsSaving(false);
+        if (inspectionError) {
+          console.warn("Aviso ao sincronizar vistoria pai:", inspectionError);
         }
-      }, 150);
 
+        // PASSO 2: Salva a assinatura com segurança absoluta
+        const { error: supabaseError } = await supabase
+          .from('sector_inspections')
+          .upsert({
+            id: inspection.id,
+            inspectionId: inspection.id,
+            responsibleName: responsibleName.trim(),
+            signatureBase64: signatureBase64,
+            signedAt: Date.now()
+          }, { onConflict: 'id' });
+
+        if (supabaseError) {
+          throw supabaseError;
+        }
+      }
+
+      // 🔔 NOTIFICAÇÃO: Criar o aviso para os Administradores no banco local Dexie
+      const admins = await db.users.filter(u => u.role === 'administrador' || u.role === 'vistoriador').toArray();
+      for (const admin of admins) {
+        if (admin.userId !== user?.userId) {
+          await db.notifications.add({
+            id: generateId(),
+            type: 'sistema',
+            title: 'Setor Encerrado!',
+            message: `O setor "${location?.name}" acaba de concluir a auditoria e assinar o termo de ${totalItens} itens.`,
+            date: Date.now(),
+            read: false,
+            targetUserId: admin.userId,
+            relatedId: inspection.id
+          });
+        }
+      }
+
+      onComplete(); // Triggers the parent's finalize flow
+      
     } catch (err: any) {
-      console.error(err);
-      toast('Ocorreu um erro ao processar a assinatura.', 'error', 'Erro Crítico');
-      setError('Falha ao processar os dados da vistoria.');
-      setIsSaving(false);
+      console.error("Erro ao salvar assinatura:", err);
+      setError("Erro ao processar assinatura. Verifique sua conexão e tente novamente.");
+    } finally {
+      setIsSubmitting(false);
     }
   };
 
+  if (!isOpen) return null;
+
   return (
-    <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-900/60 backdrop-blur-md p-0 md:p-6 animate-in fade-in duration-300">
-      <Card className="w-full md:max-w-4xl h-full md:h-auto md:max-h-[95vh] shadow-[0_40px_100px_-20px_rgba(0,0,0,0.4)] border-none flex flex-col gap-0 p-0 overflow-hidden relative rounded-none md:rounded-[3rem] bg-white">
+    <div className="fixed inset-0 z-[200] flex items-center justify-center p-4 sm:p-6 bg-slate-900/60 backdrop-blur-md animate-in fade-in duration-300">
+      <Card className="w-full max-w-2xl bg-white border-none shadow-[0_50px_100px_-20px_rgba(0,0,0,0.3)] rounded-[2.5rem] flex flex-col max-h-[95vh] overflow-hidden">
         
-        {/* Header - Fixed */}
-        <div className="px-8 py-6 bg-slate-50 border-b border-slate-100 flex items-center justify-between shrink-0">
+        <div className="p-8 pb-6 border-b border-slate-100 flex items-center justify-between shrink-0 bg-slate-50/50">
           <div className="flex items-center gap-4">
-            <div className="w-14 h-14 bg-indigo-600 rounded-[1.5rem] flex items-center justify-center text-white shadow-xl shadow-indigo-600/20">
-              <FileText className="w-7 h-7" />
+            <div className="w-14 h-14 bg-indigo-600 rounded-2xl flex items-center justify-center text-white shadow-lg shadow-indigo-600/20">
+              <Signature className="w-7 h-7" />
             </div>
-            <div>
-              <h3 className="text-2xl font-display font-black text-slate-900 leading-tight">Encerramento do Setor</h3>
-              <p className="text-[11px] font-bold text-slate-400 uppercase tracking-[0.2em]">{location.name}</p>
+            <div className="flex flex-col">
+              <h2 className="text-2xl font-display font-black text-slate-900 tracking-tight leading-none">Termo de Responsabilidade</h2>
+              <span className="text-[10px] font-black uppercase tracking-widest text-slate-400 mt-2">Encerramento Setorial</span>
             </div>
           </div>
           <button 
-            onClick={onClose} 
-            className="w-12 h-12 flex items-center justify-center hover:bg-slate-200 rounded-2xl transition-all text-slate-400"
+            onClick={onClose}
+            className="p-3 text-slate-400 hover:text-slate-900 hover:bg-white rounded-xl transition-all shadow-sm border border-slate-200"
           >
-            <X className="w-7 h-7" />
+            <X className="w-5 h-5" />
           </button>
         </div>
 
-        {/* Content - Scrollable */}
-        <div className="flex-1 overflow-y-auto px-8 py-10 flex flex-col gap-10">
+        <div className="p-8 overflow-y-auto flex-1 custom-scrollbar flex flex-col gap-8">
           
-          {/* Item Verification List */}
-          <div className="flex flex-col gap-6">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-3">
-                <div className="w-10 h-10 bg-indigo-100 rounded-xl flex items-center justify-center text-indigo-600">
-                  <ClipboardList className="w-5 h-5" />
-                </div>
-                <div>
-                  <h4 className="text-sm font-black text-slate-900 uppercase tracking-widest">Conferência de Itens</h4>
-                  <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mt-0.5">Verifique os bens antes de assinar</p>
-                </div>
-              </div>
-              <span className="px-4 py-1.5 bg-slate-100 text-slate-600 rounded-full text-[10px] font-black uppercase tracking-widest">
-                {assets.length} ITENS
-              </span>
-            </div>
-
-            <div className="grid grid-cols-1 gap-3 max-h-[300px] overflow-y-auto pr-2 custom-scrollbar">
-              {assets.map((asset) => (
-                <div key={asset.id} className="flex items-center justify-between p-4 bg-slate-50 rounded-2xl border border-slate-100 group hover:border-indigo-200 hover:bg-white transition-all duration-300">
-                  <div className="flex items-center gap-4">
-                    <div className="w-10 h-10 bg-white rounded-xl flex items-center justify-center text-slate-400 shadow-sm border border-slate-100 group-hover:text-indigo-600 transition-colors">
-                      <Zap className="w-5 h-5" />
-                    </div>
-                    <div className="flex flex-col">
-                      <span className="text-sm font-bold text-slate-900 leading-tight">{asset.name}</span>
-                      <span className="text-[10px] font-black text-slate-400 mt-1 uppercase tracking-wider">Pat: {asset.patrimonyNumber}</span>
-                    </div>
-                  </div>
-                  <div className={cn(
-                    "px-3 py-1 rounded-lg text-[9px] font-black uppercase tracking-widest",
-                    asset.condition === 'novo' ? 'bg-emerald-100 text-emerald-700' :
-                    asset.condition === 'bom' ? 'bg-blue-100 text-blue-700' :
-                    asset.condition === 'regular' ? 'bg-amber-100 text-amber-700' :
-                    asset.condition === 'ruim' ? 'bg-orange-100 text-orange-700' :
-                    'bg-rose-100 text-rose-700'
-                  )}>
-                    {asset.condition}
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-
-          {/* Summary Stats */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <div className="bg-indigo-50/50 p-6 rounded-[2rem] border border-indigo-100/50 flex items-center gap-5">
-              <div className="w-12 h-12 bg-white rounded-2xl flex items-center justify-center text-indigo-600 shadow-sm border border-indigo-100">
-                <ClipboardList className="w-6 h-6" />
-              </div>
-              <div>
-                <p className="text-2xl font-display font-black text-slate-900 leading-none">{assets.length}</p>
-                <span className="text-[10px] font-black uppercase tracking-widest text-indigo-500 mt-1 block">Bens Vistoriados</span>
-              </div>
-            </div>
-            <div className="bg-slate-50 p-6 rounded-[2rem] border border-slate-100 flex items-center gap-5">
-              <div className="w-12 h-12 bg-white rounded-2xl flex items-center justify-center text-slate-400 shadow-sm border border-slate-100">
-                <Clock className="w-6 h-6" />
-              </div>
-              <div>
-                <p className="text-lg font-bold text-slate-700 leading-none">{formatDate(inspection.date)}</p>
-                <span className="text-[10px] font-black uppercase tracking-widest text-slate-400 mt-1 block">Início da Vistoria</span>
-              </div>
-            </div>
-          </div>
-
-          {/* Form */}
-          <div className="flex flex-col gap-8">
-            <div className="space-y-3">
-              <label className="text-[11px] font-black text-slate-500 uppercase tracking-[0.2em] ml-1">
-                Servidor Responsável pela Sala
-              </label>
-              <div className="relative">
-                <User className="absolute left-5 top-1/2 -translate-y-1/2 w-6 h-6 text-slate-300" />
-                <Input 
-                  value={responsibleName}
-                  onChange={(e) => setResponsibleName(e.target.value)}
-                  placeholder="Nome completo do servidor"
-                  className="pl-14 h-16 text-base font-bold placeholder:text-slate-300 bg-slate-50/50 border-slate-200 rounded-2xl focus:bg-white transition-all shadow-sm"
-                />
-              </div>
-            </div>
-
-            <div className="space-y-4">
-              <div className="flex items-center justify-between ml-1">
-                <label className="text-[11px] font-black text-slate-500 uppercase tracking-[0.2em]">
-                  Assinatura Digital do Servidor
-                </label>
-                {!isCanvasEmpty && (
-                  <button 
-                    onClick={clearSignature}
-                    className="flex items-center gap-2 text-rose-500 hover:text-rose-600 font-black text-[10px] uppercase tracking-widest transition-all bg-rose-50 px-4 py-2 rounded-xl border border-rose-100 shadow-sm"
-                  >
-                    <Trash2 className="w-4 h-4" /> Limpar Escrita
-                  </button>
-                )}
-              </div>
-              
-              <div className={cn(
-                "border-4 border-dashed rounded-[2.5rem] bg-white relative group overflow-hidden touch-none h-72 transition-all duration-500",
-                isCanvasEmpty ? "border-slate-100 bg-slate-50/30" : "border-indigo-600 ring-[12px] ring-indigo-50"
-              )}>
-                <SignatureCanvas
-                  ref={sigPad}
-                  penColor="#1e293b"
-                  onBegin={() => setIsCanvasEmpty(false)}
-                  velocityFilterWeight={0.7}
-                  canvasProps={{
-                    className: "w-full h-full cursor-crosshair",
-                    style: { width: '100%', height: '100%', touchAction: 'none' }
-                  }}
-                />
-                {isCanvasEmpty && (
-                  <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none text-slate-200">
-                    <div className="w-20 h-20 bg-white rounded-3xl flex items-center justify-center shadow-xl border border-slate-100 mb-4 animate-bounce duration-[2000ms]">
-                      <Signature className="w-10 h-10" />
-                    </div>
-                    <span className="text-xs font-black uppercase tracking-[0.3em] text-slate-400">Assine com o dedo ou mouse</span>
-                  </div>
-                )}
-              </div>
-            </div>
+          <div className="bg-indigo-50/50 border border-indigo-100 rounded-[1.5rem] p-6 flex flex-col gap-2">
+            <p className="text-sm font-medium text-slate-600 leading-relaxed text-justify">
+              Declaro sob as penas da Lei que acompanhei a presente vistoria física patrimonial nas dependências do(a) <strong className="text-slate-900">{location.name}</strong>, conferindo e atestando a existência de <strong className="text-indigo-600 bg-indigo-100 px-2 py-0.5 rounded-md">{assets.reduce((acc, a) => acc + (a.quantity || 1), 0)} itens</strong> constantes na lista deste sistema. Confirmo que as condições de conservação relatadas condizem com a realidade atual dos bens em minha posse ou supervisão direta.
+            </p>
           </div>
 
           {error && (
-            <Alert variant="error" className="rounded-3xl p-6 border-rose-100 bg-rose-50/50">
-              <div className="flex items-start gap-4">
-                <AlertCircle className="w-6 h-6 text-rose-500 shrink-0 mt-0.5" />
-                <div className="flex flex-col gap-1">
-                  <p className="font-bold text-rose-900 text-sm">Atenção Necessária</p>
-                  <p className="text-xs text-rose-700/80 font-medium leading-relaxed">{error}</p>
-                </div>
-              </div>
-            </Alert>
+            <div className="flex items-center gap-3 p-4 bg-rose-50 text-rose-600 rounded-2xl border border-rose-100 text-xs font-bold uppercase tracking-widest animate-in shake">
+              <AlertCircle className="w-5 h-5 shrink-0" />
+              {error}
+            </div>
           )}
 
-          <div className="bg-slate-900 p-8 rounded-[2rem] flex flex-col items-center gap-4 text-center">
-             <div className="w-10 h-10 bg-indigo-500 rounded-full flex items-center justify-center text-white shadow-lg shadow-indigo-500/20">
-                <ShieldCheck className="w-5 h-5" />
-             </div>
-             <p className="text-[11px] leading-relaxed text-slate-400 font-bold max-w-sm uppercase tracking-widest">
-               Este documento possui validade administrativa. Ao assinar, você declara estar ciente do estado físico dos bens patrimoniais registrados.
-             </p>
+          <div className="flex flex-col gap-6">
+            <div className="flex flex-col gap-2">
+              <label className="text-[10px] font-black text-slate-900 uppercase tracking-widest ml-1">Nome Completo do Responsável</label>
+              <Input 
+                placeholder="Ex: João Silva de Almeida" 
+                value={responsibleName}
+                onChange={e => setResponsibleName(e.target.value)}
+                className="h-14 font-bold text-slate-700 bg-slate-50 border-slate-200 focus:bg-white"
+              />
+            </div>
+
+            <div className="flex flex-col gap-2">
+              <div className="flex items-center justify-between ml-1">
+                <label className="text-[10px] font-black text-slate-900 uppercase tracking-widest">Assinatura Digital</label>
+                <button 
+                  onClick={clearSignature}
+                  className="text-[10px] font-bold text-rose-500 hover:text-rose-700 uppercase tracking-widest transition-colors"
+                >
+                  Limpar Traço
+                </button>
+              </div>
+              <div className="relative border-2 border-dashed border-slate-300 rounded-[2rem] bg-slate-50 overflow-hidden group">
+                <canvas
+                  ref={canvasRef}
+                  width={600}
+                  height={250}
+                  className="w-full h-48 touch-none cursor-crosshair relative z-10"
+                  onMouseDown={startDrawing}
+                  onMouseUp={stopDrawing}
+                  onMouseOut={stopDrawing}
+                  onMouseMove={draw}
+                  onTouchStart={startDrawing}
+                  onTouchEnd={stopDrawing}
+                  onTouchMove={draw}
+                />
+                <div className="absolute inset-0 flex items-center justify-center pointer-events-none opacity-20 group-hover:opacity-10 transition-opacity">
+                  <Signature className="w-16 h-16 text-slate-400" />
+                </div>
+                <div className="absolute bottom-4 left-0 right-0 text-center pointer-events-none opacity-30">
+                  <span className="text-[10px] font-black uppercase tracking-[0.3em] text-slate-500">Assine na tela acima</span>
+                </div>
+              </div>
+            </div>
           </div>
+
         </div>
 
-        {/* Footer Actions - Fixed */}
-        <div className="px-8 py-8 bg-slate-50 border-t border-slate-100 flex flex-col sm:flex-row gap-4 shrink-0">
+        <div className="p-8 border-t border-slate-100 bg-white flex flex-col sm:flex-row items-center gap-4 shrink-0">
           <Button 
-            variant="outline" 
+            variant="secondary" 
             onClick={onClose} 
-            className="flex-1 h-16 border-slate-200 text-slate-500 font-black text-xs uppercase tracking-[0.2em] rounded-2xl hover:bg-slate-100 transition-all"
+            className="w-full sm:flex-1 h-16 rounded-2xl text-[10px] font-black uppercase tracking-widest bg-slate-100 text-slate-500 hover:bg-slate-200"
           >
             Cancelar
           </Button>
           <Button 
-            onClick={handleSave}
-            loading={isSaving}
-            icon={CheckCircle}
-            className="flex-[2] h-16 bg-indigo-600 hover:bg-indigo-700 text-white font-black text-xs uppercase tracking-[0.2em] rounded-2xl shadow-[0_20px_40px_-10px_rgba(79,70,229,0.4)] transition-all transform active:scale-95"
+            variant="accent" 
+            onClick={handleSubmit} 
+            loading={isSubmitting}
+            icon={CheckCircle2}
+            className="w-full sm:flex-[2] h-16 rounded-2xl text-[10px] font-black uppercase tracking-[0.2em] shadow-xl shadow-indigo-600/20 bg-indigo-600 hover:bg-indigo-700"
           >
-            Confirmar e Assinar Termo
+            Atestar e Encerrar Vistoria
           </Button>
         </div>
+
       </Card>
     </div>
   );

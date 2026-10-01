@@ -1,179 +1,157 @@
 import { db as dexie } from './db';
-import { db as firestore, auth, handleFirestoreError } from './firebase';
-import { collection, doc, setDoc, onSnapshot, query, where, deleteDoc } from 'firebase/firestore';
-import { uploadAssetPhoto } from './storageService';
+import { auth } from './firebase'; 
+import { cloudDB } from './cloudDB'; // A NOSSA NOVA TOMADA UNIVERSAL
 
-function sanitizeForFirestore(obj: any) {
-  const newObj = { ...obj };
-  Object.keys(newObj).forEach(key => {
-    if (newObj[key] === undefined) {
-      delete newObj[key];
-    }
-  });
-  return newObj;
-}
+// 🛡️ Filtros Cirúrgicos Estritos
+const buildLocationPayload = (loc: any) => ({
+  id: loc.id,
+  name: loc.name,
+  description: loc.description || null,
+  latitude: loc.latitude ? Number(loc.latitude) : null,
+  longitude: loc.longitude ? Number(loc.longitude) : null,
+  parentId: loc.parentId || null,
+  updatedAt: Date.now(),
+  deleted: loc.deleted || false
+});
 
-// Synchronize simple collections (Delta Sync: Cloud -> Local)
-export function setupSync() {
+const buildInspectionPayload = (insp: any) => ({
+  id: insp.id,
+  locationId: insp.locationId,
+  date: insp.date,
+  participants: Array.isArray(insp.participants) ? insp.participants : [],
+  status: insp.status,
+  qrCodeData: insp.qrCodeData || null,
+  concludedBy: insp.concludedBy || null,
+  concludedAt: insp.concludedAt ? Number(insp.concludedAt) : null,
+  finalizedBy: insp.finalizedBy || null,
+  finalizedAt: insp.finalizedAt ? Number(insp.finalizedAt) : null,
+  updatedAt: Date.now(),
+  deleted: insp.deleted || false
+});
+
+export async function setupSync() {
   if (!auth.currentUser) return;
-
   const collections = [
-    { name: 'locations', dexie: dexie.locations, pk: 'id' },
-    { name: 'inspections', dexie: dexie.inspections, pk: 'id' },
-    { name: 'assets', dexie: dexie.assets, pk: 'id' },
-    { name: 'users', dexie: dexie.users, pk: 'userId' }
+    { name: 'locations', dexie: dexie.locations, pk: 'id', updatedCol: 'updatedAt' },
+    { name: 'inspections', dexie: dexie.inspections, pk: 'id', updatedCol: 'updatedAt' },
+    { name: 'assets', dexie: dexie.assets, pk: 'id', updatedCol: 'updatedAt' },
+    { name: 'users', dexie: dexie.users, pk: 'userId', updatedCol: 'updatedAt' } 
   ];
 
-  collections.forEach(({ name, dexie: table, pk }) => {
+  for (const { name, dexie: table, pk, updatedCol } of collections) {
     const storageKey = `lastSyncTime_${name}`;
-    const lastTimeStr = localStorage.getItem(storageKey);
-    const lastSyncTime = parseInt(lastTimeStr || '0');
+    const lastSyncTime = parseInt(localStorage.getItem(storageKey) || '0');
     
-    console.log(`[Sync] Configurando escuta para ${name}. Último sync: ${new Date(lastSyncTime).toLocaleString()}`);
+    try {
+      // Usando o Adaptador Cloud genérico em vez do Supabase direto
+      const { data, error } = await cloudDB.getRecordsSince(name, updatedCol, lastSyncTime);
+      if (error) throw error;
 
-    const q = lastSyncTime > 0 
-      ? query(collection(firestore, name), where('updatedAt', '>', lastSyncTime))
-      : query(collection(firestore, name));
-
-    onSnapshot(q, async (snapshot) => {
-      if (snapshot.empty && lastSyncTime > 0) return;
-      
-      console.log(`[Sync] Recebidas ${snapshot.size} atualizações de ${name}`);
-      let maxUpdatedAt = lastSyncTime;
-
-      // Usar uma transação para performance se houver muitos registros
-      await dexie.transaction('rw', table as any, async () => {
-        for (const change of snapshot.docChanges()) {
-          const data = change.doc.data() as any;
-          const updatedAt = data.updatedAt || 0;
-          if (updatedAt > maxUpdatedAt) maxUpdatedAt = updatedAt;
-
-          if (change.type === 'removed' || data.deleted === true) {
-            await table.delete(change.doc.id);
-          } else {
-            // Preserva o status needsSync local se o item ainda não subiu
-            // mas aqui estamos recebendo do servidor, então o do servidor é mais novo
-            await table.put({ [pk]: change.doc.id, ...data, needsSync: 0 });
+      if (data && data.length > 0) {
+        let maxUpdatedAt = lastSyncTime;
+        await dexie.transaction('rw', table as any, async () => {
+          for (const record of data) {
+            const updatedAt = record.updatedAt || 0;
+            if (updatedAt > maxUpdatedAt) maxUpdatedAt = updatedAt;
+            if (record.deleted === true) {
+              await table.delete(record[pk]);
+            } else {
+              await table.put({ ...record, needsSync: 0 });
+            }
           }
-        }
-      });
-
-      if (maxUpdatedAt > lastSyncTime) {
-        localStorage.setItem(storageKey, maxUpdatedAt.toString());
+        });
+        if (maxUpdatedAt > lastSyncTime) localStorage.setItem(storageKey, maxUpdatedAt.toString());
       }
-    }, (error) => {
-      console.error(`[Sync] Erro no stream de ${name}:`, error);
-    });
-  });
+    } catch (error) {
+      console.error(`[Sync] Erro ao baixar ${name}:`, error);
+    }
+  }
 }
 
 let isPushing = false;
 
-// Push local changes to cloud
 export async function pushLocalChanges() {
   if (isPushing) return;
-  
   isPushing = true;
   window.dispatchEvent(new CustomEvent('app-sync-start'));
 
   try {
-    // 1. Sync Locations
-    const unsyncedLocations = await dexie.locations
-      .filter(loc => loc.needsSync === 1 || loc.needsSync === true as any || String(loc.needsSync) === 'true')
-      .toArray();
-    
-    if (unsyncedLocations.length > 0) console.log(`[Sync] Encontrados ${unsyncedLocations.length} locais pendentes.`);
-    
+    // 1. LOCATIONS
+    const unsyncedLocations = await dexie.locations.filter(loc => loc.needsSync === 1 || String(loc.needsSync) === 'true').toArray();
     for (const loc of unsyncedLocations) {
-      const locRef = doc(firestore, 'locations', loc.id);
       try {
         if (loc.deleted) {
-          await deleteDoc(locRef);
+          await cloudDB.deleteRecord('locations', loc.id);
           await dexie.locations.delete(loc.id);
         } else {
-          const { needsSync, ...data } = loc;
-          data.updatedAt = Date.now();
-          await setDoc(locRef, sanitizeForFirestore(data));
-          await dexie.locations.update(loc.id, { needsSync: 0, updatedAt: data.updatedAt });
+          const payload = buildLocationPayload(loc);
+          const { error } = await cloudDB.upsertRecord('locations', payload);
+          if (!error) await dexie.locations.update(loc.id, { needsSync: 0, updatedAt: payload.updatedAt });
         }
-      } catch (e) {
-        console.error(`[Sync] Falha ao sincronizar local ${loc.id}:`, e);
-      }
+      } catch (e) {}
     }
 
-    // 2. Sync Inspections
-    const unsyncedInspections = await dexie.inspections
-      .filter(insp => insp.needsSync === 1 || insp.needsSync === true as any || String(insp.needsSync) === 'true')
-      .toArray();
-    
-    if (unsyncedInspections.length > 0) console.log(`[Sync] Encontradas ${unsyncedInspections.length} vistorias pendentes.`);
-    
+    // 2. INSPECTIONS
+    const unsyncedInspections = await dexie.inspections.filter(insp => insp.needsSync === 1 || String(insp.needsSync) === 'true').toArray();
     for (const insp of unsyncedInspections) {
-      const inspRef = doc(firestore, 'inspections', insp.id);
       try {
         if (insp.deleted) {
-          await deleteDoc(inspRef);
+          await cloudDB.deleteRecord('inspections', insp.id);
           await dexie.inspections.delete(insp.id);
         } else {
-          const { needsSync, ...data } = insp;
-          data.updatedAt = Date.now();
-          await setDoc(inspRef, sanitizeForFirestore(data));
-          await dexie.inspections.update(insp.id, { needsSync: 0, updatedAt: data.updatedAt });
+          const payload = buildInspectionPayload(insp);
+          const { error } = await cloudDB.upsertRecord('inspections', payload);
+          if (!error) await dexie.inspections.update(insp.id, { needsSync: 0, updatedAt: payload.updatedAt });
         }
-      } catch (e) {
-        console.error(`[Sync] Falha ao sincronizar vistoria ${insp.id}:`, e);
-      }
+      } catch (e) {}
     }
 
-    // 3. Sync Assets
-    const unsyncedAssets = await dexie.assets
-      .filter(asset => asset.needsSync === 1 || asset.needsSync === true as any || String(asset.needsSync) === 'true')
-      .toArray();
-    
-    if (unsyncedAssets.length > 0) console.log(`[Sync] Encontrados ${unsyncedAssets.length} itens pendentes.`);
-    
+    // 3. ASSETS
+    const unsyncedAssets = await dexie.assets.filter(asset => asset.needsSync === 1 || String(asset.needsSync) === 'true').toArray();
     for (const asset of unsyncedAssets) {
-      const assetRef = doc(firestore, 'assets', asset.id);
-
       if (asset.deleted) {
-        await deleteDoc(assetRef);
+        await cloudDB.deleteRecord('assets', asset.id);
         await dexie.assets.delete(asset.id);
         continue;
       }
-
-      const { needsSync, ...data } = asset;
-      data.updatedAt = Date.now();
       
-      // Interceptação para Storage (Evita estouro de 1MB no Firestore)
       const processedPhotos: string[] = [];
       if (asset.photos) {
         for (let index = 0; index < asset.photos.length; index++) {
           const photo = asset.photos[index];
           if (typeof photo === 'string' && photo.startsWith('data:image')) {
             try {
-              const url = await uploadAssetPhoto(photo, `assets/${asset.id}/photo_${Date.now()}_${index}.jpg`);
+              const url = await cloudDB.uploadPhoto(photo, `${asset.id}/photo_${Date.now()}_${index}.jpg`);
               processedPhotos.push(url);
-            } catch (err) {
-              console.error(`[Sync] Falha no upload da foto ${index} do item ${asset.id}:`, err);
-              processedPhotos.push(photo); // Fallback para manter o dado se o upload falhar
-            }
-          } else {
-            processedPhotos.push(photo); // Já é um link de Storage
-          }
+            } catch (err) { processedPhotos.push(photo); }
+          } else { processedPhotos.push(photo); }
         }
       }
 
-      data.photos = processedPhotos;
-      if (data.isPublic === undefined) data.isPublic = true;
-      
-      await setDoc(assetRef, sanitizeForFirestore(data));
+      const uniquePhotos = Array.from(new Set(processedPhotos));
+      const now = Date.now();
 
-      // Otimização do Banco Local (Dexie): Salva as URLs leves no lugar do Base64 pesado
-      await dexie.assets.update(asset.id, { 
-        needsSync: 0, 
-        updatedAt: data.updatedAt, 
-        photos: processedPhotos 
-      });
+      const payload = {
+        id: asset.id,
+        inspectionId: asset.inspectionId,
+        name: asset.name,
+        patrimonyNumber: asset.patrimonyNumber || null,
+        condition: asset.condition,
+        photos: uniquePhotos,
+        observations: asset.observations || null,
+        createdBy: asset.createdBy || auth.currentUser?.uid || 'sistema',
+        createdAt: asset.createdAt || now,
+        hash: asset.hash,
+        isPublic: asset.isPublic ?? true,
+        quantity: asset.quantity || 1,
+        updatedAt: now,
+        deleted: asset.deleted || false
+      };
+      
+      const { error } = await cloudDB.upsertRecord('assets', payload);
+      if (!error) {
+        await dexie.assets.update(asset.id, { needsSync: 0, updatedAt: now, photos: uniquePhotos });
+      }
     }
   
     window.dispatchEvent(new CustomEvent('app-sync-end', { detail: { success: true } }));
@@ -184,112 +162,66 @@ export async function pushLocalChanges() {
   }
 }
 
-// Specific push helpers
 export async function syncInspection(inspectionId: string) {
   const inspection = await dexie.inspections.get(inspectionId);
   if (!inspection) return;
-
   window.dispatchEvent(new CustomEvent('app-sync-start'));
   try {
-    const inspectionRef = doc(firestore, 'inspections', inspection.id);
     if (inspection.deleted) {
-      await deleteDoc(inspectionRef);
+      await cloudDB.deleteRecord('inspections', inspection.id);
       await dexie.inspections.delete(inspection.id);
     } else {
-      const { ...data } = inspection;
-      data.updatedAt = Date.now();
-      await setDoc(inspectionRef, sanitizeForFirestore(data));
-      await dexie.inspections.update(inspection.id, { updatedAt: data.updatedAt, needsSync: 0 });
+      const payload = buildInspectionPayload(inspection);
+      const { error } = await cloudDB.upsertRecord('inspections', payload);
+      if (!error) await dexie.inspections.update(inspection.id, { updatedAt: payload.updatedAt, needsSync: 0 });
     }
     window.dispatchEvent(new CustomEvent('app-sync-end', { detail: { success: true } }));
   } catch (error) {
     window.dispatchEvent(new CustomEvent('app-sync-end', { detail: { success: false } }));
-    handleFirestoreError(error, 'write', `inspections/${inspectionId}`);
   }
 }
 
 export async function syncLocation(locationId: string) {
   const location = await dexie.locations.get(locationId);
   if (!location) return;
-
   window.dispatchEvent(new CustomEvent('app-sync-start'));
   try {
-    const locationRef = doc(firestore, 'locations', location.id);
     if (location.deleted) {
-      await deleteDoc(locationRef);
+      await cloudDB.deleteRecord('locations', location.id);
       await dexie.locations.delete(location.id);
     } else {
-      const { ...data } = location;
-      data.updatedAt = Date.now();
-      await setDoc(locationRef, sanitizeForFirestore(data));
-      await dexie.locations.update(location.id, { updatedAt: data.updatedAt, needsSync: 0 });
+      const payload = buildLocationPayload(location);
+      const { error } = await cloudDB.upsertRecord('locations', payload);
+      if (!error) await dexie.locations.update(location.id, { updatedAt: payload.updatedAt, needsSync: 0 });
     }
     window.dispatchEvent(new CustomEvent('app-sync-end', { detail: { success: true } }));
   } catch (error) {
     window.dispatchEvent(new CustomEvent('app-sync-end', { detail: { success: false } }));
-    handleFirestoreError(error, 'write', `locations/${locationId}`);
   }
 }
 
 export async function forceFullSyncRecovery() {
-  console.log("[Recovery] Iniciando recuperação total...");
-  
-  // 1. Tenta enviar mudanças pendentes antes de qualquer coisa
   try {
     const pendingCount = await dexie.assets.filter(a => a.needsSync === 1).count();
-    if (pendingCount > 0) {
-      console.log(`[Recovery] Tentando sincronizar ${pendingCount} itens pendentes antes do reset...`);
-      await pushLocalChanges();
-    }
-  } catch (e) {
-    console.error("[Recovery] Falha ao sincronizar antes do reset:", e);
-  }
+    if (pendingCount > 0) { await pushLocalChanges(); }
+  } catch (e) {}
 
-  // 2. Limpa os marcadores de tempo
-  const keys = [
-    'lastSyncTime_locations',
-    'lastSyncTime_inspections',
-    'lastSyncTime_assets',
-    'lastSyncTime_users',
-    'lastSyncTime_sector_inspections'
-  ];
-  
+  const keys = ['lastSyncTime_locations','lastSyncTime_inspections','lastSyncTime_assets','lastSyncTime_users','lastSyncTime_sector_inspections'];
   keys.forEach(key => localStorage.removeItem(key));
   
-  // 3. Limpa os dados locais que JÁ ESTÃO sincronizados
-  // Isso garante que dados excluídos no Firestore sumam do Dexie local
   try {
     await dexie.locations.filter(l => !l.needsSync).delete();
     await dexie.inspections.filter(i => !i.needsSync).delete();
     await dexie.assets.filter(a => a.needsSync !== 1).delete();
-    console.log("[Recovery] Dados locais sincronizados foram limpos.");
-  } catch (e) {
-    console.error("[Recovery] Erro ao limpar tabelas locais:", e);
-    // Se falhar em limpar seletivamente, podemos tentar limpar tudo se o usuário confirmar
-    // mas por hora apenas logamos.
-  }
-
-  console.log("[Recovery] Cache de sincronização limpo. Recarregando página...");
+  } catch (e) {}
   window.location.reload();
 }
 
 export async function hardResetAndRescue() {
-  const confirm = window.confirm("Isso fará o download de TUDO do Firebase novamente. Deseja continuar?");
+  const confirm = window.confirm("Isso fará o download de TUDO do Supabase novamente. Deseja continuar?");
   if (!confirm) return;
-
-  // Envia qualquer coisa pendente por segurança
-  try {
-    await pushLocalChanges(); 
-  } catch (e) {
-    console.error("[Rescue] Erro ao sincronizar antes do reset:", e);
-  }
-
-  // Limpa o controle do Delta Sync
+  try { await pushLocalChanges(); } catch (e) {}
   localStorage.clear();
-
-  // Destrói o banco local para forçar a recriação limpa baseada na nuvem
   await dexie.delete();
-
-  // Recarrega o aplicativo
   window.location.reload();
 }
