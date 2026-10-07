@@ -145,10 +145,11 @@ function SetupScreen() {
 }
 
 function LoginScreen() {
-  const { signIn } = useAuth(); // Traz a função de login original do seu sistema
+  const { signIn } = useAuth(); 
   const [isRegistering, setIsRegistering] = useState(false);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState(''); // NOVO: Estado para repetir senha
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [resetMessage, setResetMessage] = useState('');
@@ -159,7 +160,7 @@ function LoginScreen() {
     setError(null);
     setResetMessage('');
     try {
-      const success = await signIn(); // Chama o popup do Google
+      const success = await signIn(); 
       if (!success) {
         setError('Acesso negado. Esta conta do Google não possui permissão no sistema. Solicite acesso ao Administrador.');
       }
@@ -174,28 +175,105 @@ function LoginScreen() {
     }
   };
 
-  // Função para E-mail / Senha
+  // Função para E-mail / Senha (Com Relatório Completo e Mensagem de Sucesso)
   const handleAuth = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
     setError(null);
     setResetMessage('');
 
+    // Validação da Segunda Senha
+    if (isRegistering && password !== confirmPassword) {
+      setError('As senhas não coincidem. Por favor, digite senhas iguais nos dois campos.');
+      setLoading(false);
+      return;
+    }
+
+    let relatorioErro = "⚠️ RELATÓRIO DE EXECUÇÃO:\n";
+
     try {
       if (isRegistering) {
-        await createUserWithEmailAndPassword(auth, email, password);
+        // [1º ACESSO]
+        relatorioErro += "1. Criando acesso no Firebase...\n";
+        const userCred = await createUserWithEmailAndPassword(auth, email, password);
+        const novoIdOficial = userCred.user.uid;
+        const emailLimpo = email.trim().toLowerCase();
+
+        relatorioErro += "2. Atualizando memória do tablet...\n";
+        try {
+          const localUser = await db.users.where('email').equalsIgnoreCase(emailLimpo).first();
+          if (localUser) {
+            await db.users.delete(localUser.userId);
+            await db.users.add({ ...localUser, userId: novoIdOficial });
+          }
+        } catch (e: any) { relatorioErro += `   - Alerta Local: ${e.message}\n`; }
+
+        relatorioErro += "3. Buscando a sua ficha oficial no Supabase...\n";
+        const { data: cloudUsers, error: supErr } = await supabase.from('users').select('*').ilike('email', emailLimpo);
+        
+        if (supErr) throw new Error("Erro de conexão com o banco de dados: " + supErr.message);
+
+        if (cloudUsers && cloudUsers.length > 0) {
+          const oldUser = cloudUsers[0];
+          relatorioErro += "4. Ficha encontrada! Salvando novo crachá...\n";
+          
+          const { error: insErr } = await supabase.from('users').insert({ ...oldUser, userId: novoIdOficial });
+          if (insErr) throw new Error("Erro ao atualizar credencial: " + insErr.message);
+          
+          await supabase.from('users').delete().eq('userId', oldUser.userId);
+          
+          // MENSAGEM DE SUCESSO! E espera 2 segundos antes de entrar
+          setResetMessage('✅ Conta ativada com sucesso! Bem-vindo ao sistema. Entrando...');
+          setTimeout(() => window.location.reload(), 2000);
+          return;
+        } else {
+          throw new Error("O seu e-mail não foi encontrado na Lista Oficial do sistema. O Administrador cadastrou você no painel?");
+        }
+
       } else {
-        await signInWithEmailAndPassword(auth, email, password);
+        // [LOGIN NORMAL]
+        relatorioErro += "1. Verificando senha no Firebase...\n";
+        const userCred = await signInWithEmailAndPassword(auth, email, password);
+        const uid = userCred.user.uid;
+
+        relatorioErro += "2. Verificando se o dispositivo conhece você...\n";
+        const localUser = await db.users.where('userId').equals(uid).first();
+        
+        if (!localUser) {
+          relatorioErro += "3. Dispositivo novo. Puxando dados do Supabase...\n";
+          const { data: cloudUsers, error: supErr } = await supabase.from('users').select('*').eq('userId', uid);
+          
+          if (supErr) throw new Error("Erro ao buscar dados na nuvem: " + supErr.message);
+          
+          if (cloudUsers && cloudUsers.length > 0) {
+             await db.users.add(cloudUsers[0]);
+             setResetMessage('✅ Perfil sincronizado com sucesso! Entrando...');
+             setTimeout(() => window.location.reload(), 1500);
+             return;
+          } else {
+             throw new Error("O banco de dados não encontrou nenhuma ficha com este ID.");
+          }
+        } else {
+           setResetMessage('✅ Acesso autorizado! Carregando painel...');
+           setTimeout(() => window.location.reload(), 1000);
+        }
       }
     } catch (err: any) {
+      // Formata os erros do Firebase para português
       if (err.code === 'auth/email-already-in-use') {
-        setError('Este e-mail já possui uma senha. Tente fazer login na aba "Entrar".');
+        setError('Este e-mail já possui uma senha criada. Tente fazer login na aba "Entrar".');
       } else if (err.code === 'auth/invalid-login-credentials' || err.code === 'auth/wrong-password' || err.code === 'auth/user-not-found') {
         setError('E-mail ou senha incorretos. Verifique as suas credenciais.');
       } else if (err.code === 'auth/weak-password') {
         setError('A senha deve ter pelo menos 6 caracteres.');
       } else {
-        setError('Ocorreu um erro ao processar a solicitação: ' + err.message);
+        // Exibe o nosso Relatório Completo caso seja um erro invisível
+        setError(relatorioErro + "\n❌ ERRO FINAL: " + err.message);
+      }
+      
+      // Se falhou no meio da criação, limpa a tentativa do Firebase
+      if (isRegistering) {
+          await auth.signOut().catch(() => {});
       }
     } finally {
       setLoading(false);
@@ -215,7 +293,7 @@ function LoginScreen() {
       const { getAuth, sendPasswordResetEmail } = await import('firebase/auth');
       const currentAuth = getAuth();
       await sendPasswordResetEmail(currentAuth, targetEmail);
-      setResetMessage('Se o e-mail estiver cadastrado, você receberá um link de recuperação (verifique o SPAM).');
+      setResetMessage('✅ Se o e-mail estiver cadastrado, você receberá um link de recuperação (verifique o SPAM).');
     } catch (err: any) {
       if (err?.code === 'auth/invalid-email') {
         setError('O formato do e-mail é inválido.');
@@ -230,13 +308,11 @@ function LoginScreen() {
   return (
     <div className="min-h-screen bg-slate-50 flex items-center justify-center p-6 font-sans relative overflow-hidden bg-[radial-gradient(#e2e8f0_1px,transparent_1px)] [background-size:24px_24px]">
       
-      {/* Elementos de Fundo Estilizados */}
       <div className="absolute top-[0%] left-[-10%] w-96 h-96 bg-indigo-500/10 rounded-full blur-[100px] pointer-events-none"></div>
       <div className="absolute bottom-[-10%] right-[-10%] w-96 h-96 bg-emerald-500/10 rounded-full blur-[100px] pointer-events-none"></div>
 
       <Card className="w-full max-w-[420px] bg-white rounded-[2.5rem] shadow-[0_20px_60px_-15px_rgba(0,0,0,0.1)] border border-slate-100 p-8 md:p-10 relative z-10 animate-in fade-in zoom-in-95 duration-700">
         
-        {/* Cabeçalho do Login */}
         <div className="flex flex-col items-center text-center mb-8">
           <div className="w-20 h-20 bg-slate-900 rounded-[1.5rem] flex items-center justify-center shadow-2xl shadow-slate-900/20 mb-6 transform rotate-6 hover:rotate-0 transition-transform duration-500">
             <ShieldCheck className="w-10 h-10 text-indigo-400 -rotate-6" />
@@ -249,22 +325,22 @@ function LoginScreen() {
           </div>
         </div>
 
-        {/* MENSAGENS DE ERRO / SUCESSO */}
+        {/* MENSAGENS DE ERRO COM PRE-WRAP PARA LER AS LINHAS */}
         {error && (
-          <div className="bg-rose-50 border border-rose-100 p-4 rounded-2xl flex items-center gap-3 text-rose-600 animate-in shake mb-6">
-            <AlertCircle className="w-5 h-5 shrink-0" />
-            <p className="text-[11px] font-bold leading-tight">{error}</p>
+          <div className="bg-rose-50 border border-rose-100 p-4 rounded-2xl flex items-start gap-3 text-rose-600 animate-in shake mb-6">
+            <AlertCircle className="w-5 h-5 shrink-0 mt-0.5" />
+            <p className="text-[11px] font-bold leading-tight whitespace-pre-wrap">{error}</p>
           </div>
         )}
 
+        {/* MENSAGENS DE SUCESSO VERDE */}
         {resetMessage && (
           <div className="bg-emerald-50 border border-emerald-100 p-4 rounded-2xl flex items-center gap-3 text-emerald-700 animate-in slide-in-from-top-2 mb-6">
             <CheckCircle2 className="w-5 h-5 shrink-0" />
-            <p className="text-[11px] font-bold leading-tight">{resetMessage}</p>
+            <p className="text-[12px] font-bold leading-tight">{resetMessage}</p>
           </div>
         )}
 
-        {/* BOTÃO DO GOOGLE (Administradores) */}
         <button
           type="button"
           onClick={handleGoogleAuth}
@@ -285,25 +361,23 @@ function LoginScreen() {
           <div className="relative flex justify-center text-[9px] uppercase font-black text-slate-300 bg-white px-4 tracking-[0.3em]">Ou use E-mail e Senha</div>
         </div>
 
-        {/* Abas Indutivas (Agentes e Comissões) */}
         <div className="flex p-1 bg-slate-100 rounded-2xl mb-6 relative shadow-inner">
           <button
             type="button"
-            onClick={() => { setIsRegistering(false); setError(null); setResetMessage(''); }}
+            onClick={() => { setIsRegistering(false); setError(null); setResetMessage(''); setConfirmPassword(''); }}
             className={`flex-1 py-3 text-[10px] font-black uppercase tracking-widest rounded-xl transition-all duration-300 flex items-center justify-center gap-2 ${!isRegistering ? 'bg-white text-indigo-600 shadow-sm' : 'text-slate-400 hover:text-slate-600'}`}
           >
             <LogIn className="w-4 h-4" /> Entrar
           </button>
           <button
             type="button"
-            onClick={() => { setIsRegistering(true); setError(null); setResetMessage(''); }}
+            onClick={() => { setIsRegistering(true); setError(null); setResetMessage(''); setConfirmPassword(''); }}
             className={`flex-1 py-3 text-[10px] font-black uppercase tracking-widest rounded-xl transition-all duration-300 flex items-center justify-center gap-2 ${isRegistering ? 'bg-white text-emerald-600 shadow-sm' : 'text-slate-400 hover:text-slate-600'}`}
           >
             <UserPlus className="w-4 h-4" /> 1º Acesso
           </button>
         </div>
 
-        {/* Formulário Principal */}
         <form onSubmit={handleAuth} className="flex flex-col gap-4">
           
           {isRegistering && (
@@ -332,22 +406,40 @@ function LoginScreen() {
             <input
               type="password"
               required
-              placeholder={isRegistering ? "Crie uma senha (min. 6 carac.)" : "Sua senha de acesso"}
+              placeholder={isRegistering ? "Crie uma senha (mínimo 6 caracteres)" : "Sua senha de acesso"}
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               className="w-full pl-12 pr-4 h-14 bg-slate-50 border border-slate-200 rounded-2xl text-sm font-semibold focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 focus:outline-none transition-all placeholder:text-slate-400"
             />
-            {!isRegistering && (
+          </div>
+
+          {/* NOVO CAMPO: REPITA A SENHA */}
+          {isRegistering && (
+             <div className="flex flex-col gap-1 relative group">
+              <Key className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-400 group-focus-within:text-emerald-600 transition-colors" />
+              <input
+                type="password"
+                required
+                placeholder="Repita a senha para confirmar"
+                value={confirmPassword}
+                onChange={(e) => setConfirmPassword(e.target.value)}
+                className="w-full pl-12 pr-4 h-14 bg-slate-50 border border-slate-200 rounded-2xl text-sm font-semibold focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 focus:outline-none transition-all placeholder:text-slate-400"
+              />
+            </div>
+          )}
+
+          {!isRegistering && (
+            <div className="flex justify-end">
               <button 
                 type="button" 
                 onClick={handleForgotPassword}
                 disabled={loading}
-                className="text-[10px] text-slate-400 hover:text-indigo-600 font-black uppercase tracking-widest text-right px-2 mt-2 transition-colors"
+                className="text-[10px] text-slate-400 hover:text-indigo-600 font-black uppercase tracking-widest px-2 mt-2 transition-colors"
               >
                 Esqueci minha senha
               </button>
-            )}
-          </div>
+            </div>
+          )}
 
           <button
             type="submit"
