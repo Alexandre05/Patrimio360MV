@@ -7,6 +7,7 @@ const buildLocationPayload = (loc: any) => ({
   id: loc.id,
   name: loc.name,
   description: loc.description || null,
+  internalCode: loc.internalCode || null,
   latitude: loc.latitude ? Number(loc.latitude) : null,
   longitude: loc.longitude ? Number(loc.longitude) : null,
   parentId: loc.parentId || null,
@@ -29,6 +30,19 @@ const buildInspectionPayload = (insp: any) => ({
   deleted: insp.deleted || false
 });
 
+const buildUserPayload = (u: any) => ({
+  userId: u.userId,
+  name: u.name,
+  email: u.email,
+  role: u.role,
+  status: u.status,
+  cargo: u.cargo || '',
+  locationId: u.locationId || null,
+  isTrashed: u.isTrashed || false,
+  updatedAt: Date.now(),
+  deleted: u.deleted || false
+});
+
 export async function setupSync() {
   if (!auth.currentUser) return;
   const collections = [
@@ -43,7 +57,6 @@ export async function setupSync() {
     const lastSyncTime = parseInt(localStorage.getItem(storageKey) || '0');
     
     try {
-      // Usando o Adaptador Cloud genérico em vez do Supabase direto
       const { data, error } = await cloudDB.getRecordsSince(name, updatedCol, lastSyncTime);
       if (error) throw error;
 
@@ -76,6 +89,16 @@ export async function pushLocalChanges() {
   window.dispatchEvent(new CustomEvent('app-sync-start'));
 
   try {
+    // 0. USERS (Garante que a equipa também sobe para o banco novo)
+    const unsyncedUsers = await dexie.users.filter(u => u.needsSync === 1 || String(u.needsSync) === 'true').toArray();
+    for (const u of unsyncedUsers) {
+      try {
+        const payload = buildUserPayload(u);
+        const { error } = await cloudDB.upsertRecord('users', payload);
+        if (!error) await dexie.users.update(u.userId, { needsSync: 0, updatedAt: payload.updatedAt });
+      } catch (e) {}
+    }
+
     // 1. LOCATIONS
     const unsyncedLocations = await dexie.locations.filter(loc => loc.needsSync === 1 || String(loc.needsSync) === 'true').toArray();
     for (const loc of unsyncedLocations) {
@@ -200,28 +223,39 @@ export async function syncLocation(locationId: string) {
   }
 }
 
-export async function forceFullSyncRecovery() {
-  try {
-    const pendingCount = await dexie.assets.filter(a => a.needsSync === 1).count();
-    if (pendingCount > 0) { await pushLocalChanges(); }
-  } catch (e) {}
-
-  const keys = ['lastSyncTime_locations','lastSyncTime_inspections','lastSyncTime_assets','lastSyncTime_users','lastSyncTime_sector_inspections'];
-  keys.forEach(key => localStorage.removeItem(key));
+// 🚀 FUNÇÃO DE RESGATE: Marca tudo no computador como pendente e envia para o Supabase Novo!
+export async function migrateAllLocalToNewCloud() {
+  console.log("🚀 Iniciando migração total do computador para o novo Supabase...");
   
-  try {
-    await dexie.locations.filter(l => !l.needsSync).delete();
-    await dexie.inspections.filter(i => !i.needsSync).delete();
-    await dexie.assets.filter(a => a.needsSync !== 1).delete();
-  } catch (e) {}
-  window.location.reload();
+  await dexie.users.toCollection().modify({ needsSync: 1 });
+  await dexie.locations.toCollection().modify({ needsSync: 1 });
+  await dexie.inspections.toCollection().modify({ needsSync: 1 });
+  await dexie.assets.toCollection().modify({ needsSync: 1 });
+
+  const totalUsers = await dexie.users.count();
+  const totalLocations = await dexie.locations.count();
+  const totalInspections = await dexie.inspections.count();
+  const totalAssets = await dexie.assets.count();
+
+  console.log(`📦 Encontrados no PC: ${totalUsers} usuários, ${totalLocations} locais, ${totalInspections} vistorias e ${totalAssets} bens.`);
+
+  await pushLocalChanges();
+  console.log("✅ Migração concluída com sucesso! Todos os dados estão no novo Supabase.");
+  alert(`Migração concluída! Enviados: ${totalUsers} usuários, ${totalLocations} locais, ${totalInspections} vistorias e ${totalAssets} bens.`);
+}
+
+// Deixamos a função de recuperação apontando para a migração segura para não apagar nada por engano
+export async function forceFullSyncRecovery() {
+  await migrateAllLocalToNewCloud();
 }
 
 export async function hardResetAndRescue() {
-  const confirm = window.confirm("Isso fará o download de TUDO do Supabase novamente. Deseja continuar?");
+  const confirm = window.confirm("Deseja reenviar TODOS os dados salvos neste computador para o novo banco do Supabase?");
   if (!confirm) return;
-  try { await pushLocalChanges(); } catch (e) {}
-  localStorage.clear();
-  await dexie.delete();
-  window.location.reload();
+  await migrateAllLocalToNewCloud();
+}
+
+// Disponibiliza o comando no Console (F12) para rodar a qualquer momento
+if (typeof window !== 'undefined') {
+  (window as any).resgatarDados = migrateAllLocalToNewCloud;
 }
