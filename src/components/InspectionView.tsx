@@ -838,7 +838,7 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
 
   if (!inspection || !location) return null;
 
-  const isLocked = inspection.status === 'finalizada' || (inspection.status === 'concluida' && !isCommittee);
+  const isLocked = inspection.status === 'finalizada' || inspection.status === 'concluida';
   const isAddBlocked = hasSubLocations; 
   const isFinalized = inspection.status === 'finalizada';
   const isConcluded = inspection.status === 'concluida';

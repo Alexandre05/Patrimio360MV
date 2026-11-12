@@ -146,14 +146,23 @@ export function LocationsView({ onSelectInspection }: { onSelectInspection: (id:
     ? allFilteredLocations 
     : allFilteredLocations?.slice(0, displayLimit);
 
-  const handleStartInspection = async (locationId: string) => {
+const handleStartInspection = async (locationId: string) => {
+    // 1. Busca qualquer vistoria ativa deste local (independente do status)
     const existing = await db.inspections
       .where({ locationId })
-      .filter(i => i.status !== 'finalizada')
+      .filter(i => !i.deleted)
       .reverse()
       .first();
 
     if (existing) {
+      // 2. Trava de Segurança: Se já estiver concluída ou homologada, abre direto.
+      // (Não podemos perguntar se o usuário quer apagar uma vistoria fechada!)
+      if (existing.status === 'concluida' || existing.status === 'finalizada') {
+        onSelectInspection(existing.id);
+        return;
+      }
+
+      // 3. Se estiver "em_andamento", mantém o seu fluxo normal de perguntar:
       const confirmContinue = window.confirm("Existe uma vistoria pendente neste local. Deseja CONTINUAR de onde parou?\n\n(Clique em CANCELAR se quiser excluir a atual e começar uma NOVA do zero)");
       if (confirmContinue) {
         onSelectInspection(existing.id);
