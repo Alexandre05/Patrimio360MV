@@ -646,15 +646,32 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
     } catch (err: any) { setError(err.message || "Erro ao transferir item"); } finally { setIsTransferring(false); }
   };
 
-  const generatePDF = async () => {
+const generatePDF = async () => {
     try {
       setError(null);
       const doc = new jsPDF();
-      doc.setFontSize(18);
-      doc.text('Relatório de Vistoria Patrimonial', 14, 22);
       
+      // Cabeçalho Oficial
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(16);
+      doc.setTextColor(15, 23, 42); // Slate 900
+      doc.text('RELATÓRIO DE VISTORIA PATRIMONIAL', 14, 20);
+      
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(10);
+      doc.setTextColor(100, 116, 139); // Slate 500
+      doc.text('Prefeitura Municipal de Manoel Viana - RS', 14, 26);
+
+      // Informações do Local e Data
+      doc.setFont('helvetica', 'bold');
       doc.setFontSize(11);
-      doc.text(`Local: ${location?.name}`, 14, 32);
+      doc.setTextColor(15, 23, 42);
+      doc.text(`Local: ${location?.name}`, 14, 36);
+      
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(10);
+      doc.setTextColor(71, 85, 105);
+      
       const getPDFDisplayDate = (insp: any) => {
         const finalDate = insp?.finalizedAt || insp?.updatedAt || insp?.date;
         if (!finalDate) return 0;
@@ -663,62 +680,170 @@ export function InspectionView({ id, onBack }: { id: string, onBack: () => void 
         if (finalDate.seconds) return finalDate.seconds * 1000;
         return new Date(finalDate).getTime() || 0;
       };
-      doc.text(`Data: ${formatDate(getPDFDisplayDate(inspection))}`, 14, 38);
       
-      if (inspection?.concludedBy) { doc.text(`Vistoriador: ${inspection.concludedBy === user?.userId ? user?.name : 'Identificado no Sistema'}`, 14, 44); } 
-      else { doc.text(`Responsável: ${user?.name}`, 14, 44); }
+      doc.text(`Data da Auditoria: ${formatDate(getPDFDisplayDate(inspection))}`, 14, 43);
       
-      if (inspection?.status === 'finalizada') { doc.text(`Homologado por: ${inspection.finalizedBy === user?.userId ? user?.name : 'Autoridade Municipal'}`, 14, 50); }
+      const responsavelTexto = inspection?.concludedBy 
+        ? (inspection.concludedBy === user?.userId ? user?.name : 'Vistoriador Autorizado') 
+        : (user?.name || 'Equipe Técnica');
+      doc.text(`Responsável Técnico: ${responsavelTexto}`, 14, 50);
+      
+      if (inspection?.status === 'finalizada') { 
+        doc.text(`Homologado por Autoridade Competente`, 14, 57); 
+      }
 
-      doc.setFontSize(10);
-      doc.setTextColor(50);
-      doc.text(`Total de Registros: ${allVisibleAssets.length} | Total Fisico (Soma das Qtds): ${allVisibleTotalFisico}`, 14, 58);
+      doc.setFont('helvetica', 'bold');
+      doc.text(`Resumo: ${allVisibleAssets.length} registos | Total Físico: ${allVisibleTotalFisico}`, 14, 64);
 
-      const qrData = `https://patrimonio360-75ade.web.app/local/${location?.id}`;
-      doc.setFontSize(9);
-      doc.setTextColor(100);
-      doc.text('Este documento contém um QR Code DINÂMICO vinculado ao SETOR.', 14, 64);
-      doc.text('A leitura deste código sempre exibirá a auditoria mais recente homologada.', 14, 69);
-      doc.setTextColor(0);
-
+      // Tabela com larguras ajustadas para caber perfeitamente na página A4 (sem avisos de largura)
       const tableData = allVisibleAssets?.map(a => [
-        a.name, String(Number(a.quantity || 1)), a.patrimonyNumber || (a as any).code || '-', a.condition, a.observations || '-'
+        a.name, 
+        String(Number(a.quantity || 1)), 
+        a.patrimonyNumber || '-', 
+        a.condition.toUpperCase(), 
+        a.observations || '-'
       ]);
 
-      autoTable(doc, { head: [['Item', 'Qtd', 'Patrimônio', 'Estado', 'Obs']], body: tableData, startY: 74, theme: 'grid' });
+      autoTable(doc, { 
+        head: [['Item / Descrição', 'Qtd', 'Patrimônio', 'Estado', 'Observações']], 
+        body: tableData, 
+        startY: 70, 
+        theme: 'grid',
+        headStyles: { 
+          fillColor: [15, 23, 42], 
+          textColor: [255, 255, 255],
+          fontStyle: 'bold',
+          fontSize: 9
+        },
+        bodyStyles: { 
+          fontSize: 8.5,
+          textColor: [51, 65, 85],
+          valign: 'middle'
+        },
+        columnStyles: {
+          0: { cellWidth: 50 }, 
+          1: { cellWidth: 12, halign: 'center' }, 
+          2: { cellWidth: 28 }, 
+          3: { cellWidth: 22, halign: 'center' }, 
+          4: { cellWidth: 63 }  // Total exato dentro da margem útil da página
+        },
+        styles: { minCellHeight: 10 } 
+      });
 
-      if (sectorSignature) {
-        const finalY = (doc as any).lastAutoTable.finalY + 15;
+      let finalY = (doc as any).lastAutoTable.finalY + 12;
+
+      // Função segura para converter imagens locais (Base64) ignorando falhas de URLs externas com erro 544
+      const fetchImageAsBase64 = async (url: string): Promise<string> => {
+        return new Promise((resolve) => {
+          if (!url || url.includes('supabase.co')) { 
+            // Ignora URLs diretas do Storage se estiverem a gerar erro 544 de rede
+            resolve(''); 
+            return; 
+          }
+          const img = new Image();
+          img.crossOrigin = 'anonymous';
+          const timeout = setTimeout(() => resolve(''), 1500);
+
+          img.onload = () => {
+            clearTimeout(timeout);
+            try {
+              const canvas = document.createElement('canvas');
+              canvas.width = 200;
+              canvas.height = 200;
+              const ctx = canvas.getContext('2d');
+              ctx?.drawImage(img, 0, 0, canvas.width, canvas.height);
+              resolve(canvas.toDataURL('image/jpeg', 0.6));
+            } catch (e) {
+              resolve('');
+            }
+          };
+          img.onerror = () => { clearTimeout(timeout); resolve(''); };
+          img.src = url;
+        });
+      };
+
+      // Seção de Anexo Fotográfico (Processa apenas imagens em Base64 local para evitar travamentos)
+      const assetsWithPhotos = allVisibleAssets?.filter(a => a.photos && a.photos.length > 0 && a.photos[0] && a.photos[0].startsWith('data:image'));
+      if (assetsWithPhotos && assetsWithPhotos.length > 0) {
+        if (finalY > 210) { doc.addPage(); finalY = 20; }
+        
+        doc.setFont('helvetica', 'bold');
         doc.setFontSize(10);
-        doc.text('RESPONSÁVEL PELO SETOR (ATÉSTADO DE CIÊNCIA):', 14, finalY);
-        doc.setFontSize(11);
-        doc.text(sectorSignature.responsibleName.toUpperCase(), 14, finalY + 7);
-        doc.addImage(sectorSignature.signatureBase64, 'PNG', 14, finalY + 10, 40, 15);
-      }
+        doc.setTextColor(15, 23, 42);
+        doc.text('ANEXO: REGISTO FOTOGRÁFICO DE EVIDÊNCIAS', 14, finalY);
+        finalY += 6;
 
-      if (true) { 
-        const qrY = sectorSignature ? (doc as any).lastAutoTable.finalY + 35 : (doc as any).lastAutoTable.finalY + 15;
-        if (qrY < 230) {
-          doc.setFontSize(10); doc.setFont('helvetica', 'bold');
-          doc.text('SELO PERMANENTE DE TRANSPARÊNCIA (PORTA DO SETOR):', 14, qrY);
-          const qrSvg = document.querySelector('#qr-code-dynamic svg');
-          if (qrSvg) {
-            const svgData = new XMLSerializer().serializeToString(qrSvg);
-            const canvas = document.createElement('canvas'); const ctx = canvas.getContext('2d');
-            const img = new Image(); img.src = 'data:image/svg+xml;base64,' + btoa(svgData);
-            await new Promise((resolve) => {
-              img.onload = () => {
-                canvas.width = img.width; canvas.height = img.height; ctx?.drawImage(img, 0, 0);
-                doc.addImage(canvas.toDataURL('image/png'), 'PNG', 14, qrY + 5, 40, 40);
-                resolve(null);
-              };
-            });
+        for (const item of assetsWithPhotos) {
+          if (finalY > 230) { doc.addPage(); finalY = 20; }
+          
+          doc.setFont('helvetica', 'bold');
+          doc.setFontSize(8.5);
+          doc.setTextColor(71, 85, 105);
+          doc.text(`• ${item.name} ${item.patrimonyNumber ? `(Patrimônio: ${item.patrimonyNumber})` : ''}`, 14, finalY);
+          finalY += 4;
+
+          const base64Img = await fetchImageAsBase64(item.photos[0]);
+          if (base64Img) {
+            try {
+              doc.addImage(base64Img, 'JPEG', 14, finalY, 35, 35);
+              finalY += 38;
+            } catch (err) {}
           }
         }
+        finalY += 5;
       }
-      try { doc.save(`Vistoria_${location?.name}_${new Date().toLocaleDateString()}.pdf`); } 
-      catch (saveErr) { const blob = doc.output('blob'); window.open(URL.createObjectURL(blob), '_blank'); }
-    } catch (err: any) { setError(`Erro ao gerar PDF: ${err.message || 'Falha desconhecida'}`); }
+
+      // Bloco da Assinatura Setorial
+      if (sectorSignature) {
+        if (finalY > 230) { doc.addPage(); finalY = 20; }
+        doc.setFont('helvetica', 'bold');
+        doc.setFontSize(9);
+        doc.setTextColor(15, 23, 42);
+        doc.text('ATESTADO DE CIÊNCIA - RESPONSÁVEL PELO SETOR:', 14, finalY);
+        
+        doc.setFont('helvetica', 'normal');
+        doc.text(sectorSignature.responsibleName.toUpperCase(), 14, finalY + 6);
+        try {
+          doc.addImage(sectorSignature.signatureBase64, 'PNG', 14, finalY + 9, 35, 12);
+        } catch(e) {}
+        finalY += 28;
+      }
+
+      // Bloco do Selo de Transparência (QR Code Dinâmico)
+      if (true) { 
+        if (finalY > 220) { doc.addPage(); finalY = 20; }
+        doc.setFont('helvetica', 'bold');
+        doc.setFontSize(9);
+        doc.text('SELO PERMANENTE DE TRANSPARÊNCIA MUNICIPAL:', 14, finalY);
+        
+        const qrSvg = document.querySelector('#qr-code-dynamic svg');
+        if (qrSvg) {
+          const svgData = new XMLSerializer().serializeToString(qrSvg);
+          const canvas = document.createElement('canvas'); 
+          const ctx = canvas.getContext('2d');
+          const img = new Image(); 
+          img.src = 'data:image/svg+xml;base64,' + btoa(svgData);
+          await new Promise((resolve) => {
+            img.onload = () => {
+              canvas.width = img.width; 
+              canvas.height = img.height; 
+              ctx?.drawImage(img, 0, 0);
+              doc.addImage(canvas.toDataURL('image/png'), 'PNG', 14, finalY + 4, 28, 28);
+              resolve(null);
+            };
+          });
+        }
+      }
+
+      try { 
+        doc.save(`Dossie_${location?.name?.replace(/\s+/g, '_')}_${new Date().toLocaleDateString()}.pdf`); 
+      } catch (saveErr) { 
+        const blob = doc.output('blob'); 
+        window.open(URL.createObjectURL(blob), '_blank'); 
+      }
+    } catch (err: any) { 
+      setError(`Erro ao gerar PDF: ${err.message || 'Falha desconhecida'}`); 
+    }
   };
 
  const handlePrintQRCode = (type: 'vistoria' | 'local' = 'local') => {
