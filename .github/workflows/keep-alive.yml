@@ -3,7 +3,7 @@ name: Supabase Keep Alive
 on:
   push:
   schedule:
-    - cron: '0 0 */3 * *'
+    - cron: "0 0 */3 * *"
   workflow_dispatch:
 
 jobs:
@@ -12,5 +12,4 @@ jobs:
     steps:
       - name: Ping Supabase API
         run: |
-          curl -f -s -o /dev/null -w "Status HTTP: %{http_code}
-" -X GET "https://iqigbdzncjswpluhvtff.supabase.co/rest/v1/locations?select=id" -H "apikey: ${{ secrets.SUPABASE_ANON_KEY }}" -H "Authorization: Bearer ${{ secrets.SUPABASE_ANON_KEY }}"
+          curl -f -s -o /dev/null -w "Status HTTP: %{http_code}\n" -X GET "https://iqigbdzncjswpluhvtff.supabase.co/rest/v1/locations?select=id" -H "apikey: ${{ secrets.SUPABASE_ANON_KEY }}" -H "Authorization: Bearer ${{ secrets.SUPABASE_ANON_KEY }}"
