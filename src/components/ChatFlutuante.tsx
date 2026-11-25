@@ -38,32 +38,52 @@ export function ChatFlutuante() {
   const [naoLidas, setNaoLidas] = useState(0);
   const fimRef = useRef<HTMLDivElement | null>(null);
   const abertoRef = useRef(aberto);
+  const abaRef = useRef(aba);
 
   const nomeAtual = (user as any)?.name || (user as any)?.nome || (user as any)?.email?.split('@')[0] || 'Servidor';
   const emailAtual = (user as any)?.email || '';
 
-  const marcarComoVistos = async (lista: MensagemChat[]) => {
-    if (!nomeAtual) return;
-    const pendentes = lista.filter(
-      (m) => m.usuario_email !== emailAtual && !(m.visto_por || []).includes(nomeAtual)
+  // Marca em lote como lidos apenas os recados da aba que o usuário realmente está vendo
+  const marcarComoVistos = async (lista: MensagemChat[], abaAtiva: 'geral' | 'direto') => {
+    if (!nomeAtual || !abertoRef.current) return;
+
+    const pendentesIds = lista
+      .filter((m) => {
+        const dest = m.destinatario || 'Todos';
+        const pertenceAba = abaAtiva === 'geral'
+          ? dest === 'Todos'
+          : dest !== 'Todos' && (dest === nomeAtual || dest === emailAtual);
+        const jaLi = (m.visto_por || []).includes(nomeAtual);
+        return pertenceAba && m.usuario_email !== emailAtual && !jaLi;
+      })
+      .map((m) => m.id);
+
+    if (pendentesIds.length === 0) return;
+
+    // Atualiza visualmente na hora (otimista) e grava de forma atômica no banco
+    setMensagens((prev) =>
+      prev.map((m) =>
+        pendentesIds.includes(m.id)
+          ? { ...m, visto_por: Array.from(new Set([...(m.visto_por || []), nomeAtual])) }
+          : m
+      )
     );
-    for (const m of pendentes) {
-      const novaLista = [...(m.visto_por || []), nomeAtual];
-      await supabase
-        .from('mensagens_chat')
-        .update({ visto_por: novaLista })
-        .eq('id', m.id);
-    }
+
+    await supabase.rpc('marcar_recados_lidos', {
+      p_ids: pendentesIds,
+      p_leitor: nomeAtual,
+    });
   };
 
   useEffect(() => {
     abertoRef.current = aberto;
+    abaRef.current = aba;
     if (aberto) {
       setNaoLidas(0);
-      marcarComoVistos(mensagens);
+      marcarComoVistos(mensagens, aba);
       setTimeout(() => fimRef.current?.scrollIntoView({ behavior: 'smooth' }), 80);
     }
-  }, [aberto]);
+  }, [aberto, aba]);
 
   useEffect(() => {
     if (!user) return;
@@ -100,7 +120,7 @@ export function ChatFlutuante() {
       if (!error && data) {
         const ordenadas = data.reverse();
         setMensagens(ordenadas);
-        if (abertoRef.current) marcarComoVistos(ordenadas);
+        if (abertoRef.current) marcarComoVistos(ordenadas, abaRef.current);
       }
     };
 
@@ -108,7 +128,6 @@ export function ChatFlutuante() {
     carregarColegas();
     carregarHistorico();
 
-    // Atualiza batimento e lista da equipe a cada 60 segundos
     const intervalo = setInterval(() => {
       registrarBatimento();
       carregarColegas();
@@ -129,12 +148,15 @@ export function ChatFlutuante() {
         (payload) => {
           if (payload.eventType === 'INSERT') {
             const nova = payload.new as MensagemChat;
-            setMensagens((prev) => (prev.some((m) => m.id === nova.id) ? prev : [...prev, nova]));
-            if (abertoRef.current) {
-              marcarComoVistos([nova]);
-            } else if (nova.usuario_email !== emailAtual) {
-              setNaoLidas((n) => n + 1);
-            }
+            setMensagens((prev) => {
+              const atualizada = prev.some((m) => m.id === nova.id) ? prev : [...prev, nova];
+              if (abertoRef.current) {
+                marcarComoVistos([nova], abaRef.current);
+              } else if (nova.usuario_email !== emailAtual) {
+                setNaoLidas((n) => n + 1);
+              }
+              return atualizada;
+            });
             setTimeout(() => fimRef.current?.scrollIntoView({ behavior: 'smooth' }), 80);
           } else if (payload.eventType === 'UPDATE') {
             const atualizada = payload.new as MensagemChat;
@@ -215,18 +237,14 @@ export function ChatFlutuante() {
     setMensagens((prev) => prev.filter((m) => m.id !== id));
   };
 
-  const formatarDataHora = (iso: string) => {
+  const formatarHora = (iso: string) => {
     try {
-      const d = new Date(iso);
-      return d.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' }) +
-        ' às ' +
-        d.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+      return new Date(iso).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
     } catch {
       return '';
     }
   };
 
-  // Considera online se estiver no WebSocket OU teve atividade nos últimos 3 minutos
   const isColegaAtivo = (c: Colega) => {
     if (onlineUsers.some((u) => u.email?.toLowerCase() === c.email?.toLowerCase())) return true;
     if (!c.ultimo_acesso) return false;
@@ -264,7 +282,7 @@ export function ChatFlutuante() {
                 <span>Mural de Recados</span>
                 <span className="inline-flex items-center gap-1 text-[10px] bg-emerald-500/20 text-emerald-200 border border-emerald-400/30 px-2 py-0.5 rounded-full font-semibold">
                   <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
-                  {totalOnline} ativo{totalOnline > 1 ? 's' : ''}
+                  {totalOnline} online
                 </span>
               </h3>
               <p className="text-[11px] text-indigo-200 mt-0.5">Equipe Patrimônio 360</p>
@@ -279,11 +297,11 @@ export function ChatFlutuante() {
             </button>
           </div>
 
-          {/* Barra estilo "Amigos Online" do Orkut */}
+          {/* Barra de membros conectados */}
           <div className="bg-indigo-50/90 border-b border-indigo-100 px-3 py-2.5">
             <div className="flex items-center justify-between mb-1.5">
               <span className="text-[10px] font-bold uppercase tracking-wider text-indigo-900/70">
-                Em atividade ({totalOnline})
+                Conectados agora ({totalOnline})
               </span>
               <span className="text-[10px] text-indigo-600">Toque para recado direto</span>
             </div>
@@ -308,7 +326,7 @@ export function ChatFlutuante() {
                     setAba('direto');
                     setDestinatario(c.name);
                   }}
-                  title={`${c.name} — em atividade agora`}
+                  title={`${c.name} — online agora`}
                   className="flex flex-col items-center min-w-[54px] group"
                 >
                   <div className="relative">
@@ -402,80 +420,77 @@ export function ChatFlutuante() {
             </div>
           )}
 
-          <div className="h-72 overflow-y-auto p-3 space-y-3 bg-slate-50">
+          {/* Lista de mensagens com tiques estilo WhatsApp */}
+          <div className="h-72 overflow-y-auto p-3 space-y-2.5 bg-slate-100">
             {recadosVisiveis.length === 0 ? (
               <div className="text-center my-10 px-4">
                 <p className="text-xs text-slate-500 font-medium">Nenhum recado nesta aba ainda.</p>
                 <p className="text-[11px] text-slate-400 mt-1">
-                  Deixe um recado abaixo — assim que a equipe sincronizar ou abrir o app, receberá aqui!
+                  Deixe um recado abaixo — os tiques ficarão azuis assim que for lido!
                 </p>
               </div>
             ) : (
               recadosVisiveis.map((m) => {
                 const ehMeu = emailAtual && m.usuario_email === emailAtual;
                 const leitores = (m.visto_por || []).filter((n) => n !== m.usuario_nome);
-                const inicial = (m.usuario_nome || 'S').charAt(0).toUpperCase();
-                const colegaAutor = colegas.find((c) => c.email?.toLowerCase() === m.usuario_email?.toLowerCase());
-                const autorOnline = ehMeu || (colegaAutor ? isColegaAtivo(colegaAutor) : false);
+                const foiLido = leitores.length > 0;
 
                 return (
                   <div
                     key={m.id}
-                    className={`p-3 rounded-xl border shadow-sm transition-all ${
-                      ehMeu
-                        ? 'bg-indigo-50/80 border-indigo-200 ml-4'
-                        : 'bg-white border-slate-200 mr-4'
-                    }`}
+                    className={`flex flex-col max-w-[85%] ${ehMeu ? 'ml-auto items-end' : 'mr-auto items-start'}`}
                   >
-                    <div className="flex items-start justify-between gap-2 mb-1.5">
-                      <div className="flex items-center gap-2">
-                        <div className="relative">
-                          <div className={`w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold text-white ${ehMeu ? 'bg-indigo-600' : 'bg-slate-700'}`}>
-                            {inicial}
-                          </div>
-                          <span
-                            className={`absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 rounded-full ring-2 ring-white ${
-                              autorOnline ? 'bg-emerald-500' : 'bg-slate-400'
-                            }`}
-                          />
-                        </div>
-                        <div>
-                          <p className="text-xs font-bold text-slate-800 leading-none">
-                            {ehMeu ? 'Você' : m.usuario_nome}
-                            {m.destinatario && m.destinatario !== 'Todos' && (
-                              <span className="font-normal text-indigo-600"> → {m.destinatario}</span>
-                            )}
-                          </p>
-                          <span className="text-[10px] text-slate-400">{formatarDataHora(m.created_at)}</span>
-                        </div>
+                    <div
+                      className={`w-full px-3 py-2 rounded-2xl shadow-sm border ${
+                        ehMeu
+                          ? 'bg-emerald-50 border-emerald-200 text-slate-800 rounded-br-sm'
+                          : 'bg-white border-slate-200 text-slate-800 rounded-bl-sm'
+                      }`}
+                    >
+                      {/* Cabeçalho do balão */}
+                      <div className="flex items-center justify-between gap-2 mb-0.5">
+                        <span className="text-[11px] font-bold text-indigo-700">
+                          {ehMeu ? 'Você' : m.usuario_nome}
+                          {m.destinatario && m.destinatario !== 'Todos' && (
+                            <span className="font-normal text-slate-500"> → {m.destinatario}</span>
+                          )}
+                        </span>
+                        {ehMeu && (
+                          <button
+                            type="button"
+                            onClick={() => apagarRecado(m.id)}
+                            title="Apagar mensagem"
+                            className="text-slate-400 hover:text-rose-600 text-[11px] leading-none"
+                          >
+                            ✕
+                          </button>
+                        )}
                       </div>
 
-                      {ehMeu && (
-                        <button
-                          type="button"
-                          onClick={() => apagarRecado(m.id)}
-                          title="Apagar recado"
-                          className="text-slate-400 hover:text-rose-600 text-xs px-1"
-                        >
-                          🗑️
-                        </button>
-                      )}
-                    </div>
+                      {/* Texto da mensagem */}
+                      <p className="text-xs sm:text-sm whitespace-pre-wrap break-words leading-snug">
+                        {m.mensagem}
+                      </p>
 
-                    <p className="text-xs sm:text-sm text-slate-800 whitespace-pre-wrap break-words pl-9">
-                      {m.mensagem}
-                    </p>
-
-                    <div className="mt-2 pt-1.5 border-t border-slate-200/70 pl-9 flex items-center justify-between text-[10px]">
-                      {leitores.length > 0 ? (
-                        <span className="text-emerald-700 font-medium">
-                          ✓✓ Visto por: {leitores.join(', ')}
-                        </span>
-                      ) : (
-                        <span className="text-slate-400">
-                          ✓ Entregue no mural (aguardando leitura)
-                        </span>
-                      )}
+                      {/* Rodapé estilo WhatsApp: hora + tiques (✓ cinza = entregue | ✓✓ azul = lido) */}
+                      <div className="mt-1 flex items-center justify-end gap-1.5 text-[10px]">
+                        {ehMeu && foiLido && (
+                          <span className="text-slate-500 truncate max-w-[170px]" title={`Lido por: ${leitores.join(', ')}`}>
+                            Lido por {leitores.map((n) => n.split(' ')[0]).join(', ')}
+                          </span>
+                        )}
+                        <span className="text-slate-400">{formatarHora(m.created_at)}</span>
+                        {ehMeu && (
+                          <span
+                            className={`font-extrabold tracking-tighter text-xs ${
+                              foiLido ? 'text-sky-500' : 'text-slate-400'
+                            }`}
+                            title={foiLido ? `Lido por: ${leitores.join(', ')}` : 'Entregue'}
+                          >
+                            {foiLido ? '✓✓' : '✓'}
+                          </span>
+                        )}
+                      </div>
                     </div>
                   </div>
                 );
@@ -495,7 +510,7 @@ export function ChatFlutuante() {
               type="text"
               value={texto}
               onChange={(e) => setTexto(e.target.value)}
-              placeholder={aba === 'geral' ? 'Escreva um recado para todos...' : `Recado para ${destinatario}...`}
+              placeholder={aba === 'geral' ? 'Escreva para todos...' : `Mensagem para ${destinatario}...`}
               className="flex-1 text-sm px-3 py-2 rounded-xl border border-slate-300 focus:outline-none focus:border-indigo-500 text-slate-800"
             />
             <button
@@ -503,7 +518,7 @@ export function ChatFlutuante() {
               disabled={enviando || !texto.trim()}
               className="bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white text-xs font-bold px-3.5 py-2 rounded-xl transition-colors"
             >
-              {enviando ? '...' : 'Postar'}
+              {enviando ? '...' : 'Enviar'}
             </button>
           </form>
         </div>
@@ -517,7 +532,7 @@ export function ChatFlutuante() {
         <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse" />
         <span className="hidden sm:inline">Recados</span>
         <span className="text-xs bg-indigo-800/80 px-2 py-0.5 rounded-full text-indigo-100">
-          {totalOnline} ativo{totalOnline > 1 ? 's' : ''}
+          {totalOnline} online
         </span>
         {naoLidas > 0 && (
           <span className="absolute -top-1.5 -right-1.5 bg-rose-600 text-white text-[11px] font-bold w-5 h-5 rounded-full flex items-center justify-center shadow">
