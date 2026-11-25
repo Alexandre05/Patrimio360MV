@@ -26,7 +26,7 @@ interface UsuarioOnline {
   online_at: string;
 }
 
-const EMOJIS_RAPIDOS = ['👍', '✅', '👀', '⚠️'];
+const EMOJIS_RAPIDOS = ['👍', '✅', '😂', '🤦‍♂️', '🧉', '☕', '👀', '🔥', '⚠️'];
 const STATUS_ORKUT = [
   'Na sala do Patrimônio',
   'Em vistoria externa',
