@@ -226,12 +226,12 @@ export function ChatFlutuante() {
     }
   };
 
-  // Considera online se estiver no WebSocket OU teve atividade nos últimos 10 minutos
+  // Considera online se estiver no WebSocket OU teve atividade nos últimos 3 minutos
   const isColegaAtivo = (c: Colega) => {
     if (onlineUsers.some((u) => u.email?.toLowerCase() === c.email?.toLowerCase())) return true;
     if (!c.ultimo_acesso) return false;
     const diffMin = (Date.now() - new Date(c.ultimo_acesso).getTime()) / 60000;
-    return diffMin >= 0 && diffMin <= 10;
+    return diffMin >= 0 && diffMin <= 3;
   };
 
   const textoStatusColega = (c: Colega) => {
