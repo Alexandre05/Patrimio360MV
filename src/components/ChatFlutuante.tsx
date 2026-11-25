@@ -15,6 +15,7 @@ interface MensagemChat {
 interface Colega {
   name: string;
   email: string;
+  ultimo_acesso?: string;
 }
 
 interface UsuarioOnline {
@@ -67,12 +68,24 @@ export function ChatFlutuante() {
   useEffect(() => {
     if (!user) return;
 
+    const registrarBatimento = async () => {
+      if (!emailAtual) return;
+      await supabase
+        .from('users')
+        .update({ ultimo_acesso: new Date().toISOString() })
+        .ilike('email', emailAtual);
+    };
+
     const carregarColegas = async () => {
-      const { data } = await supabase.from('users').select('name, email');
+      const { data } = await supabase.from('users').select('name, email, ultimo_acesso');
       if (data) {
         const filtrados = data
-          .filter((u: any) => u.email && u.email !== emailAtual)
-          .map((u: any) => ({ name: u.name || u.email.split('@')[0], email: u.email }));
+          .filter((u: any) => u.email && u.email.toLowerCase() !== emailAtual.toLowerCase())
+          .map((u: any) => ({
+            name: u.name || u.email.split('@')[0],
+            email: u.email,
+            ultimo_acesso: u.ultimo_acesso,
+          }));
         setColegas(filtrados);
       }
     };
@@ -91,10 +104,16 @@ export function ChatFlutuante() {
       }
     };
 
+    registrarBatimento();
     carregarColegas();
     carregarHistorico();
 
-    // Canal único com Postgres Changes (recados) + Presence (quem está online agora)
+    // Atualiza batimento e lista da equipe a cada 60 segundos
+    const intervalo = setInterval(() => {
+      registrarBatimento();
+      carregarColegas();
+    }, 60000);
+
     const canal = supabase.channel('mural-orkut-patrimonio360', {
       config: {
         presence: {
@@ -150,6 +169,7 @@ export function ChatFlutuante() {
       });
 
     return () => {
+      clearInterval(intervalo);
       supabase.removeChannel(canal);
     };
   }, [user]);
@@ -179,7 +199,6 @@ export function ChatFlutuante() {
       .single();
 
     if (error) {
-      console.error('Erro ao enviar recado:', error);
       setErroEnvio('Falha ao enviar (' + (error.message || 'erro de permissão') + '). Tente novamente.');
     } else {
       setTexto('');
@@ -207,29 +226,45 @@ export function ChatFlutuante() {
     }
   };
 
+  // Considera online se estiver no WebSocket OU teve atividade nos últimos 10 minutos
+  const isColegaAtivo = (c: Colega) => {
+    if (onlineUsers.some((u) => u.email?.toLowerCase() === c.email?.toLowerCase())) return true;
+    if (!c.ultimo_acesso) return false;
+    const diffMin = (Date.now() - new Date(c.ultimo_acesso).getTime()) / 60000;
+    return diffMin >= 0 && diffMin <= 10;
+  };
+
+  const textoStatusColega = (c: Colega) => {
+    if (isColegaAtivo(c)) return 'online';
+    if (!c.ultimo_acesso) return 'offline';
+    const diffMin = Math.floor((Date.now() - new Date(c.ultimo_acesso).getTime()) / 60000);
+    if (diffMin < 60) return `há ${diffMin}m`;
+    const diffH = Math.floor(diffMin / 60);
+    if (diffH < 24) return `há ${diffH}h`;
+    return 'offline';
+  };
+
+  const colegasOnline = colegas.filter(isColegaAtivo);
+  const colegasOffline = colegas.filter((c) => !isColegaAtivo(c));
+  const totalOnline = 1 + colegasOnline.length;
+
   const recadosVisiveis = mensagens.filter((m) => {
     const dest = m.destinatario || 'Todos';
     if (aba === 'geral') return dest === 'Todos';
     return dest !== 'Todos' && (dest === nomeAtual || dest === emailAtual || m.usuario_email === emailAtual);
   });
 
-  const isEmailOnline = (email?: string) =>
-    !!email && onlineUsers.some((u) => u.email === email);
-
-  const totalOnline = onlineUsers.length > 0 ? onlineUsers.length : 1;
-
   return (
     <div className="fixed bottom-5 right-5 z-[9999] flex flex-col items-end">
       {aberto && (
         <div className="mb-3 w-[345px] sm:w-[410px] rounded-2xl bg-white shadow-2xl border border-indigo-200 overflow-hidden flex flex-col">
-          {/* Cabeçalho moderno + nostalgia Orkut */}
           <div className="bg-gradient-to-r from-indigo-700 via-indigo-800 to-slate-900 text-white px-4 py-3 flex items-center justify-between">
             <div>
               <h3 className="text-sm font-bold leading-tight flex items-center gap-2">
                 <span>Mural de Recados</span>
                 <span className="inline-flex items-center gap-1 text-[10px] bg-emerald-500/20 text-emerald-200 border border-emerald-400/30 px-2 py-0.5 rounded-full font-semibold">
                   <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
-                  {totalOnline} online
+                  {totalOnline} ativo{totalOnline > 1 ? 's' : ''}
                 </span>
               </h3>
               <p className="text-[11px] text-indigo-200 mt-0.5">Equipe Patrimônio 360</p>
@@ -248,12 +283,11 @@ export function ChatFlutuante() {
           <div className="bg-indigo-50/90 border-b border-indigo-100 px-3 py-2.5">
             <div className="flex items-center justify-between mb-1.5">
               <span className="text-[10px] font-bold uppercase tracking-wider text-indigo-900/70">
-                Conectados agora ({totalOnline})
+                Em atividade ({totalOnline})
               </span>
               <span className="text-[10px] text-indigo-600">Toque para recado direto</span>
             </div>
             <div className="flex items-center gap-2.5 overflow-x-auto pb-1">
-              {/* Você sempre aparece primeiro */}
               <div className="flex flex-col items-center min-w-[54px]">
                 <div className="relative">
                   <div className="w-9 h-9 rounded-full bg-indigo-600 text-white font-bold text-xs flex items-center justify-center ring-2 ring-white shadow-sm">
@@ -266,61 +300,57 @@ export function ChatFlutuante() {
                 </span>
               </div>
 
-              {/* Colegas online */}
-              {onlineUsers
-                .filter((u) => u.email !== emailAtual)
-                .map((u) => (
-                  <button
-                    key={u.email || u.name}
-                    type="button"
-                    onClick={() => {
-                      setAba('direto');
-                      setDestinatario(u.name);
-                    }}
-                    title={`Enviar recado direto para ${u.name}`}
-                    className="flex flex-col items-center min-w-[54px] group"
-                  >
-                    <div className="relative">
-                      <div className="w-9 h-9 rounded-full bg-slate-800 group-hover:bg-indigo-600 transition-colors text-white font-bold text-xs flex items-center justify-center ring-2 ring-white shadow-sm">
-                        {(u.name || 'C').charAt(0).toUpperCase()}
-                      </div>
-                      <span className="absolute bottom-0 right-0 w-2.5 h-2.5 rounded-full bg-emerald-500 ring-2 ring-white animate-pulse" />
+              {colegasOnline.map((c) => (
+                <button
+                  key={c.email}
+                  type="button"
+                  onClick={() => {
+                    setAba('direto');
+                    setDestinatario(c.name);
+                  }}
+                  title={`${c.name} — em atividade agora`}
+                  className="flex flex-col items-center min-w-[54px] group"
+                >
+                  <div className="relative">
+                    <div className="w-9 h-9 rounded-full bg-slate-800 group-hover:bg-indigo-600 transition-colors text-white font-bold text-xs flex items-center justify-center ring-2 ring-white shadow-sm">
+                      {c.name.charAt(0).toUpperCase()}
                     </div>
-                    <span className="text-[10px] font-medium text-slate-700 group-hover:text-indigo-700 truncate max-w-[54px] mt-1">
-                      {u.name.split(' ')[0]}
-                    </span>
-                  </button>
-                ))}
+                    <span className="absolute bottom-0 right-0 w-2.5 h-2.5 rounded-full bg-emerald-500 ring-2 ring-white animate-pulse" />
+                  </div>
+                  <span className="text-[10px] font-medium text-slate-700 group-hover:text-indigo-700 truncate max-w-[54px] mt-1">
+                    {c.name.split(' ')[0]}
+                  </span>
+                </button>
+              ))}
 
-              {/* Colegas cadastrados que estão offline no momento */}
-              {colegas
-                .filter((c) => !isEmailOnline(c.email))
-                .map((c) => (
-                  <button
-                    key={c.email}
-                    type="button"
-                    onClick={() => {
-                      setAba('direto');
-                      setDestinatario(c.name);
-                    }}
-                    title={`${c.name} (offline — deixar recado)`}
-                    className="flex flex-col items-center min-w-[54px] opacity-55 hover:opacity-100 transition-opacity"
-                  >
-                    <div className="relative">
-                      <div className="w-9 h-9 rounded-full bg-slate-300 text-slate-700 font-bold text-xs flex items-center justify-center ring-2 ring-white">
-                        {c.name.charAt(0).toUpperCase()}
-                      </div>
-                      <span className="absolute bottom-0 right-0 w-2.5 h-2.5 rounded-full bg-slate-400 ring-2 ring-white" />
+              {colegasOffline.map((c) => (
+                <button
+                  key={c.email}
+                  type="button"
+                  onClick={() => {
+                    setAba('direto');
+                    setDestinatario(c.name);
+                  }}
+                  title={`${c.name} (${textoStatusColega(c)})`}
+                  className="flex flex-col items-center min-w-[54px] opacity-60 hover:opacity-100 transition-opacity"
+                >
+                  <div className="relative">
+                    <div className="w-9 h-9 rounded-full bg-slate-300 text-slate-700 font-bold text-xs flex items-center justify-center ring-2 ring-white">
+                      {c.name.charAt(0).toUpperCase()}
                     </div>
-                    <span className="text-[10px] text-slate-500 truncate max-w-[54px] mt-1">
-                      {c.name.split(' ')[0]}
-                    </span>
-                  </button>
-                ))}
+                    <span className="absolute bottom-0 right-0 w-2.5 h-2.5 rounded-full bg-slate-400 ring-2 ring-white" />
+                  </div>
+                  <span className="text-[10px] text-slate-500 truncate max-w-[54px] mt-1">
+                    {c.name.split(' ')[0]}
+                  </span>
+                  <span className="text-[8px] text-slate-400 leading-none">
+                    {textoStatusColega(c)}
+                  </span>
+                </button>
+              ))}
             </div>
           </div>
 
-          {/* Abas Mural Geral vs Recados Diretos */}
           <div className="flex border-b border-slate-200 bg-white text-xs font-semibold">
             <button
               type="button"
@@ -351,7 +381,6 @@ export function ChatFlutuante() {
             </button>
           </div>
 
-          {/* Seletor de colega na aba Recados Diretos */}
           {aba === 'direto' && (
             <div className="px-3 py-2 bg-slate-100 border-b border-slate-200 flex items-center gap-2 text-xs">
               <span className="text-slate-600 font-medium">Para:</span>
@@ -365,7 +394,7 @@ export function ChatFlutuante() {
                 >
                   {colegas.map((c) => (
                     <option key={c.email} value={c.name}>
-                      {c.name} {isEmailOnline(c.email) ? '(online)' : '(offline)'}
+                      {c.name} ({textoStatusColega(c)})
                     </option>
                   ))}
                 </select>
@@ -373,13 +402,12 @@ export function ChatFlutuante() {
             </div>
           )}
 
-          {/* Lista de recados (Scraps) */}
           <div className="h-72 overflow-y-auto p-3 space-y-3 bg-slate-50">
             {recadosVisiveis.length === 0 ? (
               <div className="text-center my-10 px-4">
                 <p className="text-xs text-slate-500 font-medium">Nenhum recado nesta aba ainda.</p>
                 <p className="text-[11px] text-slate-400 mt-1">
-                  Deixe um recado abaixo — quando um colega abrir o sistema, aparecerá "Visto por..." aqui!
+                  Deixe um recado abaixo — assim que a equipe sincronizar ou abrir o app, receberá aqui!
                 </p>
               </div>
             ) : (
@@ -387,7 +415,8 @@ export function ChatFlutuante() {
                 const ehMeu = emailAtual && m.usuario_email === emailAtual;
                 const leitores = (m.visto_por || []).filter((n) => n !== m.usuario_nome);
                 const inicial = (m.usuario_nome || 'S').charAt(0).toUpperCase();
-                const autorOnline = ehMeu || isEmailOnline(m.usuario_email);
+                const colegaAutor = colegas.find((c) => c.email?.toLowerCase() === m.usuario_email?.toLowerCase());
+                const autorOnline = ehMeu || (colegaAutor ? isColegaAtivo(colegaAutor) : false);
 
                 return (
                   <div
@@ -480,7 +509,6 @@ export function ChatFlutuante() {
         </div>
       )}
 
-      {/* Botão flutuante com contador de quem está online */}
       <button
         type="button"
         onClick={() => setAberto((v) => !v)}
@@ -489,7 +517,7 @@ export function ChatFlutuante() {
         <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse" />
         <span className="hidden sm:inline">Recados</span>
         <span className="text-xs bg-indigo-800/80 px-2 py-0.5 rounded-full text-indigo-100">
-          {totalOnline} online
+          {totalOnline} ativo{totalOnline > 1 ? 's' : ''}
         </span>
         {naoLidas > 0 && (
           <span className="absolute -top-1.5 -right-1.5 bg-rose-600 text-white text-[11px] font-bold w-5 h-5 rounded-full flex items-center justify-center shadow">
