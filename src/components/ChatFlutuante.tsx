@@ -806,6 +806,12 @@ export function ChatFlutuante() {
               type="text"
               value={texto}
               onChange={(e) => notificarDigitando(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && !e.shiftKey) {
+                  e.preventDefault();
+                  enviarRecado(e as any);
+                }
+              }}
               placeholder={aba === 'geral' ? 'Ex: Verificar #1045 no almoxarifado...' : `Mensagem para ${destinatario}...`}
               className="flex-1 text-sm px-3 py-2 rounded-xl border border-slate-300 focus:outline-none focus:border-indigo-500 text-slate-800"
             />
