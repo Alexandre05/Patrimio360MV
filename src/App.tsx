@@ -7,6 +7,7 @@ import React, { useState, useEffect } from 'react';
 import { AuthProvider, useAuth } from './lib/AuthContext';
 import { ToastProvider, useToast } from './lib/ToastContext';
 import { Dashboard } from './components/Dashboard';
+import { ChatFlutuante } from './components/ChatFlutuante';
 import { Card, Button, Input, Alert } from './components/UI';
 import { Building2, LogIn, ShieldCheck, UserPlus, UserCheck, Search, Mail, Key, ArrowRight, AlertCircle, CheckCircle2 } from 'lucide-react';
 import { seedDatabase } from './lib/seed';
@@ -582,7 +583,7 @@ function Main() {
 
   if (isFirstUser) return <SetupScreen />;
 
-  return user ? <Dashboard /> : <LoginScreen />;
+  return user ? (<><Dashboard /><ChatFlutuante /></>) : <LoginScreen />;
 }
 
 export default function App() {
