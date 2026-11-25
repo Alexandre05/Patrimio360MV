@@ -46,6 +46,7 @@ export function ChatFlutuante() {
   const [enviando, setEnviando] = useState(false);
   const [erroEnvio, setErroEnvio] = useState<string | null>(null);
   const [naoLidas, setNaoLidas] = useState(0);
+  const [previewToast, setPreviewToast] = useState<MensagemChat | null>(null);
   const [meuStatus, setMeuStatus] = useState<string>(STATUS_ORKUT[0]);
   const [digitandoPor, setDigitandoPor] = useState<string | null>(null);
   const [somAtivo, setSomAtivo] = useState<boolean>(() => {
@@ -63,6 +64,7 @@ export function ChatFlutuante() {
   const canalRef = useRef<any>(null);
   const ultimoBroadcastDigitando = useRef<number>(0);
   const timerDigitando = useRef<any>(null);
+  const timerToast = useRef<any>(null);
 
   const nomeAtual = (user as any)?.name || (user as any)?.nome || (user as any)?.email?.split('@')[0] || 'Servidor';
   const emailAtual = (user as any)?.email || '';
@@ -74,12 +76,32 @@ export function ChatFlutuante() {
     } catch {}
   }, [somAtivo]);
 
-  // Bipe suave via Web Audio API + vibração curta no celular (zero arquivos MP3, zero banco)
+  // Atualiza o título da aba do navegador quando houver mensagens não lidas
+  useEffect(() => {
+    const tituloOriginal = 'Patrimônio 360';
+    if (naoLidas <= 0 || aberto) {
+      document.title = tituloOriginal;
+      return;
+    }
+    let alterna = false;
+    const interval = setInterval(() => {
+      alterna = !alterna;
+      document.title = alterna
+        ? `(${naoLidas}) Nova mensagem! • Patrimônio 360`
+        : tituloOriginal;
+    }, 1200);
+
+    return () => {
+      clearInterval(interval);
+      document.title = tituloOriginal;
+    };
+  }, [naoLidas, aberto]);
+
   const tocarAlertaSuave = () => {
     if (!somAtivoRef.current) return;
     try {
       if (typeof navigator !== 'undefined' && 'vibrate' in navigator) {
-        navigator.vibrate(150);
+        navigator.vibrate([150, 80, 150]);
       }
       const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
       if (AudioCtx) {
@@ -87,14 +109,14 @@ export function ChatFlutuante() {
         const osc = ctx.createOscillator();
         const gain = ctx.createGain();
         osc.type = 'sine';
-        osc.frequency.setValueAtTime(587.33, ctx.currentTime); // Ré5 suave
-        osc.frequency.exponentialRampToValueAtTime(880, ctx.currentTime + 0.12); // Lá5
-        gain.gain.setValueAtTime(0.08, ctx.currentTime);
-        gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.25);
+        osc.frequency.setValueAtTime(587.33, ctx.currentTime);
+        osc.frequency.exponentialRampToValueAtTime(880, ctx.currentTime + 0.12);
+        gain.gain.setValueAtTime(0.09, ctx.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.28);
         osc.connect(gain);
         gain.connect(ctx.destination);
         osc.start();
-        osc.stop(ctx.currentTime + 0.25);
+        osc.stop(ctx.currentTime + 0.28);
       }
     } catch {}
   };
@@ -134,6 +156,7 @@ export function ChatFlutuante() {
     abaRef.current = aba;
     if (aberto) {
       setNaoLidas(0);
+      setPreviewToast(null);
       marcarComoVistos(mensagens, aba);
       setTimeout(() => fimRef.current?.scrollIntoView({ behavior: 'smooth' }), 80);
     }
@@ -176,7 +199,6 @@ export function ChatFlutuante() {
     };
 
     const carregarHistorico = async () => {
-      // Manutenção automática: remove recados com +30 dias ou além dos 100 mais recentes
       await supabase.rpc('limpar_recados_antigos');
 
       const { data, error } = await supabase
@@ -188,7 +210,20 @@ export function ChatFlutuante() {
       if (!error && data) {
         const ordenadas = data.reverse();
         setMensagens(ordenadas);
-        if (abertoRef.current) marcarComoVistos(ordenadas, abaRef.current);
+
+        // Verifica se já existem recados não lidos ao abrir o app
+        const naoLidasIniciais = ordenadas.filter(
+          (m: MensagemChat) =>
+            m.usuario_email !== emailAtual &&
+            !(m.visto_por || []).includes(nomeAtual) &&
+            ((m.destinatario || 'Todos') === 'Todos' || m.destinatario === nomeAtual || m.destinatario === emailAtual)
+        );
+        if (!abertoRef.current && naoLidasIniciais.length > 0) {
+          setNaoLidas(naoLidasIniciais.length);
+          setPreviewToast(naoLidasIniciais[naoLidasIniciais.length - 1]);
+        } else if (abertoRef.current) {
+          marcarComoVistos(ordenadas, abaRef.current);
+        }
       }
     };
 
@@ -220,11 +255,19 @@ export function ChatFlutuante() {
             setDigitandoPor(null);
             setMensagens((prev) => {
               const atualizada = prev.some((m) => m.id === nova.id) ? prev : [...prev, nova];
+              const ehParaMim =
+                (nova.destinatario || 'Todos') === 'Todos' ||
+                nova.destinatario === nomeAtual ||
+                nova.destinatario === emailAtual;
+
               if (abertoRef.current) {
                 marcarComoVistos([nova], abaRef.current);
-              } else if (nova.usuario_email !== emailAtual) {
+              } else if (nova.usuario_email !== emailAtual && ehParaMim) {
                 setNaoLidas((n) => n + 1);
+                setPreviewToast(nova);
                 tocarAlertaSuave();
+                if (timerToast.current) clearTimeout(timerToast.current);
+                timerToast.current = setTimeout(() => setPreviewToast(null), 8000);
               }
               return atualizada;
             });
@@ -272,11 +315,23 @@ export function ChatFlutuante() {
     return () => {
       clearInterval(intervalo);
       if (timerDigitando.current) clearTimeout(timerDigitando.current);
+      if (timerToast.current) clearTimeout(timerToast.current);
       supabase.removeChannel(canal);
     };
   }, [user]);
 
   if (!user) return null;
+
+  const abrirPeloToast = () => {
+    if (previewToast?.destinatario && previewToast.destinatario !== 'Todos') {
+      setAba('direto');
+      setDestinatario(previewToast.usuario_nome);
+    } else {
+      setAba('geral');
+    }
+    setPreviewToast(null);
+    setAberto(true);
+  };
 
   const notificarDigitando = (valor: string) => {
     setTexto(valor);
@@ -415,9 +470,43 @@ export function ChatFlutuante() {
 
   return (
     <div className="fixed bottom-5 right-5 z-[9999] flex flex-col items-end">
+      {/* Cartão Toast flutuante quando chega nova mensagem com o chat fechado */}
+      {!aberto && previewToast && (
+        <div
+          onClick={abrirPeloToast}
+          role="button"
+          tabIndex={0}
+          className="mb-2.5 max-w-[300px] sm:max-w-[340px] cursor-pointer bg-slate-900 text-white border-l-4 border-amber-400 rounded-xl shadow-2xl px-3.5 py-2.5 transition-all hover:scale-[1.02]"
+        >
+          <div className="flex items-center justify-between gap-2 mb-0.5">
+            <span className="text-[10px] font-bold uppercase tracking-wider text-amber-300 flex items-center gap-1">
+              <span className="w-2 h-2 rounded-full bg-amber-400 animate-ping" />
+              Nova mensagem • {previewToast.usuario_nome.split(' ')[0]}
+            </span>
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                setPreviewToast(null);
+              }}
+              className="text-slate-400 hover:text-white text-xs leading-none px-1"
+              aria-label="Fechar aviso"
+            >
+              ✕
+            </button>
+          </div>
+          <p className="text-xs text-slate-100 line-clamp-2 break-words">
+            {previewToast.mensagem}
+          </p>
+          <span className="block text-[10px] text-indigo-300 mt-1 font-medium">
+            Toque para abrir e responder →
+          </span>
+        </div>
+      )}
+
       {aberto && (
         <div className="mb-3 w-[350px] sm:w-[420px] rounded-2xl bg-white shadow-2xl border border-indigo-200 overflow-hidden flex flex-col">
-          {/* Cabeçalho com botão de mudo e status Orkut */}
+          {/* Cabeçalho */}
           <div className="bg-gradient-to-r from-indigo-700 via-indigo-800 to-slate-900 text-white px-4 py-3">
             <div className="flex items-center justify-between">
               <h3 className="text-sm font-bold leading-tight flex items-center gap-2">
@@ -731,20 +820,32 @@ export function ChatFlutuante() {
         </div>
       )}
 
+      {/* Botão flutuante: muda de cor e pulsa "Nova mensagem!" quando há recado não lido */}
       <button
         type="button"
         onClick={() => setAberto((v) => !v)}
-        className="relative flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white font-semibold text-sm px-4 py-3 rounded-full shadow-lg transition-transform active:scale-95"
+        className={`relative flex items-center gap-2 font-semibold text-sm px-4 py-3 rounded-full shadow-lg transition-all active:scale-95 ${
+          naoLidas > 0 && !aberto
+            ? 'bg-amber-500 hover:bg-amber-600 text-slate-950 ring-4 ring-amber-300/60 animate-bounce'
+            : 'bg-indigo-600 hover:bg-indigo-700 text-white'
+        }`}
       >
-        <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse" />
-        <span className="hidden sm:inline">Recados</span>
-        <span className="text-xs bg-indigo-800/80 px-2 py-0.5 rounded-full text-indigo-100">
-          {totalOnline} online
-        </span>
-        {naoLidas > 0 && (
-          <span className="absolute -top-1.5 -right-1.5 bg-rose-600 text-white text-[11px] font-bold w-5 h-5 rounded-full flex items-center justify-center shadow">
-            {naoLidas}
-          </span>
+        {naoLidas > 0 && !aberto ? (
+          <>
+            <span className="text-base leading-none">💬</span>
+            <span>Nova mensagem!</span>
+            <span className="text-xs bg-slate-900 text-amber-300 font-bold px-2 py-0.5 rounded-full">
+              {naoLidas}
+            </span>
+          </>
+        ) : (
+          <>
+            <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse" />
+            <span className="hidden sm:inline">Recados</span>
+            <span className="text-xs bg-indigo-800/80 px-2 py-0.5 rounded-full text-indigo-100">
+              {totalOnline} online
+            </span>
+          </>
         )}
       </button>
     </div>
