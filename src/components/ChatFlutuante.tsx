@@ -9,6 +9,7 @@ interface MensagemChat {
   destinatario?: string;
   mensagem: string;
   visto_por?: string[];
+  reacoes?: Record<string, string[]>;
   created_at: string;
 }
 
@@ -21,8 +22,17 @@ interface Colega {
 interface UsuarioOnline {
   name: string;
   email: string;
+  status_msg?: string;
   online_at: string;
 }
+
+const EMOJIS_RAPIDOS = ['👍', '✅', '👀', '⚠️'];
+const STATUS_ORKUT = [
+  'Na sala do Patrimônio',
+  'Em vistoria externa',
+  'Conferindo plaquetas',
+  'Disponível',
+];
 
 export function ChatFlutuante() {
   const { user } = useAuth();
@@ -36,14 +46,19 @@ export function ChatFlutuante() {
   const [enviando, setEnviando] = useState(false);
   const [erroEnvio, setErroEnvio] = useState<string | null>(null);
   const [naoLidas, setNaoLidas] = useState(0);
+  const [meuStatus, setMeuStatus] = useState<string>(STATUS_ORKUT[0]);
+  const [digitandoPor, setDigitandoPor] = useState<string | null>(null);
+
   const fimRef = useRef<HTMLDivElement | null>(null);
   const abertoRef = useRef(aberto);
   const abaRef = useRef(aba);
+  const canalRef = useRef<any>(null);
+  const ultimoBroadcastDigitando = useRef<number>(0);
+  const timerDigitando = useRef<any>(null);
 
   const nomeAtual = (user as any)?.name || (user as any)?.nome || (user as any)?.email?.split('@')[0] || 'Servidor';
   const emailAtual = (user as any)?.email || '';
 
-  // Marca em lote como lidos apenas os recados da aba que o usuário realmente está vendo
   const marcarComoVistos = async (lista: MensagemChat[], abaAtiva: 'geral' | 'direto') => {
     if (!nomeAtual || !abertoRef.current) return;
 
@@ -60,7 +75,6 @@ export function ChatFlutuante() {
 
     if (pendentesIds.length === 0) return;
 
-    // Atualiza visualmente na hora (otimista) e grava de forma atômica no banco
     setMensagens((prev) =>
       prev.map((m) =>
         pendentesIds.includes(m.id)
@@ -84,6 +98,18 @@ export function ChatFlutuante() {
       setTimeout(() => fimRef.current?.scrollIntoView({ behavior: 'smooth' }), 80);
     }
   }, [aberto, aba]);
+
+  // Atualiza presença quando o usuário muda a frase de status estilo Orkut
+  useEffect(() => {
+    if (canalRef.current && user) {
+      canalRef.current.track({
+        name: nomeAtual,
+        email: emailAtual,
+        status_msg: meuStatus,
+        online_at: new Date().toISOString(),
+      });
+    }
+  }, [meuStatus]);
 
   useEffect(() => {
     if (!user) return;
@@ -140,6 +166,7 @@ export function ChatFlutuante() {
         },
       },
     });
+    canalRef.current = canal;
 
     canal
       .on(
@@ -148,6 +175,7 @@ export function ChatFlutuante() {
         (payload) => {
           if (payload.eventType === 'INSERT') {
             const nova = payload.new as MensagemChat;
+            setDigitandoPor(null);
             setMensagens((prev) => {
               const atualizada = prev.some((m) => m.id === nova.id) ? prev : [...prev, nova];
               if (abertoRef.current) {
@@ -167,6 +195,13 @@ export function ChatFlutuante() {
           }
         }
       )
+      .on('broadcast', { event: 'digitando' }, ({ payload }) => {
+        if (payload?.email && payload.email !== emailAtual) {
+          setDigitandoPor(payload.nome || 'Alguém');
+          if (timerDigitando.current) clearTimeout(timerDigitando.current);
+          timerDigitando.current = setTimeout(() => setDigitandoPor(null), 2800);
+        }
+      })
       .on('presence', { event: 'sync' }, () => {
         const state = canal.presenceState<UsuarioOnline>();
         const listaAtivos: UsuarioOnline[] = [];
@@ -185,6 +220,7 @@ export function ChatFlutuante() {
           await canal.track({
             name: nomeAtual,
             email: emailAtual,
+            status_msg: meuStatus,
             online_at: new Date().toISOString(),
           });
         }
@@ -192,11 +228,50 @@ export function ChatFlutuante() {
 
     return () => {
       clearInterval(intervalo);
+      if (timerDigitando.current) clearTimeout(timerDigitando.current);
       supabase.removeChannel(canal);
     };
   }, [user]);
 
   if (!user) return null;
+
+  const notificarDigitando = (valor: string) => {
+    setTexto(valor);
+    const agora = Date.now();
+    if (canalRef.current && valor.trim() && agora - ultimoBroadcastDigitando.current > 1800) {
+      ultimoBroadcastDigitando.current = agora;
+      canalRef.current.send({
+        type: 'broadcast',
+        event: 'digitando',
+        payload: { nome: nomeAtual.split(' ')[0], email: emailAtual },
+      });
+    }
+  };
+
+  const alternarReacao = async (id: string, emoji: string) => {
+    // Atualização otimista imediata na tela
+    setMensagens((prev) =>
+      prev.map((m) => {
+        if (m.id !== id) return m;
+        const atuais = { ...(m.reacoes || {}) };
+        const lista = [...(atuais[emoji] || [])];
+        if (lista.includes(nomeAtual)) {
+          const filtrada = lista.filter((u) => u !== nomeAtual);
+          if (filtrada.length === 0) delete atuais[emoji];
+          else atuais[emoji] = filtrada;
+        } else {
+          atuais[emoji] = [...lista, nomeAtual];
+        }
+        return { ...m, reacoes: atuais };
+      })
+    );
+
+    await supabase.rpc('alternar_reacao_recado', {
+      p_id: id,
+      p_emoji: emoji,
+      p_usuario: nomeAtual,
+    });
+  };
 
   const enviarRecado = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -216,6 +291,7 @@ export function ChatFlutuante() {
         destinatario: destinoFinal,
         mensagem: conteudo,
         visto_por: [],
+        reacoes: {},
       })
       .select()
       .single();
@@ -245,11 +321,35 @@ export function ChatFlutuante() {
     }
   };
 
+  // Destaca números de tombamento digitados com # (ex: #1234)
+  const renderizarTextoComPlaquetas = (conteudo: string) => {
+    const partes = conteudo.split(/(#\d+)/g);
+    return partes.map((parte, idx) => {
+      if (/^#\d+$/.test(parte)) {
+        return (
+          <span
+            key={idx}
+            className="inline-block bg-amber-100 text-amber-900 border border-amber-300 font-bold text-[11px] px-1.5 py-0.2 rounded mx-0.5"
+            title="Número de tombamento / plaqueta"
+          >
+            🏷️ {parte}
+          </span>
+        );
+      }
+      return <React.Fragment key={idx}>{parte}</React.Fragment>;
+    });
+  };
+
   const isColegaAtivo = (c: Colega) => {
     if (onlineUsers.some((u) => u.email?.toLowerCase() === c.email?.toLowerCase())) return true;
     if (!c.ultimo_acesso) return false;
     const diffMin = (Date.now() - new Date(c.ultimo_acesso).getTime()) / 60000;
     return diffMin >= 0 && diffMin <= 3;
+  };
+
+  const getStatusOnlineColega = (email: string) => {
+    const u = onlineUsers.find((item) => item.email?.toLowerCase() === email?.toLowerCase());
+    return u?.status_msg || 'Online agora';
   };
 
   const textoStatusColega = (c: Colega) => {
@@ -275,9 +375,10 @@ export function ChatFlutuante() {
   return (
     <div className="fixed bottom-5 right-5 z-[9999] flex flex-col items-end">
       {aberto && (
-        <div className="mb-3 w-[345px] sm:w-[410px] rounded-2xl bg-white shadow-2xl border border-indigo-200 overflow-hidden flex flex-col">
-          <div className="bg-gradient-to-r from-indigo-700 via-indigo-800 to-slate-900 text-white px-4 py-3 flex items-center justify-between">
-            <div>
+        <div className="mb-3 w-[350px] sm:w-[420px] rounded-2xl bg-white shadow-2xl border border-indigo-200 overflow-hidden flex flex-col">
+          {/* Cabeçalho com seletor rápido de status estilo Orkut */}
+          <div className="bg-gradient-to-r from-indigo-700 via-indigo-800 to-slate-900 text-white px-4 py-3">
+            <div className="flex items-center justify-between">
               <h3 className="text-sm font-bold leading-tight flex items-center gap-2">
                 <span>Mural de Recados</span>
                 <span className="inline-flex items-center gap-1 text-[10px] bg-emerald-500/20 text-emerald-200 border border-emerald-400/30 px-2 py-0.5 rounded-full font-semibold">
@@ -285,35 +386,50 @@ export function ChatFlutuante() {
                   {totalOnline} online
                 </span>
               </h3>
-              <p className="text-[11px] text-indigo-200 mt-0.5">Equipe Patrimônio 360</p>
+              <button
+                type="button"
+                onClick={() => setAberto(false)}
+                className="text-indigo-200 hover:text-white text-lg leading-none px-2 py-1 rounded"
+                aria-label="Fechar mural"
+              >
+                ✕
+              </button>
             </div>
-            <button
-              type="button"
-              onClick={() => setAberto(false)}
-              className="text-indigo-200 hover:text-white text-lg leading-none px-2 py-1 rounded"
-              aria-label="Fechar mural"
-            >
-              ✕
-            </button>
+
+            {/* Frase de status do próprio usuário (só na memória Realtime) */}
+            <div className="mt-1.5 flex items-center gap-1.5 text-[11px] text-indigo-200">
+              <span>Seu status:</span>
+              <select
+                value={meuStatus}
+                onChange={(e) => setMeuStatus(e.target.value)}
+                className="bg-indigo-950/60 text-white border border-indigo-400/30 rounded-md px-1.5 py-0.5 text-[11px] focus:outline-none"
+              >
+                {STATUS_ORKUT.map((st) => (
+                  <option key={st} value={st} className="bg-slate-900 text-white">
+                    {st}
+                  </option>
+                ))}
+              </select>
+            </div>
           </div>
 
           {/* Barra de membros conectados */}
-          <div className="bg-indigo-50/90 border-b border-indigo-100 px-3 py-2.5">
+          <div className="bg-indigo-50/90 border-b border-indigo-100 px-3 py-2">
             <div className="flex items-center justify-between mb-1.5">
               <span className="text-[10px] font-bold uppercase tracking-wider text-indigo-900/70">
-                Conectados agora ({totalOnline})
+                Equipe ({totalOnline} online)
               </span>
-              <span className="text-[10px] text-indigo-600">Toque para recado direto</span>
+              <span className="text-[10px] text-indigo-600">Dica: use #número para plaqueta</span>
             </div>
             <div className="flex items-center gap-2.5 overflow-x-auto pb-1">
-              <div className="flex flex-col items-center min-w-[54px]">
+              <div className="flex flex-col items-center min-w-[58px]" title={`Você: ${meuStatus}`}>
                 <div className="relative">
                   <div className="w-9 h-9 rounded-full bg-indigo-600 text-white font-bold text-xs flex items-center justify-center ring-2 ring-white shadow-sm">
                     {nomeAtual.charAt(0).toUpperCase()}
                   </div>
                   <span className="absolute bottom-0 right-0 w-2.5 h-2.5 rounded-full bg-emerald-500 ring-2 ring-white" />
                 </div>
-                <span className="text-[10px] font-semibold text-slate-700 truncate max-w-[54px] mt-1">
+                <span className="text-[10px] font-semibold text-slate-700 truncate max-w-[58px] mt-1">
                   Você
                 </span>
               </div>
@@ -326,8 +442,8 @@ export function ChatFlutuante() {
                     setAba('direto');
                     setDestinatario(c.name);
                   }}
-                  title={`${c.name} — online agora`}
-                  className="flex flex-col items-center min-w-[54px] group"
+                  title={`${c.name} — ${getStatusOnlineColega(c.email)}`}
+                  className="flex flex-col items-center min-w-[58px] group"
                 >
                   <div className="relative">
                     <div className="w-9 h-9 rounded-full bg-slate-800 group-hover:bg-indigo-600 transition-colors text-white font-bold text-xs flex items-center justify-center ring-2 ring-white shadow-sm">
@@ -335,8 +451,11 @@ export function ChatFlutuante() {
                     </div>
                     <span className="absolute bottom-0 right-0 w-2.5 h-2.5 rounded-full bg-emerald-500 ring-2 ring-white animate-pulse" />
                   </div>
-                  <span className="text-[10px] font-medium text-slate-700 group-hover:text-indigo-700 truncate max-w-[54px] mt-1">
+                  <span className="text-[10px] font-medium text-slate-700 group-hover:text-indigo-700 truncate max-w-[58px] mt-1">
                     {c.name.split(' ')[0]}
+                  </span>
+                  <span className="text-[8px] text-emerald-700 truncate max-w-[58px] leading-none">
+                    {getStatusOnlineColega(c.email)}
                   </span>
                 </button>
               ))}
@@ -350,7 +469,7 @@ export function ChatFlutuante() {
                     setDestinatario(c.name);
                   }}
                   title={`${c.name} (${textoStatusColega(c)})`}
-                  className="flex flex-col items-center min-w-[54px] opacity-60 hover:opacity-100 transition-opacity"
+                  className="flex flex-col items-center min-w-[58px] opacity-60 hover:opacity-100 transition-opacity"
                 >
                   <div className="relative">
                     <div className="w-9 h-9 rounded-full bg-slate-300 text-slate-700 font-bold text-xs flex items-center justify-center ring-2 ring-white">
@@ -358,7 +477,7 @@ export function ChatFlutuante() {
                     </div>
                     <span className="absolute bottom-0 right-0 w-2.5 h-2.5 rounded-full bg-slate-400 ring-2 ring-white" />
                   </div>
-                  <span className="text-[10px] text-slate-500 truncate max-w-[54px] mt-1">
+                  <span className="text-[10px] text-slate-500 truncate max-w-[58px] mt-1">
                     {c.name.split(' ')[0]}
                   </span>
                   <span className="text-[8px] text-slate-400 leading-none">
@@ -373,7 +492,7 @@ export function ChatFlutuante() {
             <button
               type="button"
               onClick={() => { setAba('geral'); setDestinatario('Todos'); }}
-              className={`flex-1 py-2.5 text-center transition-colors ${
+              className={`flex-1 py-2 text-center transition-colors ${
                 aba === 'geral'
                   ? 'text-indigo-700 border-b-2 border-indigo-600 bg-indigo-50/30'
                   : 'text-slate-500 hover:text-indigo-600'
@@ -389,7 +508,7 @@ export function ChatFlutuante() {
                   setDestinatario(colegas[0].name);
                 }
               }}
-              className={`flex-1 py-2.5 text-center transition-colors ${
+              className={`flex-1 py-2 text-center transition-colors ${
                 aba === 'direto'
                   ? 'text-indigo-700 border-b-2 border-indigo-600 bg-indigo-50/30'
                   : 'text-slate-500 hover:text-indigo-600'
@@ -420,13 +539,13 @@ export function ChatFlutuante() {
             </div>
           )}
 
-          {/* Lista de mensagens com tiques estilo WhatsApp */}
-          <div className="h-72 overflow-y-auto p-3 space-y-2.5 bg-slate-100">
+          {/* Lista de mensagens com reações + plaquetas # + tiques estilo WhatsApp */}
+          <div className="h-72 overflow-y-auto p-3 space-y-3 bg-slate-100">
             {recadosVisiveis.length === 0 ? (
               <div className="text-center my-10 px-4">
                 <p className="text-xs text-slate-500 font-medium">Nenhum recado nesta aba ainda.</p>
                 <p className="text-[11px] text-slate-400 mt-1">
-                  Deixe um recado abaixo — os tiques ficarão azuis assim que for lido!
+                  Ex: "Conferir plaqueta #4582 na sala 03"
                 </p>
               </div>
             ) : (
@@ -434,11 +553,12 @@ export function ChatFlutuante() {
                 const ehMeu = emailAtual && m.usuario_email === emailAtual;
                 const leitores = (m.visto_por || []).filter((n) => n !== m.usuario_nome);
                 const foiLido = leitores.length > 0;
+                const reacoes = m.reacoes || {};
 
                 return (
                   <div
                     key={m.id}
-                    className={`flex flex-col max-w-[85%] ${ehMeu ? 'ml-auto items-end' : 'mr-auto items-start'}`}
+                    className={`flex flex-col max-w-[88%] ${ehMeu ? 'ml-auto items-end' : 'mr-auto items-start'}`}
                   >
                     <div
                       className={`w-full px-3 py-2 rounded-2xl shadow-sm border ${
@@ -447,7 +567,6 @@ export function ChatFlutuante() {
                           : 'bg-white border-slate-200 text-slate-800 rounded-bl-sm'
                       }`}
                     >
-                      {/* Cabeçalho do balão */}
                       <div className="flex items-center justify-between gap-2 mb-0.5">
                         <span className="text-[11px] font-bold text-indigo-700">
                           {ehMeu ? 'Você' : m.usuario_nome}
@@ -467,29 +586,56 @@ export function ChatFlutuante() {
                         )}
                       </div>
 
-                      {/* Texto da mensagem */}
                       <p className="text-xs sm:text-sm whitespace-pre-wrap break-words leading-snug">
-                        {m.mensagem}
+                        {renderizarTextoComPlaquetas(m.mensagem)}
                       </p>
 
-                      {/* Rodapé estilo WhatsApp: hora + tiques (✓ cinza = entregue | ✓✓ azul = lido) */}
-                      <div className="mt-1 flex items-center justify-end gap-1.5 text-[10px]">
-                        {ehMeu && foiLido && (
-                          <span className="text-slate-500 truncate max-w-[170px]" title={`Lido por: ${leitores.join(', ')}`}>
-                            Lido por {leitores.map((n) => n.split(' ')[0]).join(', ')}
-                          </span>
-                        )}
-                        <span className="text-slate-400">{formatarHora(m.created_at)}</span>
-                        {ehMeu && (
-                          <span
-                            className={`font-extrabold tracking-tighter text-xs ${
-                              foiLido ? 'text-sky-500' : 'text-slate-400'
-                            }`}
-                            title={foiLido ? `Lido por: ${leitores.join(', ')}` : 'Entregue'}
-                          >
-                            {foiLido ? '✓✓' : '✓'}
-                          </span>
-                        )}
+                      {/* Reações já marcadas + botões rápidos de reação */}
+                      <div className="mt-1.5 flex flex-wrap items-center justify-between gap-1">
+                        <div className="flex items-center gap-1">
+                          {EMOJIS_RAPIDOS.map((emoji) => {
+                            const quemReagiu = reacoes[emoji] || [];
+                            const euReagi = quemReagiu.includes(nomeAtual);
+                            return (
+                              <button
+                                key={emoji}
+                                type="button"
+                                onClick={() => alternarReacao(m.id, emoji)}
+                                title={quemReagiu.length > 0 ? `${emoji} por: ${quemReagiu.join(', ')}` : `Reagir com ${emoji}`}
+                                className={`text-[11px] px-1.5 py-0.5 rounded-full border transition-all ${
+                                  euReagi
+                                    ? 'bg-indigo-100 border-indigo-400 text-indigo-900 font-bold'
+                                    : quemReagiu.length > 0
+                                    ? 'bg-slate-100 border-slate-300 text-slate-700'
+                                    : 'border-transparent opacity-45 hover:opacity-100 hover:bg-slate-100'
+                                }`}
+                              >
+                                {emoji}
+                                {quemReagiu.length > 0 && <span className="ml-0.5 text-[10px]">{quemReagiu.length}</span>}
+                              </button>
+                            );
+                          })}
+                        </div>
+
+                        {/* Hora + tiques estilo WhatsApp */}
+                        <div className="flex items-center gap-1 text-[10px]">
+                          {ehMeu && foiLido && (
+                            <span className="text-slate-500 truncate max-w-[115px]" title={`Lido por: ${leitores.join(', ')}`}>
+                              Lido por {leitores.map((n) => n.split(' ')[0]).join(', ')}
+                            </span>
+                          )}
+                          <span className="text-slate-400">{formatarHora(m.created_at)}</span>
+                          {ehMeu && (
+                            <span
+                              className={`font-extrabold tracking-tighter text-xs ${
+                                foiLido ? 'text-sky-500' : 'text-slate-400'
+                              }`}
+                              title={foiLido ? `Lido por: ${leitores.join(', ')}` : 'Entregue'}
+                            >
+                              {foiLido ? '✓✓' : '✓'}
+                            </span>
+                          )}
+                        </div>
                       </div>
                     </div>
                   </div>
@@ -498,6 +644,13 @@ export function ChatFlutuante() {
             )}
             <div ref={fimRef} />
           </div>
+
+          {/* Indicador "Fulano está digitando..." (zero custo de banco) */}
+          {digitandoPor && (
+            <div className="px-3 py-1 bg-indigo-50 border-t border-indigo-100 text-[11px] text-indigo-700 font-medium animate-pulse">
+              ✍️ {digitandoPor} está digitando...
+            </div>
+          )}
 
           {erroEnvio && (
             <div className="px-3 py-1.5 bg-rose-50 border-t border-rose-200 text-[11px] text-rose-700">
@@ -509,8 +662,8 @@ export function ChatFlutuante() {
             <input
               type="text"
               value={texto}
-              onChange={(e) => setTexto(e.target.value)}
-              placeholder={aba === 'geral' ? 'Escreva para todos...' : `Mensagem para ${destinatario}...`}
+              onChange={(e) => notificarDigitando(e.target.value)}
+              placeholder={aba === 'geral' ? 'Ex: Verificar #1045 no almoxarifado...' : `Mensagem para ${destinatario}...`}
               className="flex-1 text-sm px-3 py-2 rounded-xl border border-slate-300 focus:outline-none focus:border-indigo-500 text-slate-800"
             />
             <button
