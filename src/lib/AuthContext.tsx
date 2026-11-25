@@ -4,7 +4,7 @@ import { User, db as localDb } from './db';
 import { auth, googleProvider } from './firebase';
 import { 
   onAuthStateChanged, 
-  signInWithPopup, 
+  signInWithPopup, signInWithRedirect, getRedirectResult, 
   signInWithEmailAndPassword, 
   createUserWithEmailAndPassword, 
   signOut as firebaseSignOut,
@@ -29,6 +29,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [isFirstUser, setIsFirstUser] = useState(false);
 
   useEffect(() => {
+    getRedirectResult(auth).catch(() => {});
     const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
       if (firebaseUser) {
         if (firebaseUser.isAnonymous) {
@@ -112,7 +113,16 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         const result = await signInWithEmailAndPassword(auth, email, password);
         firebaseUser = result.user;
       } else {
-        const result = await signInWithPopup(auth, googleProvider);
+        let result;
+        try {
+          result = await signInWithPopup(auth, googleProvider);
+        } catch (popErr: any) {
+          if (popErr?.code === 'auth/popup-blocked' || popErr?.code === 'auth/cancelled-popup-request') {
+            await signInWithRedirect(auth, googleProvider);
+            return true;
+          }
+          throw popErr;
+        }
         firebaseUser = result.user;
       }
       
