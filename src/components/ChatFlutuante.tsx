@@ -48,16 +48,56 @@ export function ChatFlutuante() {
   const [naoLidas, setNaoLidas] = useState(0);
   const [meuStatus, setMeuStatus] = useState<string>(STATUS_ORKUT[0]);
   const [digitandoPor, setDigitandoPor] = useState<string | null>(null);
+  const [somAtivo, setSomAtivo] = useState<boolean>(() => {
+    try {
+      return localStorage.getItem('patrimonio360_chat_som') !== 'false';
+    } catch {
+      return true;
+    }
+  });
 
   const fimRef = useRef<HTMLDivElement | null>(null);
   const abertoRef = useRef(aberto);
   const abaRef = useRef(aba);
+  const somAtivoRef = useRef(somAtivo);
   const canalRef = useRef<any>(null);
   const ultimoBroadcastDigitando = useRef<number>(0);
   const timerDigitando = useRef<any>(null);
 
   const nomeAtual = (user as any)?.name || (user as any)?.nome || (user as any)?.email?.split('@')[0] || 'Servidor';
   const emailAtual = (user as any)?.email || '';
+
+  useEffect(() => {
+    somAtivoRef.current = somAtivo;
+    try {
+      localStorage.setItem('patrimonio360_chat_som', String(somAtivo));
+    } catch {}
+  }, [somAtivo]);
+
+  // Bipe suave via Web Audio API + vibração curta no celular (zero arquivos MP3, zero banco)
+  const tocarAlertaSuave = () => {
+    if (!somAtivoRef.current) return;
+    try {
+      if (typeof navigator !== 'undefined' && 'vibrate' in navigator) {
+        navigator.vibrate(150);
+      }
+      const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
+      if (AudioCtx) {
+        const ctx = new AudioCtx();
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(587.33, ctx.currentTime); // Ré5 suave
+        osc.frequency.exponentialRampToValueAtTime(880, ctx.currentTime + 0.12); // Lá5
+        gain.gain.setValueAtTime(0.08, ctx.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.25);
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+        osc.start();
+        osc.stop(ctx.currentTime + 0.25);
+      }
+    } catch {}
+  };
 
   const marcarComoVistos = async (lista: MensagemChat[], abaAtiva: 'geral' | 'direto') => {
     if (!nomeAtual || !abertoRef.current) return;
@@ -99,7 +139,6 @@ export function ChatFlutuante() {
     }
   }, [aberto, aba]);
 
-  // Atualiza presença quando o usuário muda a frase de status estilo Orkut
   useEffect(() => {
     if (canalRef.current && user) {
       canalRef.current.track({
@@ -137,6 +176,9 @@ export function ChatFlutuante() {
     };
 
     const carregarHistorico = async () => {
+      // Manutenção automática: remove recados com +30 dias ou além dos 100 mais recentes
+      await supabase.rpc('limpar_recados_antigos');
+
       const { data, error } = await supabase
         .from('mensagens_chat')
         .select('*')
@@ -182,6 +224,7 @@ export function ChatFlutuante() {
                 marcarComoVistos([nova], abaRef.current);
               } else if (nova.usuario_email !== emailAtual) {
                 setNaoLidas((n) => n + 1);
+                tocarAlertaSuave();
               }
               return atualizada;
             });
@@ -249,7 +292,6 @@ export function ChatFlutuante() {
   };
 
   const alternarReacao = async (id: string, emoji: string) => {
-    // Atualização otimista imediata na tela
     setMensagens((prev) =>
       prev.map((m) => {
         if (m.id !== id) return m;
@@ -321,7 +363,6 @@ export function ChatFlutuante() {
     }
   };
 
-  // Destaca números de tombamento digitados com # (ex: #1234)
   const renderizarTextoComPlaquetas = (conteudo: string) => {
     const partes = conteudo.split(/(#\d+)/g);
     return partes.map((parte, idx) => {
@@ -376,7 +417,7 @@ export function ChatFlutuante() {
     <div className="fixed bottom-5 right-5 z-[9999] flex flex-col items-end">
       {aberto && (
         <div className="mb-3 w-[350px] sm:w-[420px] rounded-2xl bg-white shadow-2xl border border-indigo-200 overflow-hidden flex flex-col">
-          {/* Cabeçalho com seletor rápido de status estilo Orkut */}
+          {/* Cabeçalho com botão de mudo e status Orkut */}
           <div className="bg-gradient-to-r from-indigo-700 via-indigo-800 to-slate-900 text-white px-4 py-3">
             <div className="flex items-center justify-between">
               <h3 className="text-sm font-bold leading-tight flex items-center gap-2">
@@ -386,17 +427,33 @@ export function ChatFlutuante() {
                   {totalOnline} online
                 </span>
               </h3>
-              <button
-                type="button"
-                onClick={() => setAberto(false)}
-                className="text-indigo-200 hover:text-white text-lg leading-none px-2 py-1 rounded"
-                aria-label="Fechar mural"
-              >
-                ✕
-              </button>
+              <div className="flex items-center gap-1">
+                <button
+                  type="button"
+                  onClick={() => {
+                    const novoEstado = !somAtivo;
+                    setSomAtivo(novoEstado);
+                    if (novoEstado) {
+                      somAtivoRef.current = true;
+                      tocarAlertaSuave();
+                    }
+                  }}
+                  title={somAtivo ? 'Som e vibração ativados (clique para silenciar)' : 'Silenciado (clique para ativar alerta)'}
+                  className="text-indigo-200 hover:text-white text-sm px-2 py-1 rounded hover:bg-white/10 transition-colors"
+                >
+                  {somAtivo ? '🔔' : '🔇'}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setAberto(false)}
+                  className="text-indigo-200 hover:text-white text-lg leading-none px-2 py-1 rounded hover:bg-white/10"
+                  aria-label="Fechar mural"
+                >
+                  ✕
+                </button>
+              </div>
             </div>
 
-            {/* Frase de status do próprio usuário (só na memória Realtime) */}
             <div className="mt-1.5 flex items-center gap-1.5 text-[11px] text-indigo-200">
               <span>Seu status:</span>
               <select
@@ -539,7 +596,7 @@ export function ChatFlutuante() {
             </div>
           )}
 
-          {/* Lista de mensagens com reações + plaquetas # + tiques estilo WhatsApp */}
+          {/* Lista de mensagens */}
           <div className="h-72 overflow-y-auto p-3 space-y-3 bg-slate-100">
             {recadosVisiveis.length === 0 ? (
               <div className="text-center my-10 px-4">
@@ -590,7 +647,6 @@ export function ChatFlutuante() {
                         {renderizarTextoComPlaquetas(m.mensagem)}
                       </p>
 
-                      {/* Reações já marcadas + botões rápidos de reação */}
                       <div className="mt-1.5 flex flex-wrap items-center justify-between gap-1">
                         <div className="flex items-center gap-1">
                           {EMOJIS_RAPIDOS.map((emoji) => {
@@ -617,7 +673,6 @@ export function ChatFlutuante() {
                           })}
                         </div>
 
-                        {/* Hora + tiques estilo WhatsApp */}
                         <div className="flex items-center gap-1 text-[10px]">
                           {ehMeu && foiLido && (
                             <span className="text-slate-500 truncate max-w-[115px]" title={`Lido por: ${leitores.join(', ')}`}>
@@ -645,7 +700,6 @@ export function ChatFlutuante() {
             <div ref={fimRef} />
           </div>
 
-          {/* Indicador "Fulano está digitando..." (zero custo de banco) */}
           {digitandoPor && (
             <div className="px-3 py-1 bg-indigo-50 border-t border-indigo-100 text-[11px] text-indigo-700 font-medium animate-pulse">
               ✍️ {digitandoPor} está digitando...
