@@ -9,11 +9,13 @@ export default defineConfig(({mode}) => {
   return {
     plugins: [
       VitePWA({
-      workbox: { navigateFallbackDenylist: [/^\/__\//] },
         registerType: 'autoUpdate',
         includeAssets: ['icon-192.png', 'icon-512.png'],
         workbox: {
           maximumFileSizeToCacheInBytes: 5 * 1024 * 1024,
+          navigateFallbackDenylist: [/^\/__\//],
+          skipWaiting: true,
+          clientsClaim: true,
         },
         manifest: {
           name: 'Patrimônio 360',
