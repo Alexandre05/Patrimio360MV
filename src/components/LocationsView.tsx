@@ -151,12 +151,13 @@ export function LocationsView({ onSelectInspection }: { onSelectInspection: (id:
     
     if (!activeParentId) {
       if (!hasGlobalAccess) {
-        // Mostra o orgao/local vinculado ao responsavel e todas as salas internas vinculadas a ele
-        return loc.id === user?.locationId || allowedLocationIds.has(loc.id);
+        // Mostra apenas o orgao/local principal vinculado ao responsavel (ao clicar nele, abre os filhos)
+        return loc.id === user?.locationId;
       }
       return !loc.parentId;
     } else {
-      return loc.parentId === activeParentId;
+      // Dentro do local pai, mostra exclusivamente os filhos (nunca repete o proprio pai)
+      return loc.parentId === activeParentId && loc.id !== activeParentId;
     }
   });
 
