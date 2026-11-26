@@ -114,12 +114,28 @@ export function Dashboard() {
   const rawInspections = useLiveQuery(() => db.inspections.filter(i => !i.deleted).toArray());
   const rawAssets = useLiveQuery(() => db.assets.filter(a => !a.deleted).toArray());
 
-  const hasGlobalAccess = user?.role === 'administrador' || user?.role === 'vistoriador' || user?.role === 'prefeito' || !user?.locationId;
+  const isGlobalAdmin = user?.role === 'administrador' || user?.role === 'prefeito' || user?.email?.toLowerCase() === 'alexandremenna05@gmail.com';
+  const hasGlobalAccess = isGlobalAdmin || (user?.role === 'vistoriador' && !user?.locationId);
 
-  const locations = rawLocations?.filter(l => {
-    if (hasGlobalAccess) return true;
-    return l.id === user.locationId || l.parentId === user.locationId;
-  }) || [];
+  const allowedLocationIds = React.useMemo(() => {
+    if (!rawLocations) return new Set<string>();
+    if (hasGlobalAccess) return new Set(rawLocations.map(l => l.id));
+    if (!user?.locationId) return new Set<string>();
+    const allowed = new Set<string>([user.locationId]);
+    let added = true;
+    while (added) {
+      added = false;
+      for (const loc of rawLocations) {
+        if (loc.parentId && allowed.has(loc.parentId) && !allowed.has(loc.id)) {
+          allowed.add(loc.id);
+          added = true;
+        }
+      }
+    }
+    return allowed;
+  }, [rawLocations, hasGlobalAccess, user?.locationId]);
+
+  const locations = rawLocations?.filter(l => allowedLocationIds.has(l.id)) || [];
   
   const locationIds = locations.map(l => l.id);
 

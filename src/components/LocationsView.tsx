@@ -23,7 +23,7 @@ L.Icon.Default.mergeOptions({
 
 export function LocationsView({ onSelectInspection }: { onSelectInspection: (id: string) => void }) {
   const { user } = useAuth();
-  const isAdmin = user?.role === 'administrador' || user?.role === 'prefeito' || user?.email === 'henri199@gmail.com' || auth.currentUser?.email === 'henri199@gmail.com';
+  const isAdmin = user?.role === 'administrador' || user?.role === 'prefeito' || user?.email === 'alexandremenna05@gmail.com' || auth.currentUser?.email === 'alexandremenna05@gmail.com';
   const isManager = isAdmin || user?.role === 'responsavel';
   const isCommittee = isManager || user?.role === 'vistoriador';
 
@@ -32,13 +32,28 @@ export function LocationsView({ onSelectInspection }: { onSelectInspection: (id:
   const rawInspections = useLiveQuery(() => db.inspections.filter(i => !i.deleted).toArray());
   const rawAssets = useLiveQuery(() => db.assets.filter(a => !a.deleted).toArray());
 
-  // Regra de Ouro: Vistoriadores e Administradores veem tudo. Responsável vê apenas o seu setor.
-  const hasGlobalAccess = user?.role === 'administrador' || user?.role === 'vistoriador' || user?.role === 'prefeito' || !user?.locationId;
+  const isGlobalAdmin = user?.role === 'administrador' || user?.role === 'prefeito' || user?.email?.toLowerCase() === 'alexandremenna05@gmail.com';
+  const hasGlobalAccess = isGlobalAdmin || (user?.role === 'vistoriador' && !user?.locationId);
 
-  const locations = rawLocations?.filter(l => {
-    if (hasGlobalAccess) return true;
-    return l.id === user.locationId || l.parentId === user.locationId;
-  }) || [];
+  const allowedLocationIds = React.useMemo(() => {
+    if (!rawLocations) return new Set<string>();
+    if (hasGlobalAccess) return new Set(rawLocations.map(l => l.id));
+    if (!user?.locationId) return new Set<string>();
+    const allowed = new Set<string>([user.locationId]);
+    let added = true;
+    while (added) {
+      added = false;
+      for (const loc of rawLocations) {
+        if (loc.parentId && allowed.has(loc.parentId) && !allowed.has(loc.id)) {
+          allowed.add(loc.id);
+          added = true;
+        }
+      }
+    }
+    return allowed;
+  }, [rawLocations, hasGlobalAccess, user?.locationId]);
+
+  const locations = rawLocations?.filter(l => allowedLocationIds.has(l.id)) || [];
 
   const locationIds = locations.map(l => l.id);
   const inspections = rawInspections?.filter(i => hasGlobalAccess ? true : locationIds.includes(i.locationId)) || [];
