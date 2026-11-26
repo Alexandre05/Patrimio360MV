@@ -61,12 +61,16 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
     // 2. Busca primeiro na nuvem (Supabase) para garantir role e locationId sempre atualizados pelo Admin
     try {
-      const { data: cloudUser, error: cloudErr } = await supabase
+      const { data: cloudUsers, error: cloudErr } = await supabase
         .from('users')
         .select('*')
         .ilike('email', userEmail)
         .eq('deleted', false)
-        .maybeSingle();
+        .order('updatedAt', { ascending: false });
+
+      const cloudUser = Array.isArray(cloudUsers)
+        ? (cloudUsers.find((u: any) => u.locationId || u.location_id) || cloudUsers[0])
+        : cloudUsers;
 
       if (!cloudErr && cloudUser) {
         const normalizedUser: User = {

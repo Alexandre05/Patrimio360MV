@@ -54,7 +54,7 @@ export async function setupSync() {
 
   for (const { name, dexie: table, pk, updatedCol } of collections) {
     const storageKey = `lastSyncTime_${name}`;
-    const lastSyncTime = parseInt(localStorage.getItem(storageKey) || '0');
+    const lastSyncTime = name === 'locations' ? 0 : parseInt(localStorage.getItem(storageKey) || '0');
     
     try {
       const { data, error } = await cloudDB.getRecordsSince(name, updatedCol, lastSyncTime);

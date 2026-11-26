@@ -58,7 +58,7 @@ export function UsersView() {
       const userData = {
         userId: saveId,
         name: formData.name,
-        email: formData.email,
+        email: formData.email.trim().toLowerCase(),
         role: formData.role || 'vistoriador',
         locationId: cleanLocationId,
         status: 'ativo',
