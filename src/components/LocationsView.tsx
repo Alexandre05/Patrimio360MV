@@ -33,7 +33,7 @@ export function LocationsView({ onSelectInspection }: { onSelectInspection: (id:
   const rawAssets = useLiveQuery(() => db.assets.filter(a => !a.deleted).toArray());
 
   const isGlobalAdmin = user?.role === 'administrador' || user?.role === 'prefeito' || user?.email?.toLowerCase() === 'alexandremenna05@gmail.com';
-  const hasGlobalAccess = isGlobalAdmin || (user?.role === 'vistoriador' && !user?.locationId);
+  const hasGlobalAccess = isGlobalAdmin || user?.role === 'vistoriador';
 
   const allowedLocationIds = React.useMemo(() => {
     if (!rawLocations) return new Set<string>();
