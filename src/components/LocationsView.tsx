@@ -93,6 +93,7 @@ export function LocationsView({ onSelectInspection }: { onSelectInspection: (id:
     });
     setEditingLocationId(loc.id);
     setIsAdding(true);
+    window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
   const getLatestStatusCount = (locId: string) => {
@@ -273,11 +274,11 @@ const handleStartInspection = async (locationId: string) => {
       const lat = newLoc.latitude ? parseFloat(newLoc.latitude) : undefined;
       const lng = newLoc.longitude ? parseFloat(newLoc.longitude) : undefined;
       
-      const locationData = {
+      const locationData: any = {
         name: newLoc.name.trim(),
         description: newLoc.description,
         needsSync: 1,
-        ...(newLoc.parentId ? { parentId: newLoc.parentId } : {}),
+        parentId: newLoc.parentId ? newLoc.parentId : undefined,
         ...(lat && lng ? { latitude: lat, longitude: lng } : {})
       };
 
@@ -1091,15 +1092,28 @@ const handleDeleteLocation = async (locId: string) => {
               <Input label="Endereço / Descrição" placeholder="Rua Central, nº 123" value={newLoc.description} onChange={e => setNewLoc({...newLoc, description: e.target.value})} />
               
               <Select 
-                label="Departamento Pai / Vínculo (Opcional)"
+                label="Transferir / Vincular ao Local Pai (Prédio ou Secretaria)"
                 value={newLoc.parentId}
                 onChange={e => setNewLoc({...newLoc, parentId: e.target.value})}
                 disabled={!!activeParentId && !editingLocationId}
                 options={[
-                  { value: '', label: 'Nenhum (Raiz)' },
+                  { value: '', label: 'Nenhum (Localização Raiz / Órgão Principal)' },
                   ...(locations || [])
-                    .filter(l => l.id !== editingLocationId)
-                    .map(l => ({ value: l.id, label: l.name }))
+                    .filter(l => {
+                      if (!editingLocationId) return true;
+                      // Impede vincular um local a si mesmo ou a um de seus proprios filhos
+                      let curr: Location | undefined = l;
+                      while (curr) {
+                        if (curr.id === editingLocationId) return false;
+                        curr = curr.parentId ? locations.find(p => p.id === curr?.parentId) : undefined;
+                      }
+                      return true;
+                    })
+                    .sort((a, b) => a.name.localeCompare(b.name))
+                    .map(l => {
+                      const parent = l.parentId ? locations.find(p => p.id === l.parentId) : null;
+                      return { value: l.id, label: parent ? `${parent.name} ↳ ${l.name}` : l.name };
+                    })
                 ]}
               />
 
