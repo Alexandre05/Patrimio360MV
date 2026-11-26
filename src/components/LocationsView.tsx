@@ -44,7 +44,8 @@ export function LocationsView({ onSelectInspection }: { onSelectInspection: (id:
     while (added) {
       added = false;
       for (const loc of rawLocations) {
-        if (loc.parentId && allowed.has(loc.parentId) && !allowed.has(loc.id)) {
+        const pid = loc.parentId || (loc as any).parent_id;
+        if (pid && allowed.has(pid) && !allowed.has(loc.id)) {
           allowed.add(loc.id);
           added = true;
         }

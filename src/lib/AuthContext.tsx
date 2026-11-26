@@ -59,7 +59,29 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       return userData;
     }
 
-    // 2. Busca no banco local (Dexie)
+    // 2. Busca primeiro na nuvem (Supabase) para garantir role e locationId sempre atualizados pelo Admin
+    try {
+      const { data: cloudUser, error: cloudErr } = await supabase
+        .from('users')
+        .select('*')
+        .ilike('email', userEmail)
+        .eq('deleted', false)
+        .maybeSingle();
+
+      if (!cloudErr && cloudUser) {
+        const normalizedUser: User = {
+          ...(cloudUser as any),
+          locationId: (cloudUser as any).locationId || (cloudUser as any).location_id || undefined,
+        };
+        await localDb.users.put(normalizedUser);
+        localStorage.setItem('current_user', JSON.stringify(normalizedUser));
+        return normalizedUser;
+      }
+    } catch (e) {
+      console.warn("Offline ou falha ao buscar utilizador no Supabase, usando cache local:", e);
+    }
+
+    // 3. Fallback offline no banco local (Dexie)
     try {
       const localUser = await localDb.users.where('email').equalsIgnoreCase(userEmail).first();
       if (localUser && !localUser.deleted) {
@@ -68,24 +90,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       }
     } catch (e) {
       console.error("Erro ao verificar utilizador local:", e);
-    }
-
-    // 3. Fallback na nuvem (Supabase) caso seja o primeiro acesso neste aparelho
-    try {
-      const { data: cloudUser } = await supabase
-        .from('users')
-        .select('*')
-        .ilike('email', userEmail)
-        .eq('deleted', false)
-        .maybeSingle();
-
-      if (cloudUser) {
-        await localDb.users.put(cloudUser as User);
-        localStorage.setItem('current_user', JSON.stringify(cloudUser));
-        return cloudUser as User;
-      }
-    } catch (e) {
-      console.error("Erro ao buscar utilizador no Supabase:", e);
     }
 
     return null;
