@@ -10,7 +10,11 @@ import {
 } from 'firebase/auth';
 import firebaseConfig from '../../firebase-applet-config.json';
 
-const app = initializeApp(firebaseConfig);
+const resolvedConfig = {
+  ...firebaseConfig,
+  authDomain: "patrimonio360-75ade.firebaseapp.com"
+};
+const app = initializeApp(resolvedConfig);
 export const firebaseConfigInfo = firebaseConfig;
 export const firebaseApp = app;
 

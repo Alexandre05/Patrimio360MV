@@ -9,6 +9,7 @@ export default defineConfig(({mode}) => {
   return {
     plugins: [
       VitePWA({
+      workbox: { navigateFallbackDenylist: [/^\/__\//] },
         registerType: 'autoUpdate',
         includeAssets: ['icon-192.png', 'icon-512.png'],
         workbox: {
