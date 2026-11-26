@@ -367,9 +367,42 @@ export function Dashboard() {
         return <InventoryDashboard />;
       case 'scanner':
         return <ScannerView onOpenInspection={handleScannerOpen} />;
-      case 'home':
+      case 'home': {
+        const assignedSector = user?.role === 'responsavel'
+          ? (rawLocations?.find(l => l.id === user?.locationId) || locations?.[0])
+          : null;
         return (
           <div className="flex flex-col gap-10 animate-in fade-in slide-in-from-bottom-4 duration-700">
+            {user?.role === 'responsavel' && (
+              <div
+                onClick={() => setActiveTab('locations')}
+                role="button"
+                tabIndex={0}
+                onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') setActiveTab('locations'); }}
+                className="group cursor-pointer rounded-[2.5rem] bg-gradient-to-r from-indigo-600 via-indigo-600 to-slate-900 p-8 lg:p-10 text-white shadow-2xl shadow-indigo-600/20 hover:shadow-indigo-600/30 hover:-translate-y-0.5 transition-all duration-300 flex flex-col md:flex-row items-center justify-between gap-6 border border-indigo-400/20"
+              >
+                <div className="flex flex-col md:flex-row items-center gap-6 text-center md:text-left">
+                  <div className="w-16 h-16 rounded-3xl bg-white/15 backdrop-blur-sm border border-white/20 flex items-center justify-center shrink-0 group-hover:scale-105 transition-transform">
+                    <Building2 className="w-8 h-8 text-white" />
+                  </div>
+                  <div className="flex flex-col gap-1.5">
+                    <span className="text-[10px] font-black uppercase tracking-[0.25em] text-indigo-200">
+                      Setor Sob Sua Responsabilidade • {locations.length} {locations.length === 1 ? 'Ambiente' : 'Ambientes / Salas'}
+                    </span>
+                    <h3 className="text-2xl lg:text-3xl font-display font-black tracking-tight leading-tight">
+                      {assignedSector?.name || 'Meu Setor Patrimonial'}
+                    </h3>
+                    <p className="text-sm font-medium text-indigo-100/90">
+                      Clique aqui para ver os locais, salas vinculadas e acompanhar as vistorias deste setor.
+                    </p>
+                  </div>
+                </div>
+                <div className="inline-flex items-center gap-3 px-6 py-4 rounded-2xl bg-white text-indigo-700 font-black text-xs uppercase tracking-widest shadow-lg group-hover:bg-indigo-50 transition-colors shrink-0">
+                  <span>Ver Locais</span>
+                  <ArrowRight className="w-4 h-4 group-hover:translate-x-1 transition-transform" />
+                </div>
+              </div>
+            )}
             {quotaExceeded && (
               <div className="bg-amber-50 border border-amber-200 rounded-[2.5rem] p-6 flex flex-col md:flex-row items-center gap-6 animate-in slide-in-from-top-4 duration-500 shadow-xl shadow-amber-500/5">
                 <div className="w-16 h-16 bg-white rounded-3xl flex items-center justify-center shadow-lg shadow-amber-500/10 shrink-0">
@@ -423,7 +456,7 @@ export function Dashboard() {
                       Sincronização Forçada
                     </Button>
                     
-                    {isManager && (
+                    {isAdmin && (
                       <div className="flex items-center gap-4 ml-2">
                         <button onClick={async () => {
                           const confirmCleanup = window.confirm("Isso irá remover vistorias sem itens e locais sem vistorias. Deseja prosseguir?");
@@ -580,6 +613,7 @@ export function Dashboard() {
             )}
           </div>
         );
+      }
       case 'locations':
         return <LocationsView onSelectInspection={(id) => setSelectedInspectionId(id)} />;
       case 'inspections':
