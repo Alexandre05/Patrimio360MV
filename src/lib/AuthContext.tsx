@@ -153,30 +153,16 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         throw new Error("Acesso Restrito. Seu e-mail não pertence à comissão de patrimônio de Manoel Viana.");
       }
 
-      // Login com Google: força seleção de conta e usa redirect na própria aba (evita bloqueio de popup)
+      // Login com Google via Pop-up direto no clique do usuario (evita loop de redirect)
       googleProvider.setCustomParameters({ prompt: 'select_account' });
-      try {
-        const result = await signInWithPopup(auth, googleProvider);
-        const autorizado = await autorizarUsuarioFirebase(result.user);
-        if (autorizado) {
-          setUser(autorizado);
-          return true;
-        }
-        await firebaseSignOut(auth);
-        throw new Error("Acesso Restrito. Seu e-mail não pertence à comissão de patrimônio de Manoel Viana.");
-      } catch (popErr: any) {
-        // Se o navegador fechar, bloquear ou barrar o pop-up, redireciona na própria aba imediatamente
-        if (
-          popErr?.code === 'auth/popup-blocked' ||
-          popErr?.code === 'auth/popup-closed-by-user' ||
-          popErr?.code === 'auth/cancelled-popup-request' ||
-          popErr?.code === 'auth/operation-not-supported-in-this-environment'
-        ) {
-          await signInWithRedirect(auth, googleProvider);
-          return true;
-        }
-        throw popErr;
+      const result = await signInWithPopup(auth, googleProvider);
+      const autorizado = await autorizarUsuarioFirebase(result.user);
+      if (autorizado) {
+        setUser(autorizado);
+        return true;
       }
+      await firebaseSignOut(auth);
+      throw new Error("Acesso Restrito. Seu e-mail não pertence à comissão de patrimônio de Manoel Viana.");
     } catch (e: any) {
       console.error("Erro no login:", e);
       if (e.code === 'auth/network-request-failed') {
