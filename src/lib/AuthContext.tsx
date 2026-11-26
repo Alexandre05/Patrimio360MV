@@ -1,10 +1,12 @@
 import React, { createContext, useContext, useEffect, useState } from 'react';
-import { v4 as uuidv4 } from 'uuid';
 import { User, db as localDb } from './db';
 import { auth, googleProvider } from './firebase';
+import { supabase } from './supabase';
 import { 
   onAuthStateChanged, 
-  signInWithPopup, signInWithRedirect, getRedirectResult, 
+  signInWithPopup, 
+  signInWithRedirect,
+  getRedirectResult,
   signInWithEmailAndPassword, 
   createUserWithEmailAndPassword, 
   signOut as firebaseSignOut,
@@ -28,73 +30,105 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [loading, setLoading] = useState(true);
   const [isFirstUser, setIsFirstUser] = useState(false);
 
-  useEffect(() => {
-    getRedirectResult(auth).catch(() => {});
-    const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
-      if (firebaseUser) {
-        if (firebaseUser.isAnonymous) {
-          setUser({
-            userId: firebaseUser.uid,
-            name: 'Cidadão (Consulta)',
-            email: 'public@patri-mv.gov.br',
-            role: 'vistoriador',
-            status: 'ativo',
-            cargo: 'Visitante'
-          });
-          setLoading(false);
-          return;
-        }
+  const autorizarUsuarioFirebase = async (firebaseUser: any): Promise<User | null> => {
+    if (firebaseUser.isAnonymous) {
+      return {
+        userId: firebaseUser.uid,
+        name: 'Cidadão (Consulta)',
+        email: 'public@patri-mv.gov.br',
+        role: 'vistoriador',
+        status: 'ativo',
+        cargo: 'Visitante'
+      };
+    }
 
-        const userEmail = firebaseUser.email?.toLowerCase().trim();
+    const userEmail = firebaseUser.email?.toLowerCase().trim();
+    if (!userEmail) return null;
 
-        // 1. O "Master Admin" (Reconhecimento Imediato via Código - Sem bloqueio do Firestore)
-        if (userEmail === 'alexandremenna05@gmail.com') {
-          const userData: User = {
-            userId: firebaseUser.uid,
-            name: firebaseUser.displayName || 'Alexandre Barreto Menna',
-            email: userEmail,
-            role: 'administrador',
-            status: 'ativo',
-            cargo: 'Administrador Master'
-          };
-          
-          await localDb.users.put(userData);
-          setUser(userData);
-          localStorage.setItem('current_user', JSON.stringify(userData));
-          setLoading(false);
-          return;
-        }
+    // 1. Master Admin
+    if (userEmail === 'alexandremenna05@gmail.com') {
+      const userData: User = {
+        userId: firebaseUser.uid,
+        name: firebaseUser.displayName || 'Alexandre Barreto Menna',
+        email: userEmail,
+        role: 'administrador',
+        status: 'ativo',
+        cargo: 'Administrador Master'
+      };
+      await localDb.users.put(userData);
+      localStorage.setItem('current_user', JSON.stringify(userData));
+      return userData;
+    }
 
-        // 2. Utilizadores comuns cadastrados localmente no Dexie
-        if (userEmail) {
-          try {
-            const localUser = await localDb.users.where('email').equals(userEmail).first();
-            if (localUser) {
-              setUser(localUser);
-              localStorage.setItem('current_user', JSON.stringify(localUser));
-              setLoading(false);
-              return;
-            }
-          } catch (e) {
-            console.error("Erro ao verificar utilizador local:", e);
-          }
-        }
-
-        // Se não for master nem estiver cadastrado, encerra a sessão por segurança
-        try {
-          await firebaseSignOut(auth);
-        } catch (e) {}
-        setUser(null);
-        localStorage.removeItem('current_user');
-      } else {
-        setUser(null);
-        localStorage.removeItem('current_user');
+    // 2. Busca no banco local (Dexie)
+    try {
+      const localUser = await localDb.users.where('email').equalsIgnoreCase(userEmail).first();
+      if (localUser && !localUser.deleted) {
+        localStorage.setItem('current_user', JSON.stringify(localUser));
+        return localUser;
       }
-      setLoading(false);
-      setIsFirstUser(false);
-    });
+    } catch (e) {
+      console.error("Erro ao verificar utilizador local:", e);
+    }
 
-    return () => unsubscribe();
+    // 3. Fallback na nuvem (Supabase) caso seja o primeiro acesso neste aparelho
+    try {
+      const { data: cloudUser } = await supabase
+        .from('users')
+        .select('*')
+        .ilike('email', userEmail)
+        .eq('deleted', false)
+        .maybeSingle();
+
+      if (cloudUser) {
+        await localDb.users.put(cloudUser as User);
+        localStorage.setItem('current_user', JSON.stringify(cloudUser));
+        return cloudUser as User;
+      }
+    } catch (e) {
+      console.error("Erro ao buscar utilizador no Supabase:", e);
+    }
+
+    return null;
+  };
+
+  useEffect(() => {
+    let ativo = true;
+
+    const inicializarAuth = async () => {
+      try {
+        await getRedirectResult(auth);
+      } catch (e) {
+        console.warn("Aviso no retorno do redirect Google:", e);
+      }
+
+      const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
+        if (!ativo) return;
+        if (firebaseUser) {
+          const autorizado = await autorizarUsuarioFirebase(firebaseUser);
+          if (autorizado) {
+            setUser(autorizado);
+          } else {
+            try { await firebaseSignOut(auth); } catch {}
+            setUser(null);
+            localStorage.removeItem('current_user');
+          }
+        } else {
+          setUser(null);
+          localStorage.removeItem('current_user');
+        }
+        setLoading(false);
+        setIsFirstUser(false);
+      });
+
+      return unsubscribe;
+    };
+
+    const unsubPromise = inicializarAuth();
+    return () => {
+      ativo = false;
+      unsubPromise.then((unsub) => unsub && unsub());
+    };
   }, []);
 
   const signInAsGuest = async () => {
@@ -108,64 +142,45 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const signIn = async (email?: string, password?: string) => {
     try {
-      let firebaseUser;
       if (email && password) {
         const result = await signInWithEmailAndPassword(auth, email, password);
-        firebaseUser = result.user;
-      } else {
-        let result;
-        try {
-          result = await signInWithPopup(auth, googleProvider);
-        } catch (popErr: any) {
-          if (popErr?.code === 'auth/popup-blocked' || popErr?.code === 'auth/cancelled-popup-request') {
-            await signInWithRedirect(auth, googleProvider);
-            return true;
-          }
-          throw popErr;
-        }
-        firebaseUser = result.user;
-      }
-      
-      const userEmail = firebaseUser.email?.toLowerCase().trim();
-
-      // Libera acesso imediato para o Master Admin
-      if (userEmail === 'alexandremenna05@gmail.com') {
-        const userData: User = {
-          userId: firebaseUser.uid,
-          name: firebaseUser.displayName || 'Alexandre Barreto Menna',
-          email: userEmail,
-          role: 'administrador',
-          status: 'ativo',
-          cargo: 'Administrador Master'
-        };
-        
-        await localDb.users.put(userData);
-        setUser(userData);
-        localStorage.setItem('current_user', JSON.stringify(userData));
-        return true;
-      }
-
-      // Verifica se existe no banco local Dexie
-      if (userEmail) {
-        const localUser = await localDb.users.where('email').equals(userEmail).first();
-        if (localUser) {
-          setUser(localUser);
-          localStorage.setItem('current_user', JSON.stringify(localUser));
+        const autorizado = await autorizarUsuarioFirebase(result.user);
+        if (autorizado) {
+          setUser(autorizado);
           return true;
         }
+        await firebaseSignOut(auth);
+        throw new Error("Acesso Restrito. Seu e-mail não pertence à comissão de patrimônio de Manoel Viana.");
       }
 
-      if (auth.currentUser) {
+      // Login com Google: força seleção de conta e usa redirect na própria aba (evita bloqueio de popup)
+      googleProvider.setCustomParameters({ prompt: 'select_account' });
+      try {
+        const result = await signInWithPopup(auth, googleProvider);
+        const autorizado = await autorizarUsuarioFirebase(result.user);
+        if (autorizado) {
+          setUser(autorizado);
+          return true;
+        }
         await firebaseSignOut(auth);
+        throw new Error("Acesso Restrito. Seu e-mail não pertence à comissão de patrimônio de Manoel Viana.");
+      } catch (popErr: any) {
+        // Se o navegador fechar, bloquear ou barrar o pop-up, redireciona na própria aba imediatamente
+        if (
+          popErr?.code === 'auth/popup-blocked' ||
+          popErr?.code === 'auth/popup-closed-by-user' ||
+          popErr?.code === 'auth/cancelled-popup-request' ||
+          popErr?.code === 'auth/operation-not-supported-in-this-environment'
+        ) {
+          await signInWithRedirect(auth, googleProvider);
+          return true;
+        }
+        throw popErr;
       }
-      setUser(null);
-      localStorage.removeItem('current_user');
-      
-      throw new Error("Acesso Restrito. Seu e-mail não pertence à comissão de patrimônio de Manoel Viana.");
     } catch (e: any) {
       console.error("Erro no login:", e);
       if (e.code === 'auth/network-request-failed') {
-        throw new Error("ERRO DE REDE: O login falhou. Por favor, abra o aplicativo em uma nova aba.");
+        throw new Error("ERRO DE REDE: O login falhou. Verifique sua conexão com a internet.");
       }
       throw e;
     }
@@ -177,11 +192,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       
       if (!firebaseUser) {
         if (password) {
-           const result = await createUserWithEmailAndPassword(auth, userData.email, password);
-           firebaseUser = result.user;
+          const result = await createUserWithEmailAndPassword(auth, userData.email, password);
+          firebaseUser = result.user;
         } else {
-           const result = await signInWithPopup(auth, googleProvider);
-           firebaseUser = result.user;
+          googleProvider.setCustomParameters({ prompt: 'select_account' });
+          await signInWithRedirect(auth, googleProvider);
+          return true;
         }
       }
       
