@@ -4,7 +4,6 @@ import { auth, googleProvider } from './firebase';
 import { supabase } from './supabase';
 import { 
   onAuthStateChanged, 
-  signInWithPopup, 
   signInWithRedirect,
   getRedirectResult,
   signInWithEmailAndPassword, 
@@ -94,15 +93,24 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     let ativo = true;
+    let unsubscribe: (() => void) | undefined;
 
-    const inicializarAuth = async () => {
+    const inicializar = async () => {
       try {
-        await getRedirectResult(auth);
+        // Processa o retorno do Google antes de checar o estado da sessao
+        const redirectRes = await getRedirectResult(auth);
+        if (redirectRes?.user && ativo) {
+          const autorizado = await autorizarUsuarioFirebase(redirectRes.user);
+          if (autorizado) {
+            setUser(autorizado);
+            setLoading(false);
+          }
+        }
       } catch (e) {
-        console.warn("Aviso no retorno do redirect Google:", e);
+        console.error("Erro ao processar retorno do Google:", e);
       }
 
-      const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
+      unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
         if (!ativo) return;
         if (firebaseUser) {
           const autorizado = await autorizarUsuarioFirebase(firebaseUser);
@@ -120,14 +128,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         setLoading(false);
         setIsFirstUser(false);
       });
-
-      return unsubscribe;
     };
 
-    const unsubPromise = inicializarAuth();
+    inicializar();
     return () => {
       ativo = false;
-      unsubPromise.then((unsub) => unsub && unsub());
+      if (unsubscribe) unsubscribe();
     };
   }, []);
 
@@ -153,16 +159,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         throw new Error("Acesso Restrito. Seu e-mail não pertence à comissão de patrimônio de Manoel Viana.");
       }
 
-      // Login com Google via Pop-up direto no clique do usuario (evita loop de redirect)
+      // Usa redirect direto na mesma aba (funciona em PC, celular e PWA sem bloqueio de pop-up)
       googleProvider.setCustomParameters({ prompt: 'select_account' });
-      const result = await signInWithPopup(auth, googleProvider);
-      const autorizado = await autorizarUsuarioFirebase(result.user);
-      if (autorizado) {
-        setUser(autorizado);
-        return true;
-      }
-      await firebaseSignOut(auth);
-      throw new Error("Acesso Restrito. Seu e-mail não pertence à comissão de patrimônio de Manoel Viana.");
+      await signInWithRedirect(auth, googleProvider);
+      return true;
     } catch (e: any) {
       console.error("Erro no login:", e);
       if (e.code === 'auth/network-request-failed') {
@@ -175,7 +175,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const signUp = async (userData: Omit<User, 'userId'>, password?: string) => {
     try {
       let firebaseUser = auth.currentUser;
-      
       if (!firebaseUser) {
         if (password) {
           const result = await createUserWithEmailAndPassword(auth, userData.email, password);
@@ -186,7 +185,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           return true;
         }
       }
-      
       if (!firebaseUser) return false;
 
       const newUser: User = {
@@ -194,7 +192,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         userId: firebaseUser.uid,
         email: firebaseUser.email?.toLowerCase().trim() || userData.email
       };
-      
       await localDb.users.put(newUser);
       setUser(newUser);
       setIsFirstUser(false);
