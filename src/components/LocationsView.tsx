@@ -150,7 +150,8 @@ export function LocationsView({ onSelectInspection }: { onSelectInspection: (id:
     
     if (!activeParentId) {
       if (!hasGlobalAccess) {
-        return loc.id === user?.locationId;
+        // Mostra o orgao/local vinculado ao responsavel e todas as salas internas vinculadas a ele
+        return loc.id === user?.locationId || allowedLocationIds.has(loc.id);
       }
       return !loc.parentId;
     } else {
