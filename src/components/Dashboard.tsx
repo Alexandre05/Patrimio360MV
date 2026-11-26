@@ -368,12 +368,13 @@ export function Dashboard() {
       case 'scanner':
         return <ScannerView onOpenInspection={handleScannerOpen} />;
       case 'home': {
-        const assignedSector = user?.role === 'responsavel'
+        const isSectorResponsible = !isGlobalAdmin && (user?.role === 'responsavel' || !!user?.locationId);
+        const assignedSector = isSectorResponsible
           ? (rawLocations?.find(l => l.id === user?.locationId) || locations?.[0])
           : null;
         return (
           <div className="flex flex-col gap-10 animate-in fade-in slide-in-from-bottom-4 duration-700">
-            {user?.role === 'responsavel' && (
+            {isSectorResponsible && (
               <div
                 onClick={() => setActiveTab('locations')}
                 role="button"
