@@ -13,8 +13,8 @@ import { Building2, LogIn, ShieldCheck, UserPlus, UserCheck, Search, Mail, Key, 
 import { seedDatabase } from './lib/seed';
 import { db } from './lib/db';
 import { supabase } from './lib/supabase'; // Nosso Supabase oficial
-import { getAuth, sendPasswordResetEmail, signInWithEmailAndPassword, createUserWithEmailAndPassword } from 'firebase/auth';
-import { auth } from './lib/firebase';
+import { getAuth, sendPasswordResetEmail, signInWithEmailAndPassword, createUserWithEmailAndPassword, signInWithPopup, signInWithRedirect } from 'firebase/auth';
+import { auth, googleProvider } from './lib/firebase';
 
 import { PublicInspectionView } from './components/PublicInspectionView';
 import { PublicScannerView } from './components/PublicScannerView';
@@ -155,25 +155,26 @@ function LoginScreen() {
   const [error, setError] = useState<string | null>(null);
   const [resetMessage, setResetMessage] = useState('');
 
-  // Função para Login com Google
-  const handleGoogleAuth = async () => {
-    setLoading(true);
+  // Função para Login com Google (disparo sincrono direto no clique para nao ser bloqueado pelo navegador)
+  const handleGoogleAuth = () => {
     setError(null);
     setResetMessage('');
-    try {
-      const success = await signIn(); 
-      if (!success) {
-        setError('Acesso negado. Esta conta do Google não possui permissão no sistema. Solicite acesso ao Administrador.');
-      }
-    } catch (err: any) {
-      if (err.code === 'auth/popup-closed-by-user' || err.code === 'auth/cancelled-popup-request') {
-        setError('O login com Google foi cancelado.');
-      } else {
-        setError('Falha no login com Google: ' + (err.message || 'Erro de conexão.'));
-      }
-    } finally {
-      setLoading(false);
-    }
+    googleProvider.setCustomParameters({ prompt: 'select_account' });
+    signInWithPopup(auth, googleProvider)
+      .then(() => {
+        // O AuthContext assume automaticamente via onAuthStateChanged
+      })
+      .catch((err: any) => {
+        if (err?.code === 'auth/popup-blocked' || err?.code === 'auth/operation-not-supported-in-this-environment') {
+          signInWithRedirect(auth, googleProvider).catch((e) => {
+            setError('Falha no redirecionamento Google: ' + (e.message || 'Erro de conexão.'));
+          });
+        } else if (err?.code === 'auth/popup-closed-by-user' || err?.code === 'auth/cancelled-popup-request') {
+          setError('A janela do Google foi fechada. Clique novamente e selecione sua conta.');
+        } else {
+          setError('Falha no login com Google: ' + (err?.message || 'Erro de conexão.'));
+        }
+      });
   };
 
   // Função para E-mail / Senha (Com Relatório Completo e Mensagem de Sucesso)
